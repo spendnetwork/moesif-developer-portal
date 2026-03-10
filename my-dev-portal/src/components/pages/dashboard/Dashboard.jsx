@@ -66,7 +66,7 @@ const Dashboard = (props) => {
       {error && (
         <NoticeBox
           iconSrc={dashIcon}
-          title={error.toString()}
+          title={error.message}
           description={
             <p>
               Did you set up your environment variables correctly for embedded
