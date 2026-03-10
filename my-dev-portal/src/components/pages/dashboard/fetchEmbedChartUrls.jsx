@@ -35,8 +35,8 @@ export default async function fetchEmbedChartUrls({
 
   if (!response.ok) {
     console.log('error failed to fetch')
-    const errorBody = await response.text(); // or response.json() if the response is JSON
-    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody.message || `HTTP error! status: ${response.status}`);
   }
 
   const embedInfoArray = await response.json();

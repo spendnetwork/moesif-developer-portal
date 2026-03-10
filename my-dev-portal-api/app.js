@@ -414,6 +414,7 @@ app.get(
       const customerId = await getUnifiedCustomerId(req.user, email);
       if (!customerId) {
         console.error("Customer Id not found when fetching for " + email);
+        return res.status(400).json({ message: "Customer Id not found. For Stripe billing provider, please purchase a plan first." });
       }
 
       const embedInfoArray = await Promise.all(
@@ -427,7 +428,7 @@ app.get(
       );
       res.status(200).json(embedInfoArray);
     } catch (err) {
-      console.error("Error generating embedded templates:", error);
+      console.error("Error generating embedded templates:", err);
       res.status(500).json({ message: "Failed to retrieve embedded template" });
     }
   }
