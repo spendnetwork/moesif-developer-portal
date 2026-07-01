@@ -81,9 +81,19 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Resolve ECR registry
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com"
+
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+
+          echo "registry=${ECR_REGISTRY}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
         id: image
