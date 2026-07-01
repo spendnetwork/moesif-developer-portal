@@ -29,7 +29,7 @@ permissions:
 
 env:
   DOCKERFILE: distribution/docker/Dockerfile-dev-portal-api
-  DOCKER_CONTEXT: .
+  DOCKER_BUILD_CONTEXT: .
   CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME || 'portal-api' }}
 
 jobs:
@@ -119,7 +119,7 @@ jobs:
             --file "${DOCKERFILE}" \
             --tag "${IMAGE_URI}" \
             --tag "${LATEST_URI}" \
-            "${DOCKER_CONTEXT}"
+            "${DOCKER_BUILD_CONTEXT}"
 
           docker push "${IMAGE_URI}"
           docker push "${LATEST_URI}"
