@@ -11,7 +11,6 @@ export default function MoesifEmbeddedTemplate(props) {
             id={url}
             src={url}
             name="preview-frame"
-            noresize="noresize"
           />
         ))}
       </div>

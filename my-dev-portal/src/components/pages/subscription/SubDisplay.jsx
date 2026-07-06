@@ -132,8 +132,8 @@ function SubDisplay({ sub, plans }) {
 
         if (!foundPlan || !foundPrice) {
           return (
-            <div className="price--tile">
-              <div plan--content>
+            <div className="price--tile" key={`${planId}-${priceId}`}>
+              <div className="plan--content">
                 <div className="price-name">Plan and Price not found</div>
                 <div
                   className="single-price--unit"
