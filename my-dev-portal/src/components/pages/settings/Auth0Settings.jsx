@@ -53,27 +53,7 @@ function Auth0Settings(props) {
           <NoticeBox
             iconSrc={profileIcon}
             title="No Profile found"
-            description="There might have been an error"
-            actions={
-              <>
-                <a
-                  href="https://www.moesif.com/docs/developer-portal/developer-portal-overview/"
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  <button className="button button__link">See Docs</button>
-                </a>
-                <a
-                  href="https://www.moesif.com"
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  <button className="button button--outline-secondary">
-                    Go to Moesif
-                  </button>
-                </a>
-              </>
-            }
+            description="We could not load your profile. Please refresh the page or sign in again."
           />
         </div>
       )}

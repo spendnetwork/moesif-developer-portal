@@ -85,14 +85,15 @@ const Keys = () => {
   return (
     <PageLayout>
       <div className="keys-description">
-        <h1>My API Keys</h1>
+        <p className="page-eyebrow">Access</p>
+        <h1>API keys</h1>
         <p className="description">
-          On this page, you can generate an API key to access{"\n"}the APIs
-          you're subscribed to.
+          Generate an API key for the Open Opportunities API products included
+          in your active plan.
         </p>
         <div>
           <p>
-            To create an API key, you must be subscribed to an API plan first.
+            You need an active plan before a production key can be issued.
           </p>
         </div>
         <div className="page-action">
@@ -113,7 +114,7 @@ const Keys = () => {
         style={customStyles}
         contentLabel="API Key"
       >
-        <h3 className="modal-title">Get API Key</h3>
+        <h3 className="modal-title">API key created</h3>
         <div className="modal-body">
           <label>Your API Credentials</label>
           <div className="api-key-container">
@@ -143,14 +144,6 @@ const Keys = () => {
             <div style={{ color: "black", fontWeight: 300, maxWidth: 600 }}>
               <h6>Trouble shooting API Key Generation Error</h6>
               <ul>
-                <li>
-                  If using pre-supported API Gateway, did you set up already and
-                  configured it?
-                </li>
-                <li>
-                  If using custom API gateway, did you implement the code for
-                  generating key?
-                </li>
                 <li>
                   Did you already purchase a plan? In default implementation,
                   API Gateway provisioning is triggered upon successful checkout

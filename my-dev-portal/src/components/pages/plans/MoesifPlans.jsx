@@ -61,17 +61,12 @@ function MoesifPlans(props) {
   return (
     <div className="page-layout__content">
       <div className="plans-title-section">
-        <h3 className="plans-title">API Products and Plans</h3>
+        <p className="page-eyebrow">Pricing</p>
+        <h3 className="plans-title">Open Opportunities API plans</h3>
         <div className="plans-hint">
           <div>
-            Developers: See README.md file in{" "}
-            <a href="https://github.com/Moesif/moesif-developer-portal">
-              this repo
-            </a>{" "}
-            for setup instructions
-          </div>
-          <div>
-            Or, jump to <Link to={"/setup"}>setup</Link> page to get started
+            Choose the access level that matches your commitment and expected
+            usage.
           </div>
         </div>
       </div>

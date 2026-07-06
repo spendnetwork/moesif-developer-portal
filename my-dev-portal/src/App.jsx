@@ -12,7 +12,6 @@ import { AuthenticationGuard } from "./components/authentication-guard";
 import SignUp from "./components/pages/signup/SignUp";
 import RedirectToSignIn from "./components/pages/signup/OktaPostCreate";
 import Return from "./components/pages/checkout/Return";
-import Setup from "./components/pages/setup/Setup";
 import Plans from "./components/pages/plans/Plans";
 import Home from "./components/pages/home/Home";
 import Checkout from "./components/pages/checkout/Checkout";
@@ -33,7 +32,6 @@ function App() {
                 <Route path="/signup" element={<SignUp />} />
                 <Route path="login/callback" element={<LoginCallback />} />
                 <Route path="/return" element={<Return />} />
-                <Route path="/setup" element={<Setup />} />
                 <Route path="/plans" element={<Plans />} />
                 <Route
                   path="login/oktapostcreate"
@@ -112,7 +110,6 @@ function App() {
                   }
                 />
                 <Route path="/return" element={<Return />} />
-                <Route path="/setup" element={<Setup />} />
                 <Route path="/plans" element={<Plans />} />
                 <Route
                   path="/checkout"

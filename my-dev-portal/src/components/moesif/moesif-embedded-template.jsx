@@ -7,7 +7,7 @@ export default function MoesifEmbeddedTemplate(props) {
         {embedTemplateUrls?.map((url, index) => (
           <iframe
             key={url}
-            title={`Moesif Dash ${index}`}
+            title={`Usage dashboard ${index + 1}`}
             id={url}
             src={url}
             name="preview-frame"

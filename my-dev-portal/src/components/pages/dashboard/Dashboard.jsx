@@ -40,26 +40,14 @@ const Dashboard = (props) => {
 
   return (
     <PageLayout>
-      <h1>My Dashboards</h1>
-      <p>
-        Please see{" "}
-        <a
-          className="button__link"
-          target="_blank"
-          href="https://www.moesif.com/docs/embedded-templates/"
-        >
-          Moesif Embedded Metric
-        </a>{" "}
-        docs to for details regarding configuration,{" "}
-        <a
-          className="button__link"
-          target="_blank"
-          href="https://www.moesif.com/docs/embedded-templates/creating-and-using-templates/#display-options"
-        >
-          display options
-        </a>
-        , and setup instructions.
-      </p>
+      <div className="page-heading">
+        <p className="page-eyebrow">Usage</p>
+        <h1>API activity</h1>
+        <p>
+          Track requests, records returned, attachment activity, and billing
+          usage for your Open Opportunities API access.
+        </p>
+      </div>
       {!error && (
         <MoesifEmbeddedTemplate embedTemplateUrls={embedTemplateUrls || []} />
       )}
@@ -69,27 +57,9 @@ const Dashboard = (props) => {
           title={error.message}
           description={
             <p>
-              Did you set up your environment variables correctly for embedded
-              dashboard and charts?
+              We could not load your usage dashboards yet. If you have just
+              subscribed, try again shortly.
             </p>
-          }
-          actions={
-            <>
-              <a
-                target="_blank"
-                href="https://www.moesif.com/docs/embedded-templates/"
-              >
-                <button className="button button__link">
-                  Embedded Metric Docs
-                </button>
-              </a>
-              <a
-                target="_blank"
-                href="https://www.moesif.com/docs/developer-portal/configuring-the-dashboard/"
-              >
-                <button className="button">Dev Portal Docs</button>
-              </a>
-            </>
           }
         />
       )}
