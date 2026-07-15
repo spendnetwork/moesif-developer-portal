@@ -296,7 +296,7 @@ function Keys() {
                     {apiKey.description && <p>{apiKey.description}</p>}
                     <span className="key-identifier" title="Use this prefix to match the key in your configuration">
                       {apiKey.key_prefix
-                        ? `${apiKey.key_prefix}...`
+                        ? `${apiKey.key_prefix.slice(0, 18)}...`
                         : `Key ID ${apiKey.id}`}
                     </span>
                     <dl className="key-metadata">
