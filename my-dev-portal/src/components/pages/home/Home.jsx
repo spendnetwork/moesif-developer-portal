@@ -1,11 +1,19 @@
 import React from "react";
+import { Navigate } from "react-router-dom";
 
 import { PageLayout } from "../../page-layout";
 import { SignupButton } from "../../buttons/signup-button";
 import { LoginButton } from "../../buttons/login-button";
 import openOpportunitiesLogo from "../../../images/assets/open-opportunities-logo.png";
+import { PageLoader } from "../../page-loader";
+import useAuthCombined from "../../../hooks/useAuthCombined";
 
 function Home() {
+  const { isAuthenticated, isLoading } = useAuthCombined();
+
+  if (isLoading) return <PageLoader />;
+  if (isAuthenticated) return <Navigate replace to="/dashboard" />;
+
   return (
     <PageLayout isHome>
       <section className="hero">
