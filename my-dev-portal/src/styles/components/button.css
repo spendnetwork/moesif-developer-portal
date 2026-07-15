@@ -190,3 +190,21 @@ button {
 .button__price-action:hover {
   background: var(--accent-dark);
 }
+
+.button__price-action-note {
+  font-size: 1.1rem;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.button:disabled,
+.button__price-action:disabled,
+.button__purp:disabled,
+.button__sign-up:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.button__price-action:disabled:hover {
+  background: var(--accent);
+}

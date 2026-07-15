@@ -25,7 +25,11 @@ function Auth0Settings(props) {
 
   return (
     <PageLayout>
-      <h1>My Settings</h1>
+      <div className="page-heading">
+        <p className="page-eyebrow">Account</p>
+        <h1>Settings</h1>
+        <p>Manage your profile and billing details.</p>
+      </div>
       {isAuthenticated && user ? (
         <div className="container-box">
           <div className="user-profile">
@@ -36,7 +40,7 @@ function Auth0Settings(props) {
                 alt={user.name}
               />
             )}
-            <h1>{user.name}</h1>
+            <h2>{user.name}</h2>
           </div>
           <div>
             <button

@@ -1,19 +1,19 @@
 import isNil from "lodash/isNil";
 
-export function formatPrice(priceInDecimal = 0) {
+export function formatPrice(priceInDecimal = 0, currency) {
   if (isNil(priceInDecimal)) {
     return "";
   }
 
-  const priceInDollars = Number(priceInDecimal) / 100;
+  const priceInMajorUnits = Number(priceInDecimal) / 100;
 
-  // Format the price as a currency string with up to 10 decimal places
-  return new Intl.NumberFormat("en-US", {
+  // Prices default to GBP; pass the price object's currency when available.
+  return new Intl.NumberFormat("en-GB", {
     style: "currency",
-    currency: "USD",
+    currency: (currency || "GBP").toUpperCase(),
     minimumFractionDigits: 0, // Minimum number of decimal places
     maximumFractionDigits: 10, // Maximum number of decimal places
-  }).format(priceInDollars);
+  }).format(priceInMajorUnits);
 }
 
 export function formatPeriod(periodUnits, period) {
