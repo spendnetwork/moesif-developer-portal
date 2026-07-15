@@ -245,7 +245,7 @@ function Keys() {
                       </span>
                     </div>
                     {apiKey.description && <p>{apiKey.description}</p>}
-                    <code className="key-masked">{apiKey.masked_key}</code>
+                    <span className="key-identifier">Key ID {apiKey.id}</span>
                     <dl className="key-metadata">
                       <div><dt>Created</dt><dd>{formatDate(apiKey.created_at)}</dd></div>
                       <div><dt>Last used</dt><dd>{apiKey.last_used_at ? formatDate(apiKey.last_used_at) : "Not used yet"}</dd></div>
@@ -287,7 +287,7 @@ function Keys() {
             <div className="key-modal-header"><h2>API key created</h2><p>Store this key securely. You will not be able to view it again.</p></div>
             <div className="key-modal-body">
               <label>Your API key</label>
-              <div className="api-key-container"><span className="api-key-presentation"><SVG src={apiKeyIcon} /><pre className="api-key">{revealedKey}</pre></span><button className="copy-button" onClick={copyRevealedKey} title="Copy API key"><SVG className="icon" src={isCopied ? successIcon : copyIcon} /></button></div>
+              <div className="api-key-container"><span className="api-key-presentation"><SVG src={apiKeyIcon} /><code className="api-key">{revealedKey}</code></span><button className="copy-button" onClick={copyRevealedKey} title="Copy API key" aria-label="Copy API key"><SVG className="icon" src={isCopied ? successIcon : copyIcon} /></button></div>
             </div>
             <div className="key-modal-actions"><button className="button button--primary" onClick={closeModal}>Done</button></div>
           </div>
