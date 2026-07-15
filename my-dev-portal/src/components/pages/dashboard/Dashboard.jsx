@@ -1,10 +1,12 @@
 import { PageLayout } from "../../page-layout";
+import { Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { PageLoader } from "../../page-loader";
 import MoesifEmbeddedTemplate from "../../moesif/moesif-embedded-template";
 import NoticeBox from "../../notice-box";
 import dashIcon from "../../../images/icons/bar-chart.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
+import { welcomeStorageKey } from "../../../common/constants";
 import fetchEmbedChartUrls from "./fetchEmbedChartUrls";
 
 const Dashboard = (props) => {
@@ -36,6 +38,10 @@ const Dashboard = (props) => {
 
   if (isLoading || !idToken || (!error && !embedTemplateUrls)) {
     return <PageLoader />;
+  }
+
+  if (user?.sub && !localStorage.getItem(welcomeStorageKey(user.sub))) {
+    return <Navigate replace to="/welcome" />;
   }
 
   return (

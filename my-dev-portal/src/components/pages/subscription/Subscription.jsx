@@ -6,7 +6,7 @@ import useAuthCombined from "../../../hooks/useAuthCombined";
 import { PageLoader } from "../../page-loader";
 import { Link } from "react-router-dom";
 import usePlans from "../../../hooks/usePlans";
-import NoticeBox from "../../notice-box";
+import SVG from "react-inlinesvg";
 import noPriceIcon from "../../../images/icons/empty-state-price.svg";
 import SubDisplay from "./SubDisplay";
 
@@ -38,32 +38,28 @@ function Subscription(props) {
         <h1>Subscriptions</h1>
         <p>Review your active plans and billing periods.</p>
       </div>
-      {(!subscriptions || subscriptions.length <= 0) && (
-        <>
-          <NoticeBox
-            iconSrc={noPriceIcon}
-            title={subscriptionsError?.toString() || "No Subscription found"}
-            description={
-              <span>
-                If you just purchased a plan, please{" "}
-                <strong>wait at least 10 to 15 minutes</strong> for the systems
-                to sync.
-              </span>
-            }
-            actions={
-              <>
-                <Link
-                  to="/plans"
-                  rel="noreferrer noopener"
-                >
-                  <button className="button button--outline-secondary">
-                    Go to Plans
-                  </button>
-                </Link>
-              </>
-            }
-          />
-        </>
+      {subscriptionsError && (
+        <div className="alert-error" role="alert">
+          We could not load your subscriptions. Please refresh the page or try
+          again shortly.
+        </div>
+      )}
+      {!subscriptionsError && (!subscriptions || subscriptions.length <= 0) && (
+        <div className="empty-state">
+          <SVG src={noPriceIcon} aria-hidden="true" />
+          <h2>No active subscription yet</h2>
+          <p>
+            Your account is ready. Choose a plan to activate API access, then
+            create a key and start making calls.
+          </p>
+          <p className="empty-state__hint">
+            Just checked out? New subscriptions can take a few minutes to
+            appear here.
+          </p>
+          <Link to="/plans">
+            <button className="button button--primary">View plans</button>
+          </Link>
+        </div>
       )}
       {subscriptions?.length > 0 && (
         <div className="plans--container">
@@ -72,9 +68,11 @@ function Subscription(props) {
           ))}
         </div>
       )}
-      <p className="text-muted">
-        Newly created subscriptions may take up to 10 to 15 minutes to sync.
-      </p>
+      {subscriptions?.length > 0 && (
+        <p className="text-muted">
+          Recent changes to your plan can take a few minutes to appear here.
+        </p>
+      )}
     </PageLayout>
   );
 }

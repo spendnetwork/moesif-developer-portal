@@ -57,15 +57,13 @@ function MoesifPlans(props) {
 
   return (
     <div className="plans-section">
-      <div className="plans-title-section">
+      <div className="page-heading">
         <p className="page-eyebrow">Pricing</p>
-        <h1 className="plans-title">Open Opportunities API plans</h1>
-        <div className="plans-hint">
-          <div>
-            Choose the access level that matches your commitment and expected
-            usage.
-          </div>
-        </div>
+        <h1>Open Opportunities API plans</h1>
+        <p>
+          Choose the access level that matches your commitment and expected
+          usage.
+        </p>
       </div>
       {error && (
         <div className="alert-error" role="alert">
