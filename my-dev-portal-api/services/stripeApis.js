@@ -22,7 +22,6 @@ async function getActiveStripeSubscription(email, authUserId) {
     customer: customer.id,
     status: "all",
     limit: 10,
-    expand: ["data.items.data.price.product"],
   });
   const subscription = subscriptions.data.find((candidate) =>
     ["active", "trialing", "past_due"].includes(candidate.status)
@@ -30,7 +29,14 @@ async function getActiveStripeSubscription(email, authUserId) {
   if (!subscription) throw new Error("Active Stripe subscription not found");
 
   const price = subscription.items.data[0]?.price;
-  return { customer, subscription, price, product: price?.product };
+  if (!price) throw new Error("Stripe subscription price not found");
+
+  const product =
+    typeof price.product === "string"
+      ? await stripe.products.retrieve(price.product)
+      : price.product;
+
+  return { customer, subscription, price, product };
 }
 
 function getStripeCustomer(email) {
