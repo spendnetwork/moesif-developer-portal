@@ -294,7 +294,11 @@ function Keys() {
                       </span>
                     </div>
                     {apiKey.description && <p>{apiKey.description}</p>}
-                    <span className="key-identifier">Key ID {apiKey.id}</span>
+                    <span className="key-identifier" title="Use this prefix to match the key in your configuration">
+                      {apiKey.key_prefix
+                        ? `${apiKey.key_prefix}...`
+                        : `Key ID ${apiKey.id}`}
+                    </span>
                     <dl className="key-metadata">
                       <div><dt>Created</dt><dd>{formatDate(apiKey.created_at)}</dd></div>
                       <div><dt>Last used</dt><dd>{formatRelativeDate(apiKey.last_used_at)}</dd></div>
