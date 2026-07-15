@@ -1,15 +1,36 @@
 const StripeSDK = require("stripe");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
-function verifyStripeSession(checkout_session_id) {
-  return fetch(
-    `https://api.stripe.com/v1/checkout/sessions/${checkout_session_id}`,
-    {
-      headers: {
-        Authorization: `bearer ${process.env.STRIPE_API_KEY}`,
-      },
-    }
-  ).then((res) => res.json());
+function verifyStripeSession(checkoutSessionId) {
+  return stripe.checkout.sessions.retrieve(checkoutSessionId, {
+    expand: ["customer", "subscription", "line_items.data.price.product"],
+  });
+}
+
+async function getActiveStripeSubscription(email, authUserId) {
+  const customers = await stripe.customers.search({
+    query: `email:"${email.replace(/"/g, "\\\"")}"`,
+    limit: 10,
+  });
+  const customer =
+    customers.data.find(
+      (candidate) => candidate.metadata?.authUserId === authUserId
+    ) || customers.data[0];
+  if (!customer) throw new Error("Stripe customer not found");
+
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customer.id,
+    status: "all",
+    limit: 10,
+    expand: ["data.items.data.price.product"],
+  });
+  const subscription = subscriptions.data.find((candidate) =>
+    ["active", "trialing", "past_due"].includes(candidate.status)
+  );
+  if (!subscription) throw new Error("Active Stripe subscription not found");
+
+  const price = subscription.items.data[0]?.price;
+  return { customer, subscription, price, product: price?.product };
 }
 
 function getStripeCustomer(email) {
@@ -97,4 +118,5 @@ module.exports = {
   getStripeCustomer,
   getStripeCustomerId,
   getStripeCustomerIdFromCache,
+  getActiveStripeSubscription,
 };

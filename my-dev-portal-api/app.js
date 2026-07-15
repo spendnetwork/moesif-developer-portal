@@ -10,8 +10,10 @@ const { Client } = require("@okta/okta-sdk-nodejs");
 const {
   verifyStripeSession,
   getStripeCustomer,
+  getActiveStripeSubscription,
   createStripeCheckoutSession,
 } = require("./services/stripeApis");
+const { provisionSnApiCustomer } = require("./services/snApiProvisioning");
 const {
   syncToMoesif,
   getInfoForEmbeddedWorkspaces,
@@ -240,11 +242,14 @@ app.post(
       .then(async (result) => {
         const stripeCheckOutSessionInfo = result;
         console.log("in stripe register");
+        if (result.status !== "complete") {
+          return res.status(409).json({ message: "Stripe checkout is not complete" });
+        }
         if (result.customer && result.subscription) {
           console.log("customer and subscription present");
-          const email = result.customer_details.email;
-          const stripe_customer_id = result.customer;
-          const stripe_subscription_id = result.subscription;
+          const email = result.customer_details?.email || result.customer.email;
+          const stripe_customer_id = result.customer.id;
+          const stripe_subscription_id = result.subscription.id;
           try {
             if (
               process.env.MOESIF_MONETIZATION_VERSION &&
@@ -277,13 +282,24 @@ app.post(
             console.error("Error updating user/company/sub:", error);
           }
 
-          // Provision new user for access to API
-          const user = await provisioningService.provisionUser(
-            stripe_customer_id,
-            email,
-            stripe_subscription_id
-          );
-          console.log('provisioned user:', JSON.stringify(user));
+          const price = result.line_items?.data?.[0]?.price;
+          const provisionedCustomer = await provisionSnApiCustomer({
+            authUser: req.user,
+            customer: result.customer,
+            subscription: result.subscription,
+            price,
+            product: price?.product,
+          });
+          console.log("provisioned SN API customer:", JSON.stringify({
+            user_id: provisionedCustomer.user_id,
+            organization_id: provisionedCustomer.organization_id,
+            api_key_created: provisionedCustomer.api_key_created,
+          }));
+          stripeCheckOutSessionInfo.sn_api = {
+            user_id: provisionedCustomer.user_id,
+            organization_id: provisionedCustomer.organization_id,
+            api_key_created: provisionedCustomer.api_key_created,
+          };
         }
         // we still pass on result.
         console.log(JSON.stringify(stripeCheckOutSessionInfo));
@@ -375,21 +391,14 @@ app.get("/stripe/customer", authMiddleware, function (req, res) {
 
 app.post("/create-key", authMiddleware, jsonParser, async function (req, res) {
   try {
-    // if authentication used, email can come from idToken claims,
-    // otherwise we use email from body.
     const email = req.user?.email;
-
-    const customerId = await getUnifiedCustomerId(req.user, email);
-    if (!customerId) {
-      throw new Error(
-        `Customer Id unknown. Ensure you're subscribed to a plan. If you just subscribed, try again.`
-      );
-    }
-
-    // Provision new key for access to API
-    const apiKey = await provisioningService.createApiKey(customerId, email);
-    // Send the Tyk API key back as the response
-    res.status(200).send({ apikey: apiKey });
+    const stripeContext = await getActiveStripeSubscription(email, req.user?.sub);
+    const provisionedCustomer = await provisionSnApiCustomer({
+      authUser: req.user,
+      ...stripeContext,
+      rotateApiKey: true,
+    });
+    res.status(200).send({ apikey: provisionedCustomer.api_key });
   } catch (error) {
     console.error("Error creating key:", error);
     res.status(500).json({ message: "Failed to create key" });
