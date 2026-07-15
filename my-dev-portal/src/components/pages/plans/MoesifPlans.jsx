@@ -32,10 +32,7 @@ function MoesifPlans(props) {
     if (options?.disable) {
       return (
         <button disabled className="button__price-action">
-          Sign Up{" "}
-          <span style={{ fontSize: "x-small", fontWeight: "300" }}>
-            example
-          </span>
+          Sign Up <span className="button__price-action-note">example</span>
         </button>
       );
     }
@@ -59,10 +56,10 @@ function MoesifPlans(props) {
   }
 
   return (
-    <div className="page-layout__content">
+    <div className="plans-section">
       <div className="plans-title-section">
         <p className="page-eyebrow">Pricing</p>
-        <h3 className="plans-title">Open Opportunities API plans</h3>
+        <h1 className="plans-title">Open Opportunities API plans</h1>
         <div className="plans-hint">
           <div>
             Choose the access level that matches your commitment and expected
@@ -70,7 +67,12 @@ function MoesifPlans(props) {
           </div>
         </div>
       </div>
-      {error && <p>Error loading plans</p>}
+      {error && (
+        <div className="alert-error" role="alert">
+          We could not load the plans. Please refresh the page or try again
+          shortly.
+        </div>
+      )}
       {!loading && !error && (!plans || plans.length === 0) && <NoPriceFound />}
       <div className="plans--container">
         {plans &&

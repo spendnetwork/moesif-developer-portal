@@ -252,7 +252,7 @@ function Keys() {
                           aria-expanded={actionMenuId === apiKey.id}
                           aria-haspopup="menu"
                         >
-                          Actions <span aria-hidden="true">?</span>
+                          Actions <span className="key-actions-chevron" aria-hidden="true"></span>
                         </button>
                         {actionMenuId === apiKey.id && (
                           <div className="key-actions-popover" role="menu">
@@ -268,7 +268,7 @@ function Keys() {
                         <div><dt>Last used</dt><dd>{formatRelativeDate(apiKey.last_used_at)}</dd></div>
                       </dl>
                       <dl>
-                        <div><dt>Status</dt><dd><span className="key-active-indicator" aria-hidden="true">?</span> Active</dd></div>
+                        <div><dt>Status</dt><dd><span className="key-active-indicator" aria-hidden="true"></span> Active</dd></div>
                         <div><dt>Created</dt><dd>{formatDate(apiKey.created_at)}</dd></div>
                       </dl>
                     </div>

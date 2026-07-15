@@ -142,8 +142,8 @@ function SubDisplay({ sub, plans }) {
                   Was plan or price deleted in Stripe or not synced?
                 </div>
                 <p className="text-muted">
-                  Please check if plan id <code>{planId}</code> & price id{" "}
-                  <code>{priceId}</code> exits in your list of plans.
+                  Please check that plan id <code>{planId}</code> and price id{" "}
+                  <code>{priceId}</code> exist in your list of plans.
                 </p>
               </div>
             </div>
@@ -157,11 +157,13 @@ function SubDisplay({ sub, plans }) {
             price={foundPrice}
             subscriptionPeriod={subscriptionPeriod}
             actionButton={
-              <button disabled className="button__price-action">
+              <button
+                disabled
+                className="button__price-action"
+                title="Subscription management is coming soon"
+              >
                 Manage{" "}
-                <span style={{ fontSize: "x-small", fontWeight: "300" }}>
-                  TBI
-                </span>
+                <span className="button__price-action-note">coming soon</span>
               </button>
             }
           />

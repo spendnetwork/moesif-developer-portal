@@ -33,7 +33,11 @@ function Subscription(props) {
 
   return (
     <PageLayout>
-      <h1>My Current Subscriptions</h1>
+      <div className="page-heading">
+        <p className="page-eyebrow">Billing</p>
+        <h1>Subscriptions</h1>
+        <p>Review your active plans and billing periods.</p>
+      </div>
       {(!subscriptions || subscriptions.length <= 0) && (
         <>
           <NoticeBox

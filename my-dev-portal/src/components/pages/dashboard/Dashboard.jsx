@@ -20,7 +20,7 @@ const Dashboard = (props) => {
 
     if (idToken) {
       fetchEmbedChartUrls({
-        authUserId: user?.user_id || user.id || user?.sub,
+        authUserId: user?.user_id || user?.id || user?.sub,
         idToken,
         email,
       })
