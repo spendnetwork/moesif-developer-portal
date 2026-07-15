@@ -309,11 +309,17 @@ function getSubscriptionForUserEmail({ email }) {
 }
 
 function getInfoForEmbeddedWorkspaces({ userId, workspaceId }) {
+  const to = new Date();
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - 30);
+
   const templateData = {
     template: {
       values: {
         user_id: userId,
       },
+      from: from.toISOString(),
+      to: to.toISOString(),
     },
   };
 
