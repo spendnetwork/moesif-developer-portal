@@ -33,6 +33,14 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
+function formatRelativeDate(value) {
+  if (!value) return "Not used yet";
+  const days = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 86400000));
+  if (days === 0) return "Today";
+  if (days === 1) return "1 day ago";
+  return `${days} days ago`;
+}
+
 async function apiRequest(path, idToken, options = {}) {
   const response = await fetch(
     `${import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER}${path}`,
@@ -80,6 +88,7 @@ function Keys() {
   const [isCopied, setIsCopied] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [actionMenuId, setActionMenuId] = useState(null);
 
   Modal.setAppElement("#root");
 
@@ -177,6 +186,7 @@ function Keys() {
   }
 
   function openAction(action, apiKey) {
+    setActionMenuId(null);
     setSelectedKey(apiKey);
     setError("");
     setModal(action);
@@ -199,8 +209,8 @@ function Keys() {
         <header className="keys-header">
           <div>
             <p className="page-eyebrow">Access</p>
-            <h1>API keys</h1>
-            <p>Manage credentials for your Open Opportunities integrations.</p>
+            <h1>API keys <span>({keys.length})</span></h1>
+            <p>Use API keys to make programmatic calls to Open Opportunities. You can have a maximum of two active keys at a time.</p>
           </div>
           <button
             className="button button--primary keys-create-button"
@@ -232,35 +242,39 @@ function Keys() {
             {keys.map((apiKey) => (
               <article className="key-card" key={apiKey.id}>
                 <div className="key-card-main">
-                  <div className="key-card-icon"><SVG src={apiKeyIcon} /></div>
                   <div className="key-card-content">
-                    <div className="key-card-title-row">
+                    <div className="key-card-heading">
                       <h2>{apiKey.name}</h2>
-                      <span className={`key-status key-status--${apiKey.rotation_status}`}>
-                        {apiKey.rotation_status === "recommended"
-                          ? "90+ days"
-                          : apiKey.rotation_status === "warning"
-                            ? "60+ days"
-                            : "Active"}
-                      </span>
+                      <div className="key-actions-menu">
+                        <button
+                          className="button button--outline-secondary key-actions-trigger"
+                          onClick={() => setActionMenuId(actionMenuId === apiKey.id ? null : apiKey.id)}
+                          aria-expanded={actionMenuId === apiKey.id}
+                          aria-haspopup="menu"
+                        >
+                          Actions <span aria-hidden="true">?</span>
+                        </button>
+                        {actionMenuId === apiKey.id && (
+                          <div className="key-actions-popover" role="menu">
+                            <button role="menuitem" onClick={() => openAction("rotate", apiKey)}>Rotate key</button>
+                            <button role="menuitem" className="key-actions-danger" onClick={() => openAction("revoke", apiKey)}>Revoke key</button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    {apiKey.description && <p>{apiKey.description}</p>}
-                    <span className="key-identifier">Key ID {apiKey.id}</span>
-                    <dl className="key-metadata">
-                      <div><dt>Created</dt><dd>{formatDate(apiKey.created_at)}</dd></div>
-                      <div><dt>Last used</dt><dd>{apiKey.last_used_at ? formatDate(apiKey.last_used_at) : "Not used yet"}</dd></div>
-                    </dl>
+                    <div className="key-details-grid">
+                      <dl>
+                        <div><dt>Description</dt><dd>{apiKey.description || "No description"}</dd></div>
+                        <div><dt>Last used</dt><dd>{formatRelativeDate(apiKey.last_used_at)}</dd></div>
+                      </dl>
+                      <dl>
+                        <div><dt>Status</dt><dd><span className="key-active-indicator" aria-hidden="true">?</span> Active</dd></div>
+                        <div><dt>Created</dt><dd>{formatDate(apiKey.created_at)}</dd></div>
+                      </dl>
+                    </div>
                   </div>
                 </div>
                 <RotationNotice apiKey={apiKey} />
-                <div className="key-card-actions">
-                  <button className="button button--outline-secondary" onClick={() => openAction("rotate", apiKey)}>
-                    Rotate
-                  </button>
-                  <button className="button key-revoke-button" onClick={() => openAction("revoke", apiKey)}>
-                    Revoke
-                  </button>
-                </div>
               </article>
             ))}
           </div>
@@ -287,7 +301,7 @@ function Keys() {
             <div className="key-modal-header"><h2>API key created</h2><p>Store this key securely. You will not be able to view it again.</p></div>
             <div className="key-modal-body">
               <label>Your API key</label>
-              <div className="api-key-container"><span className="api-key-presentation"><SVG src={apiKeyIcon} /><code className="api-key">{revealedKey}</code></span><button className="copy-button" onClick={copyRevealedKey} title="Copy API key" aria-label="Copy API key"><SVG className="icon" src={isCopied ? successIcon : copyIcon} /></button></div>
+              <div className="api-key-container"><span className="api-key-presentation"><code className="api-key">{revealedKey}</code></span><button className="copy-button" onClick={copyRevealedKey} title="Copy API key" aria-label="Copy API key"><SVG className="icon" src={isCopied ? successIcon : copyIcon} /></button></div>
             </div>
             <div className="key-modal-actions"><button className="button button--primary" onClick={closeModal}>Done</button></div>
           </div>

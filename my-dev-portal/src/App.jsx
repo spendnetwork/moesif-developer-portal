@@ -17,6 +17,14 @@ import Home from "./components/pages/home/Home";
 import Checkout from "./components/pages/checkout/Checkout";
 import Subscription from "./components/pages/subscription/Subscription";
 import { PageFooter } from "./components/page-footer";
+import { PageLoader } from "./components/page-loader";
+
+function Auth0HomeRoute() {
+  const { isAuthenticated, isLoading } = useAuth0();
+
+  if (isLoading) return <PageLoader />;
+  return isAuthenticated ? <Navigate replace to="/dashboard" /> : <Home />;
+}
 
 function App() {
   const { isAuthenticated } = useAuth0();
