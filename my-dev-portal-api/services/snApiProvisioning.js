@@ -91,4 +91,71 @@ async function provisionSnApiCustomer({
   return body;
 }
 
-module.exports = { provisionSnApiCustomer };
+async function snApiKeyRequest(path, { method = "GET", body } = {}) {
+  const snApiBaseUrl = requireConfig("SN_API_BASE_URL");
+  const provisioningToken = requireConfig("SN_API_PROVISIONING_TOKEN");
+  const response = await fetch(`${snApiBaseUrl}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Developer-Portal-Token": provisioningToken,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const responseBody =
+    response.status === 204 ? null : await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(
+      responseBody?.detail || responseBody?.message || "SN API key request failed"
+    );
+    error.status = response.status;
+    throw error;
+  }
+  return responseBody;
+}
+
+function listSnApiKeys(authUser) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/portal-api-keys?auth0_user_id=${encodeURIComponent(
+      authUser.sub
+    )}`
+  );
+}
+
+function createSnApiKey(authUser, { name, description }) {
+  return snApiKeyRequest("/api/v3/developer-portal/portal-api-keys", {
+    method: "POST",
+    body: {
+      auth0_user_id: authUser.sub,
+      name,
+      description: description || null,
+    },
+  });
+}
+
+function revokeSnApiKey(authUser, apiKeyId) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/portal-api-keys/${apiKeyId}?auth0_user_id=${encodeURIComponent(
+      authUser.sub
+    )}`,
+    { method: "DELETE" }
+  );
+}
+
+function rotateSnApiKey(authUser, apiKeyId) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/portal-api-keys/${apiKeyId}/rotate`,
+    {
+      method: "POST",
+      body: { auth0_user_id: authUser.sub },
+    }
+  );
+}
+
+module.exports = {
+  provisionSnApiCustomer,
+  listSnApiKeys,
+  createSnApiKey,
+  revokeSnApiKey,
+  rotateSnApiKey,
+};
