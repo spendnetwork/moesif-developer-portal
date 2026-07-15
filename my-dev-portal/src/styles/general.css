@@ -164,6 +164,44 @@ code {
   font-size: 1.4rem;
 }
 
+.empty-state {
+  display: grid;
+  min-height: 28rem;
+  place-items: center;
+  align-content: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 3rem 2rem;
+  border: 1px dashed var(--button-outline);
+  border-radius: 0.6rem;
+  background: var(--surface);
+  text-align: center;
+}
+
+.empty-state > svg {
+  width: 4rem;
+  height: 4rem;
+}
+
+.empty-state h2 {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.empty-state p {
+  max-width: 48rem;
+  margin: 0;
+  color: var(--muted-text-color);
+}
+
+.empty-state__hint {
+  font-size: 1.3rem;
+}
+
+.empty-state .button {
+  margin-top: 1rem;
+}
+
 .page-eyebrow,
 .hero-kicker {
   margin: 0 0 1.2rem;

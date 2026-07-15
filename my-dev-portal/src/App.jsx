@@ -16,6 +16,7 @@ import Plans from "./components/pages/plans/Plans";
 import Home from "./components/pages/home/Home";
 import Checkout from "./components/pages/checkout/Checkout";
 import Subscription from "./components/pages/subscription/Subscription";
+import Welcome from "./components/pages/welcome/Welcome";
 import { PageFooter } from "./components/page-footer";
 import { PageLoader } from "./components/page-loader";
 
@@ -86,6 +87,14 @@ function App() {
                   }
                 />
                 <Route
+                  path="welcome"
+                  element={
+                    <SecureRoute>
+                      <Welcome />
+                    </SecureRoute>
+                  }
+                />
+                <Route
                   path="subscriptions"
                   element={
                     <SecureRoute>
@@ -138,6 +147,10 @@ function App() {
                 <Route
                   path="keys"
                   element={<AuthenticationGuard component={Keys} />}
+                />
+                <Route
+                  path="welcome"
+                  element={<AuthenticationGuard component={Welcome} />}
                 />
                 <Route
                   path="subscription"
