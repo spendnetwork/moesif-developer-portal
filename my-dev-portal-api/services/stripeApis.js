@@ -120,17 +120,28 @@ async function createStripeCheckoutSession(email, priceId, quantity, authUser) {
 
 async function updateStripeCustomerIdentity(
   customerId,
-  { moesifUserId, moesifCompanyId, auth0UserId }
+  { moesifUserId, moesifCompanyId, auth0UserId, subscriptionId }
 ) {
-  return stripe.customers.update(customerId, {
-    metadata: {
-      moesif_user_id: String(moesifUserId),
-      moesif_company_id: String(moesifCompanyId),
-      sn_user_id: String(moesifUserId),
-      sn_organization_id: String(moesifCompanyId),
-      authUserId: auth0UserId,
-    },
-  });
+  const metadata = {
+    moesif_user_id: String(moesifUserId),
+    moesif_company_id: String(moesifCompanyId),
+    sn_user_id: String(moesifUserId),
+    sn_organization_id: String(moesifCompanyId),
+    authUserId: auth0UserId,
+  };
+
+  const customer = await stripe.customers.update(customerId, { metadata });
+
+  // The subscription webhook fires before provisioning writes the customer
+  // metadata, so Moesif can process the subscription without a company
+  // mapping. Touching the subscription metadata afterwards emits
+  // customer.subscription.updated, making Moesif reprocess it with the
+  // mapping in place.
+  if (subscriptionId) {
+    await stripe.subscriptions.update(subscriptionId, { metadata });
+  }
+
+  return customer;
 }
 
 module.exports = {

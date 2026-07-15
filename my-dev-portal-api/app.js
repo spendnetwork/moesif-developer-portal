@@ -330,6 +330,7 @@ app.post(
             moesifUserId: req.user.moesif_user_id,
             moesifCompanyId: req.user.moesif_company_id,
             auth0UserId: req.user.sub,
+            subscriptionId: result.subscription.id,
           });
           syncToMoesif({
             companyId: req.user.moesif_company_id,
