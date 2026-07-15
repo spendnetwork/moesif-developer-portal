@@ -10,10 +10,15 @@ const { Client } = require("@okta/okta-sdk-nodejs");
 const {
   verifyStripeSession,
   getStripeCustomer,
-  getActiveStripeSubscription,
   createStripeCheckoutSession,
 } = require("./services/stripeApis");
-const { provisionSnApiCustomer } = require("./services/snApiProvisioning");
+const {
+  provisionSnApiCustomer,
+  listSnApiKeys,
+  createSnApiKey,
+  revokeSnApiKey,
+  rotateSnApiKey,
+} = require("./services/snApiProvisioning");
 const {
   syncToMoesif,
   getInfoForEmbeddedWorkspaces,
@@ -389,19 +394,66 @@ app.get("/stripe/customer", authMiddleware, function (req, res) {
     });
 });
 
+function sendKeyManagementError(res, error) {
+  console.error("API key management error:", error);
+  res.status(error.status || 500).json({
+    message: error.message || "API key request failed",
+  });
+}
+
+app.get("/api-keys", authMiddleware, async function (req, res) {
+  try {
+    res.status(200).json(await listSnApiKeys(req.user));
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+app.post("/api-keys", authMiddleware, jsonParser, async function (req, res) {
+  try {
+    res.status(201).json(
+      await createSnApiKey(req.user, {
+        name: req.body?.name,
+        description: req.body?.description,
+      })
+    );
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+app.delete("/api-keys/:api_key_id", authMiddleware, async function (req, res) {
+  try {
+    await revokeSnApiKey(req.user, req.params.api_key_id);
+    res.status(204).send();
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+app.post(
+  "/api-keys/:api_key_id/rotate",
+  authMiddleware,
+  async function (req, res) {
+    try {
+      res.status(200).json(
+        await rotateSnApiKey(req.user, req.params.api_key_id)
+      );
+    } catch (error) {
+      sendKeyManagementError(res, error);
+    }
+  }
+);
+
 app.post("/create-key", authMiddleware, jsonParser, async function (req, res) {
   try {
-    const email = req.user?.email;
-    const stripeContext = await getActiveStripeSubscription(email, req.user?.sub);
-    const provisionedCustomer = await provisionSnApiCustomer({
-      authUser: req.user,
-      ...stripeContext,
-      rotateApiKey: true,
+    const apiKey = await createSnApiKey(req.user, {
+      name: req.body?.name || "API key",
+      description: req.body?.description,
     });
-    res.status(200).send({ apikey: provisionedCustomer.api_key });
+    res.status(200).send({ apikey: apiKey.api_key });
   } catch (error) {
-    console.error("Error creating key:", error);
-    res.status(500).json({ message: "Failed to create key" });
+    sendKeyManagementError(res, error);
   }
 });
 
