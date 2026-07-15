@@ -114,6 +114,17 @@ async function snApiKeyRequest(path, { method = "GET", body } = {}) {
   return responseBody;
 }
 
+async function getSnApiPortalContext(authUser) {
+  if (!authUser?.sub) {
+    throw new Error("Authenticated Auth0 user id is required");
+  }
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/portal-context?auth0_user_id=${encodeURIComponent(
+      authUser.sub
+    )}`
+  );
+}
+
 function listSnApiKeys(authUser) {
   return snApiKeyRequest(
     `/api/v3/developer-portal/portal-api-keys?auth0_user_id=${encodeURIComponent(
@@ -154,6 +165,7 @@ function rotateSnApiKey(authUser, apiKeyId) {
 
 module.exports = {
   provisionSnApiCustomer,
+  getSnApiPortalContext,
   listSnApiKeys,
   createSnApiKey,
   revokeSnApiKey,

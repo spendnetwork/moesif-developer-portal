@@ -118,9 +118,25 @@ async function createStripeCheckoutSession(email, priceId, quantity, authUser) {
   return session;
 }
 
+async function updateStripeCustomerIdentity(
+  customerId,
+  { moesifUserId, moesifCompanyId, auth0UserId }
+) {
+  return stripe.customers.update(customerId, {
+    metadata: {
+      moesif_user_id: String(moesifUserId),
+      moesif_company_id: String(moesifCompanyId),
+      sn_user_id: String(moesifUserId),
+      sn_organization_id: String(moesifCompanyId),
+      authUserId: auth0UserId,
+    },
+  });
+}
+
 module.exports = {
   verifyStripeSession,
   createStripeCheckoutSession,
+  updateStripeCustomerIdentity,
   getStripeCustomer,
   getStripeCustomerId,
   getStripeCustomerIdFromCache,

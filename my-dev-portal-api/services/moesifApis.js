@@ -11,12 +11,18 @@ const moesifMiddleware = moesif({
   },
 });
 
-function syncToMoesif({ companyId, userId, email }) {
+function syncToMoesif({
+  companyId,
+  userId,
+  email,
+  auth0UserId,
+  stripeCustomerId,
+}) {
   if (companyId) {
     var company = {
       companyId: companyId,
       metadata: {
-        // feel free to add additonal profile data here.
+        stripe_customer_id: stripeCustomerId,
       },
     };
     moesifMiddleware.updateCompany(company);
@@ -28,6 +34,8 @@ function syncToMoesif({ companyId, userId, email }) {
       metadata: {
         // feel free to add additional profile data here.
         email: email,
+        auth0_user_id: auth0UserId,
+        stripe_customer_id: stripeCustomerId,
       },
     };
     moesifMiddleware.updateUser(user);
@@ -308,7 +316,7 @@ function getSubscriptionForUserEmail({ email }) {
     });
 }
 
-function getInfoForEmbeddedWorkspaces({ userId, workspaceId }) {
+function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
   const to = new Date();
   const from = new Date(to);
   from.setUTCDate(from.getUTCDate() - 30);
@@ -316,7 +324,7 @@ function getInfoForEmbeddedWorkspaces({ userId, workspaceId }) {
   const templateData = {
     template: {
       values: {
-        user_id: userId,
+        company_id: companyId,
       },
       from: from.toISOString(),
       to: to.toISOString(),
