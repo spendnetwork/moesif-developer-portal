@@ -79,18 +79,49 @@ const moesifMiddleware = moesif({
 
 app.use(moesifMiddleware, cors());
 
+const PORTAL_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
+const portalContextCache = new Map();
+
+function applyPortalContext(req, context) {
+  req.portalContext = context;
+  req.user.moesif_user_id = context.moesif_user_id;
+  req.user.moesif_company_id = context.moesif_company_id;
+  req.user.sn_api_user_id = context.user_id;
+  req.user.sn_api_organization_id = context.organization_id;
+}
+
+function invalidatePortalContext(auth0UserId) {
+  if (auth0UserId) {
+    portalContextCache.delete(auth0UserId);
+  }
+}
+
 async function attachSnApiPortalContext(req, _res, next) {
+  const auth0UserId = req.user?.sub;
+  const cached = auth0UserId ? portalContextCache.get(auth0UserId) : undefined;
+
+  if (cached && Date.now() - cached.fetchedAt < PORTAL_CONTEXT_CACHE_TTL_MS) {
+    applyPortalContext(req, cached.context);
+    return next();
+  }
+
   try {
     const context = await getSnApiPortalContext(req.user);
-    req.portalContext = context;
-    req.user.moesif_user_id = context.moesif_user_id;
-    req.user.moesif_company_id = context.moesif_company_id;
-    req.user.sn_api_user_id = context.user_id;
-    req.user.sn_api_organization_id = context.organization_id;
+    portalContextCache.set(auth0UserId, { context, fetchedAt: Date.now() });
+    applyPortalContext(req, context);
   } catch (error) {
-    // Authentication can happen before checkout has provisioned the API account.
-    if (error.status !== 404) {
+    if (error.status === 404) {
+      // Authentication can happen before checkout has provisioned the
+      // API account. Not cached so the context appears promptly once
+      // provisioning completes.
+      invalidatePortalContext(auth0UserId);
+    } else {
       console.error("Failed to resolve SN API portal context:", error);
+      if (cached) {
+        // SN API is unavailable; serve the stale context rather than
+        // emitting anonymous Moesif events.
+        applyPortalContext(req, cached.context);
+      }
     }
   }
   next();
@@ -307,6 +338,9 @@ app.post(
             auth0UserId: req.user.sub,
             stripeCustomerId: provisionedCustomer.stripe_customer_id,
           });
+          // Drop any pre-provisioning cache entry so the next request
+          // fetches the full canonical context from the SN API.
+          invalidatePortalContext(req.user.sub);
           stripeCheckOutSessionInfo.sn_api = {
             user_id: provisionedCustomer.user_id,
             organization_id: provisionedCustomer.organization_id,
