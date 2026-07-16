@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
 import SVG from "react-inlinesvg";
 import copy from "copy-to-clipboard";
@@ -6,6 +7,7 @@ import copy from "copy-to-clipboard";
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
 import apiKeyIcon from "../../../images/icons/api-key.svg";
+import lockIcon from "../../../images/icons/lock.svg";
 import copyIcon from "../../../images/icons/copy.svg";
 import successIcon from "../../../images/icons/success.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
@@ -55,7 +57,9 @@ async function apiRequest(path, idToken, options = {}) {
   );
   const body = response.status === 204 ? null : await response.json();
   if (!response.ok) {
-    throw new Error(body?.message || "API key request failed");
+    const error = new Error(body?.message || "API key request failed");
+    error.status = response.status;
+    throw error;
   }
   return body;
 }
@@ -77,6 +81,7 @@ function RotationNotice({ apiKey }) {
 
 function Keys() {
   const { isLoading: authLoading, idToken } = useAuthCombined();
+  const navigate = useNavigate();
   const [keys, setKeys] = useState([]);
   const [maxKeys, setMaxKeys] = useState(2);
   const [loading, setLoading] = useState(true);
@@ -88,6 +93,7 @@ function Keys() {
   const [isCopied, setIsCopied] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [notProvisioned, setNotProvisioned] = useState(false);
 
   Modal.setAppElement("#root");
 
@@ -100,7 +106,11 @@ function Keys() {
       setKeys(result.keys || []);
       setMaxKeys(result.max_active_keys || 2);
     } catch (requestError) {
-      setError(requestError.message);
+      if (requestError.status === 404) {
+        setNotProvisioned(true);
+      } else {
+        setError(requestError.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -199,6 +209,37 @@ function Keys() {
 
   if (authLoading || loading) return <PageLoader />;
 
+  if (notProvisioned) {
+    return (
+      <PageLayout>
+        <section className="keys-page">
+          <header className="keys-header">
+            <div>
+              <p className="page-eyebrow">Access</p>
+              <h1>API keys</h1>
+              <p>Use API keys to make programmatic calls to Open Opportunities.</p>
+            </div>
+          </header>
+          <div className="empty-state">
+            <SVG src={lockIcon} aria-hidden="true" />
+            <h2>Subscribe to unlock API keys</h2>
+            <p>
+              API keys become available once you have an active plan. Choose
+              one to activate your access, then come back here to create your
+              first key.
+            </p>
+            <button
+              className="button button--primary"
+              onClick={() => navigate("/plans")}
+            >
+              View plans
+            </button>
+          </div>
+        </section>
+      </PageLayout>
+    );
+  }
+
   const atLimit = keys.length >= maxKeys;
 
   return (
@@ -253,7 +294,11 @@ function Keys() {
                       </span>
                     </div>
                     {apiKey.description && <p>{apiKey.description}</p>}
-                    <span className="key-identifier">Key ID {apiKey.id}</span>
+                    <span className="key-identifier" title="Use this prefix to match the key in your configuration">
+                      {apiKey.key_prefix
+                        ? `${apiKey.key_prefix.slice(0, 18)}...`
+                        : `Key ID ${apiKey.id}`}
+                    </span>
                     <dl className="key-metadata">
                       <div><dt>Created</dt><dd>{formatDate(apiKey.created_at)}</dd></div>
                       <div><dt>Last used</dt><dd>{formatRelativeDate(apiKey.last_used_at)}</dd></div>
