@@ -18,6 +18,73 @@
   align-items: stretch;
 }
 
+.plan-tile {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 2.4rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(23, 34, 31, 0.05);
+}
+
+.plan-tile__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.6rem;
+}
+
+.plan-tile__name {
+  color: var(--body-text-color);
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.plan-tile__commitment {
+  color: var(--accent-dark);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.plan-tile__rates {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0 0 1.6rem;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-tile__rates li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 1.4rem;
+}
+
+.plan-tile__metric {
+  color: var(--body-text-color);
+  font-weight: 500;
+}
+
+.plan-tile__rate {
+  color: var(--muted-text-color);
+  white-space: nowrap;
+}
+
+.plan-tile__note {
+  margin: 0 0 1.6rem;
+  color: var(--muted-text-color);
+  font-size: 1.3rem;
+}
+
+.plan-tile .plan--bottom {
+  margin-top: auto;
+}
+
 .price--tile {
   display: flex;
   flex-direction: column;

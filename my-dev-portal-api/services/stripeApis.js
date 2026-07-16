@@ -78,7 +78,7 @@ async function getStripeCustomerId(email) {
   return stripeCustomerId;
 }
 
-async function createStripeCheckoutSession(email, priceId, quantity, authUser) {
+async function getOrCreateStripeCustomerId(email, authUser) {
   // make sure only one stripe customer per email
   let customerId = await getStripeCustomerId(email);
 
@@ -100,6 +100,12 @@ async function createStripeCheckoutSession(email, priceId, quantity, authUser) {
     customerId = customer.id;
   }
 
+  return customerId;
+}
+
+async function createStripeCheckoutSession(email, priceId, quantity, authUser) {
+  const customerId = await getOrCreateStripeCustomerId(email, authUser);
+
   const session = await stripe.checkout.sessions.create({
     ui_mode: "embedded",
     line_items: [
@@ -113,6 +119,37 @@ async function createStripeCheckoutSession(email, priceId, quantity, authUser) {
     customer: customerId,
     mode: "subscription",
     return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&price_id=${priceId}`,
+  });
+
+  return session;
+}
+
+async function createStripePlanCheckoutSession(email, planId, authUser) {
+  const customerId = await getOrCreateStripeCustomerId(email, authUser);
+
+  // A plan (Stripe product) can carry several usage prices - one per
+  // billing meter - so the subscription must include every active price.
+  const prices = await stripe.prices.list({
+    product: planId,
+    active: true,
+    limit: 100,
+  });
+  if (!prices.data.length) {
+    throw new Error(`No active prices found for plan ${planId}`);
+  }
+
+  const lineItems = prices.data.map((price) => ({
+    price: price.id,
+    // metered prices must not carry a quantity
+    quantity: price.recurring?.usage_type === "metered" ? undefined : 1,
+  }));
+
+  const session = await stripe.checkout.sessions.create({
+    ui_mode: "embedded",
+    line_items: lineItems,
+    customer: customerId,
+    mode: "subscription",
+    return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${planId}`,
   });
 
   return session;
@@ -147,6 +184,7 @@ async function updateStripeCustomerIdentity(
 module.exports = {
   verifyStripeSession,
   createStripeCheckoutSession,
+  createStripePlanCheckoutSession,
   updateStripeCustomerIdentity,
   getStripeCustomer,
   getStripeCustomerId,

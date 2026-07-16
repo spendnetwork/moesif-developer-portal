@@ -13,20 +13,27 @@ const stripePromise = loadStripe(
 // used on embedded checkout example code:
 // https://docs.stripe.com/checkout/embedded/quickstart
 
-function StripeCheckoutForm({ priceId, user, idToken, quantity }) {
+function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
   const [clientSecret, setClientSecret] = useState("");
 
   useEffect(() => {
     // Create a Checkout Session as soon as the page loads
-    if (!idToken || !priceId || !user?.email) {
+    if (!idToken || (!priceId && !planId) || !user?.email) {
       return;
     }
+
+    const params = new URLSearchParams({ email: user.email });
+    if (planId) {
+      params.set("plan_id", planId);
+    } else {
+      params.set("price_id", priceId);
+      if (quantity) params.set("quantity", quantity);
+    }
+
     fetch(
       `${
         import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER
-      }/create-stripe-checkout-session?price_id=${priceId}&email=${encodeURIComponent(
-        user?.email
-      )}${quantity ? `&quantity=${quantity}` : ""}`,
+      }/create-stripe-checkout-session?${params.toString()}`,
       {
         method: "POST",
         headers: {
@@ -36,10 +43,12 @@ function StripeCheckoutForm({ priceId, user, idToken, quantity }) {
     )
       .then((res) => res.json())
       .then((data) => {
-        console.log(JSON.stringify(data));
         setClientSecret(data.clientSecret);
+      })
+      .catch((err) => {
+        console.error("Failed to create checkout session", err);
       });
-  }, [priceId, user, idToken, quantity]);
+  }, [priceId, planId, user, idToken, quantity]);
 
   return (
     <div id="checkout">

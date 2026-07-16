@@ -11,6 +11,7 @@ const {
   verifyStripeSession,
   getStripeCustomer,
   createStripeCheckoutSession,
+  createStripePlanCheckoutSession,
   updateStripeCustomerIdentity,
 } = require("./services/stripeApis");
 const {
@@ -134,22 +135,25 @@ app.post(
   portalAuthMiddleware,
   async (req, res) => {
     const priceId = req.query?.price_id;
+    const planId = req.query?.plan_id;
     const email = req.user?.email;
     const quantity = req.query?.quantity || undefined;
 
-    console.log(`create-stripe-checkout-session called for ${email} priceId ${priceId} quantity ${quantity}`);
+    console.log(`create-stripe-checkout-session called for ${email} planId ${planId} priceId ${priceId} quantity ${quantity}`);
 
-    if (!priceId) {
-      return res.status(400).json({ message: "price_id is required" });
+    if (!priceId && !planId) {
+      return res.status(400).json({ message: "plan_id or price_id is required" });
     }
 
     try {
-      const session = await createStripeCheckoutSession(
-        email,
-        priceId,
-        quantity,
-        req?.user
-      );
+      const session = planId
+        ? await createStripePlanCheckoutSession(email, planId, req?.user)
+        : await createStripeCheckoutSession(
+            email,
+            priceId,
+            quantity,
+            req?.user
+          );
       console.log("got session back from stripe session");
       console.log(JSON.stringify(session));
 

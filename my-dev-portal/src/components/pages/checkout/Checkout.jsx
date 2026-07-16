@@ -50,8 +50,9 @@ function Checkout(props) {
           />
         ) : (
           <StripeCheckoutForm
-            key={urlPriceIdToPurchase}
+            key={urlPriceIdToPurchase || urlPlanIdToPurchase}
             priceId={urlPriceIdToPurchase}
+            planId={urlPlanIdToPurchase}
             quantity={urlQuantity}
             user={user}
             idToken={idToken}
