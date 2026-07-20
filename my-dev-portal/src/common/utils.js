@@ -5,7 +5,9 @@ export function formatPrice(priceInDecimal = 0, currency) {
     return "";
   }
 
-  const priceInMajorUnits = Number(priceInDecimal) / 100;
+  // Moesif exposes *_in_decimal fields already in the major currency unit
+  // (e.g. "0.26" is 26 pence, not 0.26 pence), so no minor-unit conversion.
+  const priceInMajorUnits = Number(priceInDecimal);
 
   // Prices default to GBP; pass the price object's currency when available.
   return new Intl.NumberFormat("en-GB", {
