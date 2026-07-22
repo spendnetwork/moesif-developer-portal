@@ -11,6 +11,7 @@ import lockIcon from "../../../images/icons/lock.svg";
 import copyIcon from "../../../images/icons/copy.svg";
 import successIcon from "../../../images/icons/success.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
+import useSubscriptions from "../../../hooks/useSubscriptions";
 
 const modalStyles = {
   content: {
@@ -79,9 +80,13 @@ function RotationNotice({ apiKey }) {
   );
 }
 
+const ACTIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
+
 function Keys() {
-  const { isLoading: authLoading, idToken } = useAuthCombined();
+  const { isLoading: authLoading, idToken, user } = useAuthCombined();
   const navigate = useNavigate();
+  const { subscriptions, finishedLoading: subscriptionsLoaded } =
+    useSubscriptions({ user, idToken });
   const [keys, setKeys] = useState([]);
   const [maxKeys, setMaxKeys] = useState(2);
   const [loading, setLoading] = useState(true);
@@ -207,9 +212,19 @@ function Keys() {
     }
   }
 
-  if (authLoading || loading) return <PageLoader />;
+  const waitingForSubscription =
+    Boolean(idToken && user?.email) && !subscriptionsLoaded;
 
-  if (notProvisioned) {
+  if (authLoading || loading || waitingForSubscription) return <PageLoader />;
+
+  const hasActiveSubscription =
+    Array.isArray(subscriptions) &&
+    subscriptions.some((sub) => {
+      const status = sub?.status ? String(sub.status).toLowerCase() : null;
+      return !status || ACTIVE_SUBSCRIPTION_STATUSES.includes(status);
+    });
+
+  if (notProvisioned || !hasActiveSubscription) {
     return (
       <PageLayout>
         <section className="keys-page">

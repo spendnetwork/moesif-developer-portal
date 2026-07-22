@@ -9,6 +9,7 @@ const { Client } = require("@okta/okta-sdk-nodejs");
 
 const {
   verifyStripeSession,
+  hasActiveStripeSubscription,
   getStripeCustomer,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
@@ -129,6 +130,28 @@ async function attachSnApiPortalContext(req, _res, next) {
 }
 
 const portalAuthMiddleware = [authMiddleware, attachSnApiPortalContext];
+
+// API keys grant API access, so they may only be created or rotated while the
+// customer has a live subscription. Checked against Stripe directly so a
+// cancellation takes effect immediately, not after Moesif sync.
+async function requireActiveSubscription(req, res, next) {
+  try {
+    const active = await hasActiveStripeSubscription(req.user?.email, req.user);
+    if (!active) {
+      return res.status(403).json({
+        code: "no_active_subscription",
+        message: "An active subscription is required to manage API keys.",
+      });
+    }
+  } catch (error) {
+    console.error("Subscription check failed:", error);
+    return res.status(403).json({
+      code: "no_active_subscription",
+      message: "We could not verify your subscription. Please try again.",
+    });
+  }
+  return next();
+}
 
 app.post(
   "/create-stripe-checkout-session",
@@ -464,7 +487,7 @@ app.get("/api-keys", portalAuthMiddleware, async function (req, res) {
   }
 });
 
-app.post("/api-keys", portalAuthMiddleware, jsonParser, async function (req, res) {
+app.post("/api-keys", portalAuthMiddleware, requireActiveSubscription, jsonParser, async function (req, res) {
   try {
     res.status(201).json(
       await createSnApiKey(req.user, {
@@ -489,6 +512,7 @@ app.delete("/api-keys/:api_key_id", portalAuthMiddleware, async function (req, r
 app.post(
   "/api-keys/:api_key_id/rotate",
   portalAuthMiddleware,
+  requireActiveSubscription,
   async function (req, res) {
     try {
       res.status(200).json(
@@ -500,7 +524,7 @@ app.post(
   }
 );
 
-app.post("/create-key", portalAuthMiddleware, jsonParser, async function (req, res) {
+app.post("/create-key", portalAuthMiddleware, requireActiveSubscription, jsonParser, async function (req, res) {
   try {
     const apiKey = await createSnApiKey(req.user, {
       name: req.body?.name || "API key",

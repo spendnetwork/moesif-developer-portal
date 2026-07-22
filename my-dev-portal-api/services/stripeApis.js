@@ -181,8 +181,18 @@ async function updateStripeCustomerIdentity(
   return customer;
 }
 
+async function hasActiveStripeSubscription(email, authUser) {
+  try {
+    await getActiveStripeSubscription(email, authUser?.sub);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 module.exports = {
   verifyStripeSession,
+  hasActiveStripeSubscription,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
   updateStripeCustomerIdentity,
