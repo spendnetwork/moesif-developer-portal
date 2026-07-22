@@ -19,6 +19,7 @@ import Subscription from "./components/pages/subscription/Subscription";
 import Welcome from "./components/pages/welcome/Welcome";
 import { PageFooter } from "./components/page-footer";
 import { PageLoader } from "./components/page-loader";
+import SessionTimeout from "./components/session-timeout";
 
 function Auth0HomeRoute() {
   const { isAuthenticated, isLoading } = useAuth0();
@@ -36,6 +37,7 @@ function App() {
         <div>
           <BrowserRouter>
             <OktaProviderWithNavigate>
+              <SessionTimeout />
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/signup" element={<SignUp />} />
@@ -115,6 +117,7 @@ function App() {
         <div>
           <BrowserRouter>
             <Auth0ProviderWithNavigate>
+              <SessionTimeout />
               <Routes>
                 <Route
                   path="/"
