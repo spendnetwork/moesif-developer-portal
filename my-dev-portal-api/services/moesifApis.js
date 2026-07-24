@@ -324,7 +324,9 @@ function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
   const templateData = {
     template: {
       values: {
-        company_id: companyId,
+        // The embedded template filters "company_id in {{company_id}}", and the
+        // "in" operator expects a list of values, so wrap the id in an array.
+        company_id: [String(companyId)],
       },
       from: from.toISOString(),
       to: to.toISOString(),
