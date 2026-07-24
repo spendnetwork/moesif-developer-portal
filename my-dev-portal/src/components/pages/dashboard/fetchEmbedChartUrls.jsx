@@ -6,7 +6,7 @@ function customizeUrlDisplayOptions(embedInfo) {
     embed: true,
     hide_header: true,
     show_daterange: true,
-    primary_color: "#000",
+    primary_color: "#1b6b4f",
   };
 
   return `https://www.moesif.com/public/em/ws/${

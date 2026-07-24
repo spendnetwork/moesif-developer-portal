@@ -45,9 +45,16 @@
 
 .key-card {
   overflow: hidden;
-  border: 1px solid var(--button-outline);
-  border-radius: 0.6rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
   background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+.key-card:hover {
+  border-color: var(--button-outline);
+  box-shadow: 0 2px 4px rgba(23, 34, 31, 0.06), 0 12px 32px rgba(23, 34, 31, 0.07);
 }
 
 .key-card-main {
@@ -62,8 +69,9 @@
   width: 4rem;
   height: 4rem;
   place-items: center;
-  border-radius: 0.6rem;
-  background: var(--surface-muted);
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
 .key-card-icon svg,
@@ -122,10 +130,11 @@
 
 .key-status {
   flex: 0 0 auto;
-  padding: 0.4rem 0.8rem;
-  border-radius: 999px;
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius-pill);
   font-size: 1.2rem;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .key-status--current {

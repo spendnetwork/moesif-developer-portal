@@ -57,10 +57,18 @@ h6 {
 }
 
 h1 {
-  color: var(--body-text-color);
+  color: var(--heading-color);
   font-size: 3.2rem;
   font-weight: 700;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
+}
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--heading-color);
 }
 
 h2 {
@@ -123,6 +131,43 @@ textarea {
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="url"],
+input:not([type]),
+select,
+textarea {
+  width: 100%;
+  padding: 1rem 1.2rem;
+  color: var(--body-text-color);
+  background: var(--surface);
+  border: 1px solid var(--button-outline);
+  border-radius: var(--radius-control);
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+  appearance: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted-text-color);
+  opacity: 0.75;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus,
+input[type="url"]:focus,
+input:not([type]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 a {

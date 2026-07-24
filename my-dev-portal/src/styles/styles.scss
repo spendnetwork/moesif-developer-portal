@@ -83,9 +83,12 @@ $nav-bar-color: #ffffff;
   }
 }
 
-// Iframe styling
+// Iframe styling - framed as cards to blend with the rest of the portal
 .dashboards-container iframe {
   width: 100%;
   aspect-ratio: 16 / 9; // Maintain 16:9 aspect ratio
-  border: none; // Optional: remove border if not needed
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }

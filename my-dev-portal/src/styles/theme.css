@@ -21,7 +21,7 @@
   --light-theme-6: #272F34;
 
 
-  --orange: #166f5d;
+  --orange: #1b6b4f;
   --indigo: #635dff;
   --white: #fff;
   --light-aluminium: #eaecee;
@@ -36,21 +36,29 @@
   --emerald: #1bc99f;
   --moesif-black: #17221f;
 
-  --overall-bg: #f6f7f4;
+  --overall-bg: #f5f7f4;
   --nav-bg: #17221f;
   --focus-bg: #ffffff;
-  --button-outline: #cdd8d2;
-  --body-text-color: #1d2925;
-  --muted-text-color: #687871;
-  --link-text-color: #166f5d;
-  --link-hover-color: #0e4f42;
+  --button-outline: #d3ddd6;
+  --heading-color: #23383a;
+  --body-text-color: #23302c;
+  --muted-text-color: #647873;
+  --link-text-color: #1b6b4f;
+  --link-hover-color: #124a37;
   --surface: #ffffff;
-  --surface-muted: #edf3ef;
-  --border-subtle: #dbe4df;
-  --accent: #166f5d;
-  --accent-dark: #0e4f42;
-  --accent-soft: #dcece6;
+  --surface-muted: #eef4f0;
+  --border-subtle: #dde5e0;
+  --accent: #1b6b4f;
+  --accent-dark: #124a37;
+  --accent-soft: #e3f1ea;
   --warning-soft: #fff3d4;
+
+  /* Shared shape tokens for consistent, modern rounding */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --focus-ring: 0 0 0 3px rgba(27, 107, 79, 0.18);
+  --shadow-card: 0 1px 2px rgba(23, 34, 31, 0.04), 0 8px 24px rgba(23, 34, 31, 0.05);
 
   --yellow-mandarine-gradient: linear-gradient(
     153.07deg,
