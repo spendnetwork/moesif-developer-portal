@@ -13,6 +13,7 @@ const {
   getStripeCustomer,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
+  attachPlanMeteredPrices,
   updateStripeCustomerIdentity,
 } = require("./services/stripeApis");
 const {
@@ -339,6 +340,7 @@ app.post(
         if (result.status !== "complete") {
           return res.status(409).json({ message: "Stripe checkout is not complete" });
         }
+        await attachPlanMeteredPrices(result);
         if (result.customer && result.subscription) {
           console.log("customer and subscription present");
           const email = result.customer_details?.email || result.customer.email;

@@ -15,6 +15,7 @@ const stripePromise = loadStripe(
 
 function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
   const [clientSecret, setClientSecret] = useState("");
+  const [checkoutError, setCheckoutError] = useState("");
 
   useEffect(() => {
     // Create a Checkout Session as soon as the page loads
@@ -41,17 +42,30 @@ function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
         },
       }
     )
-      .then((res) => res.json())
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok || !data.clientSecret) {
+          throw new Error(data.message || "Unable to start checkout");
+        }
+        return data;
+      })
       .then((data) => {
+        setCheckoutError("");
         setClientSecret(data.clientSecret);
       })
       .catch((err) => {
         console.error("Failed to create checkout session", err);
+        setCheckoutError(err.message || "Unable to start checkout");
       });
   }, [priceId, planId, user, idToken, quantity]);
 
   return (
     <div id="checkout">
+      {checkoutError && (
+        <div className="alert-error" role="alert">
+          {checkoutError}
+        </div>
+      )}
       {clientSecret && (
         <EmbeddedCheckoutProvider
           stripe={stripePromise}

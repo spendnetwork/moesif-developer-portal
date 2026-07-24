@@ -138,7 +138,30 @@ async function createStripePlanCheckoutSession(email, planId, authUser) {
     throw new Error(`No active prices found for plan ${planId}`);
   }
 
-  const lineItems = prices.data.map((price) => ({
+  const commitmentPrices = prices.data.filter(
+    (price) =>
+      price.metadata?.billing_category === "commitment" ||
+      price.recurring?.usage_type === "licensed"
+  );
+  const meteredPrices = prices.data.filter(
+    (price) => price.recurring?.usage_type === "metered"
+  );
+
+  if (commitmentPrices.length > 1) {
+    throw new Error(`Multiple active commitment prices found for plan ${planId}`);
+  }
+
+  // Stripe Checkout cannot create a mixed-interval subscription. For a
+  // commitment plan, Checkout collects the annual commitment first and the
+  // monthly metered items are attached after the session completes.
+  const checkoutPrices = commitmentPrices.length
+    ? commitmentPrices
+    : meteredPrices;
+  if (!checkoutPrices.length) {
+    throw new Error(`No checkout prices found for plan ${planId}`);
+  }
+
+  const lineItems = checkoutPrices.map((price) => ({
     price: price.id,
     // metered prices must not carry a quantity
     quantity: price.recurring?.usage_type === "metered" ? undefined : 1,
@@ -149,10 +172,57 @@ async function createStripePlanCheckoutSession(email, planId, authUser) {
     line_items: lineItems,
     customer: customerId,
     mode: "subscription",
+    metadata: {
+      plan_id: planId,
+      attach_metered_prices: commitmentPrices.length ? "true" : "false",
+    },
+    subscription_data: {
+      billing_mode: { type: "flexible" },
+      metadata: { plan_id: planId },
+    },
     return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${planId}`,
   });
 
   return session;
+}
+
+async function attachPlanMeteredPrices(checkoutSession) {
+  if (checkoutSession.metadata?.attach_metered_prices !== "true") return;
+
+  const planId = checkoutSession.metadata?.plan_id;
+  const subscriptionId = checkoutSession.subscription?.id;
+  if (!planId || !subscriptionId) {
+    throw new Error("Checkout session is missing its plan or subscription ID");
+  }
+
+  const [prices, subscription] = await Promise.all([
+    stripe.prices.list({ product: planId, active: true, limit: 100 }),
+    stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ["items.data.price"],
+    }),
+  ]);
+  const existingPriceIds = new Set(
+    subscription.items.data.map((item) => item.price.id)
+  );
+  const meteredPrices = prices.data.filter(
+    (price) => price.recurring?.usage_type === "metered"
+  );
+
+  if (!meteredPrices.length) {
+    throw new Error(`No active metered prices found for plan ${planId}`);
+  }
+
+  for (const price of meteredPrices) {
+    if (existingPriceIds.has(price.id)) continue;
+    await stripe.subscriptionItems.create(
+      {
+        subscription: subscriptionId,
+        price: price.id,
+        proration_behavior: "none",
+      },
+      { idempotencyKey: `portal-${checkoutSession.id}-${price.id}` }
+    );
+  }
 }
 
 async function updateStripeCustomerIdentity(
@@ -195,6 +265,7 @@ module.exports = {
   hasActiveStripeSubscription,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
+  attachPlanMeteredPrices,
   updateStripeCustomerIdentity,
   getStripeCustomer,
   getStripeCustomerId,
