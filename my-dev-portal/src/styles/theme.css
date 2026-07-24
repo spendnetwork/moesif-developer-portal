@@ -1,4 +1,55 @@
-@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap");
+
+/* Open Opportunities brand typeface (self-hosted, matches openopps.com) */
+@font-face {
+  font-family: "TheFuture";
+  src: url("/fonts/the-future-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "TheFuture";
+  src: url("/fonts/the-future-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "TheFuture";
+  src: url("/fonts/the-future-medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "TheFuture";
+  src: url("/fonts/the-future-medium-italic.woff2") format("woff2");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "TheFuture";
+  src: url("/fonts/the-future-bold.woff2") format("woff2");
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "TheFuture";
+  src: url("/fonts/the-future-bold-italic.woff2") format("woff2");
+  font-weight: 600 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "TheFuture";
+  src: url("/fonts/the-future-light-italic.woff2") format("woff2");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
 
 /* Theme */
 
@@ -107,9 +158,9 @@
     var(--emerald) -2.47%,
     var(--yellow) 102.78%
   );
-  --font-primary: Inter, system-ui, -apple-system, BlinkMacSystemFont,
+  --font-primary: "TheFuture", system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue",
     sans-serif;
-  --font-secondary: "Space Grotesk", sans-serif;
+  --font-secondary: "TheFuture", system-ui, sans-serif;
   --font-mono: "Fira Code", monospace;
 }
