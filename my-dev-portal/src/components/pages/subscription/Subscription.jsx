@@ -31,12 +31,24 @@ function Subscription(props) {
     return <PageLoader />;
   }
 
+  const openStripeManagement = import.meta.env.REACT_APP_STRIPE_MANAGEMENT_URL
+    ? () => {
+        window.open(
+          `${import.meta.env.REACT_APP_STRIPE_MANAGEMENT_URL}?prefilled_email=${encodeURIComponent(
+            user?.email || ""
+          )}`,
+          "_blank",
+          "noreferrer"
+        );
+      }
+    : undefined;
+
   return (
     <PageLayout>
       <div className="page-heading">
         <p className="page-eyebrow">Billing</p>
         <h1>Subscriptions</h1>
-        <p>Review your active plans and billing periods.</p>
+        <p>Review your active plans, rates, and billing periods.</p>
       </div>
       {subscriptionsError && (
         <div className="alert-error" role="alert">
@@ -62,9 +74,14 @@ function Subscription(props) {
         </div>
       )}
       {subscriptions?.length > 0 && (
-        <div className="plans--container">
+        <div className="subscription-list">
           {subscriptions.map((sub) => (
-            <SubDisplay sub={sub} key={sub.subscription_id} plans={plans} />
+            <SubDisplay
+              sub={sub}
+              key={sub.subscription_id}
+              plans={plans}
+              onManage={openStripeManagement}
+            />
           ))}
         </div>
       )}

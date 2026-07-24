@@ -25,3 +25,122 @@
 .sub-table > tr:nth-child(even) {
   background-color: #f9f9f9;
 }
+
+/* Subscription summary cards (Billing > Subscriptions) */
+.subscription-list {
+  display: grid;
+  gap: 1.6rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 900px) {
+  .subscription-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.subscription-card {
+  display: flex;
+  flex-direction: column;
+  padding: 2.4rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.subscription-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.2rem;
+  margin-bottom: 1.6rem;
+}
+
+.subscription-card__header h2 {
+  font-size: 1.9rem;
+  font-weight: 700;
+}
+
+.subscription-card__period {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--muted-text-color);
+  font-size: 1.3rem;
+}
+
+.subscription-status {
+  flex: 0 0 auto;
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius-pill);
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--muted-text-color);
+  background: var(--surface-muted);
+}
+
+.subscription-status--active,
+.subscription-status--trialing {
+  color: #17633c;
+  background: #e3f5e9;
+}
+
+.subscription-status--past_due,
+.subscription-status--unpaid,
+.subscription-status--incomplete {
+  color: #725300;
+  background: #fff1b8;
+}
+
+.subscription-status--canceled,
+.subscription-status--cancelled {
+  color: #8b2c21;
+  background: #fde8e5;
+}
+
+.subscription-card__lines {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0 0 1.6rem;
+  padding: 0;
+  list-style: none;
+}
+
+.subscription-card__lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 1.4rem;
+}
+
+.subscription-card__lines li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.subscription-card__metric {
+  color: var(--body-text-color);
+  font-weight: 500;
+}
+
+.subscription-card__rate {
+  color: var(--muted-text-color);
+  white-space: nowrap;
+}
+
+.subscription-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  margin-top: auto;
+  padding-top: 1.6rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.subscription-card__hint {
+  color: var(--muted-text-color);
+  font-size: 1.3rem;
+}
