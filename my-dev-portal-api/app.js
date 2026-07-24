@@ -44,6 +44,13 @@ const app = express();
 app.use(express.static(path.join(__dirname)));
 const port = 3030;
 
+// Keep the load-balancer health check independent of Moesif, Stripe, Auth0,
+// and the Spend Network API. Dependency failures should not make ECS replace
+// an otherwise healthy portal API task.
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 const moesifManagementToken = process.env.MOESIF_MANAGEMENT_TOKEN;
 const templateWorkspaceIdLiveEvent =
   process.env.MOESIF_TEMPLATE_WORKSPACE_ID_LIVE_EVENT_LOG;
