@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { LineLoader } from "../../line-loader";
 import NoPriceFound from "./NoPriceFound";
@@ -6,7 +6,6 @@ import PriceTile from "./PriceTile";
 import PlanTile from "./PlanTile";
 import { useAuth0 } from "@auth0/auth0-react";
 import { SignupButton } from "../../buttons/signup-button";
-import { examplePlansFromStripe } from "./examplePlansFromStripe";
 import usePlans from "../../../hooks/usePlans";
 
 const PLAN_KEY_ORDER = ["basic", "growth", "enterprise"];
@@ -21,7 +20,6 @@ function getCatalogPlanKey(plan) {
 function MoesifPlans(props) {
   const { isAuthenticated } = useAuth0();
 
-  const [showExample, setShowExample] = useState();
   const { plans, plansLoading: loading, plansError: error } = usePlans();
 
   const getActionButton = (price, plan, options) => {
@@ -127,32 +125,6 @@ function MoesifPlans(props) {
               )
               .flat()}
       </div>
-      <div>
-        <button
-          className="button"
-          onClick={() => {
-            setShowExample(!showExample);
-          }}
-        >
-          {showExample ? "Hide " : "Show "}example plans
-        </button>
-      </div>
-      {showExample && (
-        <div className="plans--container">
-          {examplePlansFromStripe.hits
-            .map((plan) =>
-              plan?.prices?.map((price) => (
-                <PriceTile
-                  key={`${plan.id}${price.id}`}
-                  plan={plan}
-                  price={price}
-                  actionButton={getActionButton(price, plan, { disable: true })}
-                />
-              ))
-            )
-            .flat()}
-        </div>
-      )}
     </div>
   );
 }
