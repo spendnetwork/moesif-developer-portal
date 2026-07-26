@@ -1,34 +1,19 @@
-import { useState, useEffect } from "react";
+import useSWR from "swr";
 
-// This is set up as a hook so that
-// in case other pages need subscription info
-// it can also be reused.
+import { publicFetcher } from "../lib/portal-api";
+
+// Plans come from the Moesif catalogue via the portal backend. Cached with SWR
+// so navigating back to the plans page is instant (stale-while-revalidate).
 export default function usePlans() {
-  const [error, setError] = useState();
-  const [loading, setLoading] = useState(true);
-  const [plans, setPlans] = useState(null);
+  const { data, error, isLoading } = useSWR("/plans", publicFetcher);
 
-  useEffect(() => {
-    fetch(`${import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER}/plans`)
-      .then((res) => res.json())
-      .then((result) => {
-        const loadedPlans = result?.hits || [];
-        const activePlans = loadedPlans.filter(
-          (item) => item.status === "active"
-        );
-        setPlans(activePlans);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.log("failed to load plans", err);
-        setLoading(false);
-        setError(err);
-      });
-  }, []);
+  const plans = data
+    ? (data.hits || []).filter((item) => item.status === "active")
+    : null;
 
   return {
     plansError: error,
-    plansLoading: loading,
-    plans
+    plansLoading: isLoading,
+    plans,
   };
 }

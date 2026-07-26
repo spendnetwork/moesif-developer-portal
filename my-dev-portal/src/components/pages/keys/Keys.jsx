@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
 import SVG from "react-inlinesvg";
 import copy from "copy-to-clipboard";
+import useSWR from "swr";
 
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
@@ -12,6 +13,7 @@ import copyIcon from "../../../images/icons/copy.svg";
 import successIcon from "../../../images/icons/success.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import useSubscriptions from "../../../hooks/useSubscriptions";
+import { apiRequest, authedFetcher } from "../../../lib/portal-api";
 
 const modalStyles = {
   content: {
@@ -44,27 +46,6 @@ function formatRelativeDate(value) {
   return `${days} days ago`;
 }
 
-async function apiRequest(path, idToken, options = {}) {
-  const response = await fetch(
-    `${import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER}${path}`,
-    {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${idToken}`,
-        ...options.headers,
-      },
-    }
-  );
-  const body = response.status === 204 ? null : await response.json();
-  if (!response.ok) {
-    const error = new Error(body?.message || "API key request failed");
-    error.status = response.status;
-    throw error;
-  }
-  return body;
-}
-
 function RotationNotice({ apiKey }) {
   if (apiKey.rotation_status === "current") return null;
   const recommended = apiKey.rotation_status === "recommended";
@@ -87,9 +68,6 @@ function Keys() {
   const navigate = useNavigate();
   const { subscriptions, finishedLoading: subscriptionsLoaded } =
     useSubscriptions({ user, idToken });
-  const [keys, setKeys] = useState([]);
-  const [maxKeys, setMaxKeys] = useState(2);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null);
@@ -98,32 +76,26 @@ function Keys() {
   const [isCopied, setIsCopied] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [notProvisioned, setNotProvisioned] = useState(false);
 
   Modal.setAppElement("#root");
 
-  const loadKeys = useCallback(async () => {
-    if (!idToken) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await apiRequest("/api-keys", idToken);
-      setKeys(result.keys || []);
-      setMaxKeys(result.max_active_keys || 2);
-    } catch (requestError) {
-      if (requestError.status === 404) {
-        setNotProvisioned(true);
-      } else {
-        setError(requestError.message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [idToken]);
+  const keysKey = idToken ? ["/api-keys", idToken] : null;
+  const {
+    data: keysData,
+    error: keysError,
+    isLoading: keysLoading,
+    mutate: mutateKeys,
+  } = useSWR(keysKey, authedFetcher);
 
-  useEffect(() => {
-    loadKeys();
-  }, [loadKeys]);
+  const keys = keysData?.keys || [];
+  const maxKeys = keysData?.max_active_keys || 2;
+  const notProvisioned = keysError?.status === 404;
+  const listError =
+    keysError && keysError.status !== 404 ? keysError.message : "";
+
+  async function loadKeys() {
+    await mutateKeys();
+  }
 
   function openCreateModal() {
     setName("");
@@ -215,7 +187,8 @@ function Keys() {
   const waitingForSubscription =
     Boolean(idToken && user?.email) && !subscriptionsLoaded;
 
-  if (authLoading || loading || waitingForSubscription) {
+  const keysReady = !keysKey || keysData !== undefined || keysError;
+  if (authLoading || !keysReady || waitingForSubscription) {
     return (
       <PageLayout>
         <PageLoader />
@@ -286,7 +259,9 @@ function Keys() {
           {atLimit && <span>Revoke a key before creating another.</span>}
         </div>
 
-        {error && <div className="keys-error" role="alert">{error}</div>}
+        {(error || listError) && (
+          <div className="keys-error" role="alert">{error || listError}</div>
+        )}
 
         {keys.length === 0 ? (
           <div className="keys-empty">

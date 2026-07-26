@@ -1,6 +1,7 @@
 import { PageLayout } from "../../page-layout";
 import { Navigate, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import useSWR from "swr";
 import { PageLoader } from "../../page-loader";
 import MoesifEmbeddedTemplate from "../../moesif/moesif-embedded-template";
 import NoticeBox from "../../notice-box";
@@ -17,29 +18,24 @@ const Dashboard = (props) => {
   const { user, isLoading, idToken, userEmail } = useAuthCombined();
   const navigate = useNavigate();
 
-  const [error, setError] = useState();
-  const [embedTemplateUrls, setEmbedTemplateUrls] = useState(null);
-
   const email = user?.email || userEmail;
+  const authUserId = user?.user_id || user?.id || user?.sub;
 
   useEffect(() => {
-    window?.moesif?.track('viewed-dashboard');
+    window?.moesif?.track("viewed-dashboard");
+  }, []);
 
-    if (idToken) {
-      fetchEmbedChartUrls({
-        authUserId: user?.user_id || user?.id || user?.sub,
-        idToken,
-        email,
-      })
-        .then((embedInfos) => {
-          setEmbedTemplateUrls(embedInfos);
-        })
-        .catch((err) => {
-          console.error("failed to load embed dash", err);
-          setError(err);
-        });
-    }
-  }, [idToken, user, email]);
+  // Embedded chart URLs are short-lived signed tokens, so cache them for the
+  // session and avoid refetching on window focus.
+  const embedKey = idToken && email ? ["embed-charts", authUserId, email, idToken] : null;
+  const {
+    data: embedTemplateUrls,
+    error,
+  } = useSWR(
+    embedKey,
+    () => fetchEmbedChartUrls({ authUserId, idToken, email }),
+    { revalidateOnFocus: false, dedupingInterval: 60000 }
+  );
 
   if (isLoading || !idToken || (!error && !embedTemplateUrls)) {
     return (

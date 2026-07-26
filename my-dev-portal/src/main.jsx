@@ -2,13 +2,22 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import moesifBrowser from "moesif-browser-js";
 import './main.css'
+import { SWRConfig } from 'swr'
 import App from './App.jsx'
 import "https://js.stripe.com/v3/pricing-table.js";
 import "./styles/styles.scss";
 
 createRoot(document.getElementById('root')).render(
   // <StrictMode>
-    <App />
+    <SWRConfig
+      value={{
+        keepPreviousData: true,
+        revalidateOnFocus: true,
+        dedupingInterval: 5000,
+      }}
+    >
+      <App />
+    </SWRConfig>
   // </StrictMode>,
 )
 
