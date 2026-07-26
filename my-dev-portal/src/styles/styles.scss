@@ -83,12 +83,74 @@ $nav-bar-color: #ffffff;
   }
 }
 
-// Iframe styling - framed as cards to blend with the rest of the portal
-.dashboards-container iframe {
+// Usage page - each embedded Moesif chart in a titled card
+.usage-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 2.4rem;
   width: 100%;
-  aspect-ratio: 16 / 9; // Maintain 16:9 aspect ratio
+}
+
+.usage-chart-card {
+  overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--shadow-card);
+}
+
+.usage-chart-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding: 2rem 2.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.usage-chart-card__header .page-eyebrow {
+  margin: 0 0 0.6rem;
+}
+
+.usage-chart-card__header h2 {
+  font-size: 1.9rem;
+  font-weight: 700;
+}
+
+.usage-chart-card__desc {
+  margin: 0.4rem 0 0;
+  max-width: 60rem;
+  color: var(--muted-text-color);
+  font-size: 1.4rem;
+}
+
+.usage-chart-card__range {
+  flex: 0 0 auto;
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius-pill);
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+
+.usage-chart-card__frame {
+  padding: 1.6rem;
+}
+
+.usage-chart-card__frame iframe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+@media (max-width: 640px) {
+  .usage-chart-card__header {
+    flex-direction: column;
+    padding: 1.6rem;
+  }
 }
