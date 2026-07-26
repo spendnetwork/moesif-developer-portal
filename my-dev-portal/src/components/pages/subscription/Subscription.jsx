@@ -28,7 +28,11 @@ function Subscription(props) {
     plansLoading ||
     !idToken
   ) {
-    return <PageLoader />;
+    return (
+      <PageLayout>
+        <PageLoader />
+      </PageLayout>
+    );
   }
 
   const openStripeManagement = import.meta.env.REACT_APP_STRIPE_MANAGEMENT_URL

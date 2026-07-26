@@ -20,7 +20,11 @@ function Auth0Settings(props) {
     user = auth0User;
 
   if (isLoading) {
-    return <PageLoader />;
+    return (
+      <PageLayout>
+        <PageLoader />
+      </PageLayout>
+    );
   }
 
   return (

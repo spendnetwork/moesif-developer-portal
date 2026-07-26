@@ -42,7 +42,11 @@ const Dashboard = (props) => {
   }, [idToken, user, email]);
 
   if (isLoading || !idToken || (!error && !embedTemplateUrls)) {
-    return <PageLoader />;
+    return (
+      <PageLayout>
+        <PageLoader />
+      </PageLayout>
+    );
   }
 
   if (user?.sub && !localStorage.getItem(welcomeStorageKey(user.sub))) {

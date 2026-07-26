@@ -13,7 +13,11 @@ function OktaSettings(props) {
     user = authState?.idToken?.claims;
 
   if (isLoading) {
-    return <PageLoader />;
+    return (
+      <PageLayout>
+        <PageLoader />
+      </PageLayout>
+    );
   }
 
   return (

@@ -25,7 +25,11 @@ function Checkout(props) {
   }, [urlPriceIdToPurchase, urlPlanIdToPurchase, urlQuantity]);
 
   if (isLoading || !idToken) {
-    return <PageLoader />;
+    return (
+      <PageLayout>
+        <PageLoader />
+      </PageLayout>
+    );
   }
 
   if (!urlPriceIdToPurchase && !urlPlanIdToPurchase) {

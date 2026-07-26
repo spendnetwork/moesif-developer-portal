@@ -215,7 +215,13 @@ function Keys() {
   const waitingForSubscription =
     Boolean(idToken && user?.email) && !subscriptionsLoaded;
 
-  if (authLoading || loading || waitingForSubscription) return <PageLoader />;
+  if (authLoading || loading || waitingForSubscription) {
+    return (
+      <PageLayout>
+        <PageLoader />
+      </PageLayout>
+    );
+  }
 
   const hasActiveSubscription =
     Array.isArray(subscriptions) &&
