@@ -94,21 +94,25 @@
   --heading-color: #23383a;
   --body-text-color: #23302c;
   --muted-text-color: #647873;
-  --link-text-color: #1b6b4f;
-  --link-hover-color: #124a37;
+  --link-text-color: #034737;
+  --link-hover-color: #022e24;
   --surface: #ffffff;
   --surface-muted: #eef4f0;
   --border-subtle: #dde5e0;
-  --accent: #1b6b4f;
-  --accent-dark: #124a37;
+  --accent: #034737;
+  --accent-dark: #022e24;
   --accent-soft: #e3f1ea;
+  /* Bright mint used for button highlight + focus, matching openopps.com */
+  --highlight: #a9ff9b;
+  --highlight-dark: #22281e;
   --warning-soft: #fff3d4;
 
   /* Shared shape tokens for consistent, modern rounding */
   --radius-control: 8px;
   --radius-card: 12px;
   --radius-pill: 999px;
-  --focus-ring: 0 0 0 3px rgba(27, 107, 79, 0.18);
+  --focus-ring: 0 0 0 3px rgba(3, 71, 55, 0.2);
+  --focus-ring-highlight: 0 0 0 4px rgba(169, 255, 155, 0.6);
   --shadow-card: 0 1px 2px rgba(23, 34, 31, 0.04), 0 8px 24px rgba(23, 34, 31, 0.05);
 
   --yellow-mandarine-gradient: linear-gradient(
