@@ -38,12 +38,16 @@ function registerPurchaseStripe({
     )
       .then(async (res) => {
         if (!res.ok) {
-          const errorBody = await res.json();
-          throw new Error(
-            `Failed provision: ${res.status}, body: ${JSON.stringify(
-              errorBody
-            )}`
-          );
+          const errorBody = await res.json().catch(() => ({}));
+          const message =
+            errorBody.code === "email_identity_conflict"
+              ? errorBody.message
+              : `Failed provision: ${res.status}, body: ${JSON.stringify(
+                  errorBody
+                )}`;
+          const provisionErr = new Error(message);
+          provisionErr.code = errorBody.code;
+          throw provisionErr;
         }
         return res.json();
       })
@@ -196,20 +200,26 @@ function Return(props) {
       <h1>Subscribe Status</h1>
       <NoticeBox
         iconSrc={noPriceIcon}
-        title={provisionError ? "Provision Service Failed" : "Checkout Failed"}
+        title={
+          provisionError?.code === "email_identity_conflict"
+            ? "Use your original sign-in"
+            : provisionError
+              ? "Provision Service Failed"
+              : "Checkout Failed"
+        }
         description={
-          provisionError
-            ? "We could not finish setting up your access. Please try again shortly."
-            : "Seems you didn't checkout successfully?"
+          provisionError?.code === "email_identity_conflict"
+            ? provisionError.message
+            : provisionError
+              ? "We could not finish setting up your access. Please try again shortly."
+              : "Seems you didn't checkout successfully?"
         }
         actions={
-          <>
-            <Link to="/plans" rel="noreferrer noopener">
-              <button className="button button--outline-secondary">
-                Go to Plans
-              </button>
-            </Link>
-          </>
+          <Link to="/plans" rel="noreferrer noopener">
+            <button className="button button--outline-secondary">
+              Go to Plans
+            </button>
+          </Link>
         }
       />
     </PageLayout>

@@ -84,11 +84,25 @@ async function provisionSnApiCustomer({
   );
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
+    const error = new Error(
       `SN API provisioning failed (${response.status}): ${JSON.stringify(body)}`
     );
+    error.status = response.status;
+    error.detail = body?.detail;
+    throw error;
   }
   return body;
+}
+
+async function checkSnApiEmailAvailability(authUser) {
+  if (!authUser?.sub || !authUser?.email) {
+    throw new Error("Authenticated Auth0 user id and email are required");
+  }
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/email-availability?email=${encodeURIComponent(
+      authUser.email
+    )}&auth0_user_id=${encodeURIComponent(authUser.sub)}`
+  );
 }
 
 async function snApiKeyRequest(path, { method = "GET", body } = {}) {
@@ -165,6 +179,7 @@ function rotateSnApiKey(authUser, apiKeyId) {
 
 module.exports = {
   provisionSnApiCustomer,
+  checkSnApiEmailAvailability,
   getSnApiPortalContext,
   listSnApiKeys,
   createSnApiKey,

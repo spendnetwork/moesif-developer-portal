@@ -251,6 +251,11 @@ async function updateStripeCustomerIdentity(
   return customer;
 }
 
+async function cancelStripeSubscription(subscriptionId) {
+  if (!subscriptionId) return null;
+  return stripe.subscriptions.cancel(subscriptionId);
+}
+
 async function hasActiveStripeSubscription(email, authUser) {
   try {
     await getActiveStripeSubscription(email, authUser?.sub);
@@ -262,6 +267,7 @@ async function hasActiveStripeSubscription(email, authUser) {
 
 module.exports = {
   verifyStripeSession,
+  cancelStripeSubscription,
   hasActiveStripeSubscription,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,

@@ -10,6 +10,7 @@ const { Client } = require("@okta/okta-sdk-nodejs");
 const {
   verifyStripeSession,
   hasActiveStripeSubscription,
+  cancelStripeSubscription,
   getStripeCustomer,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
@@ -18,6 +19,7 @@ const {
 } = require("./services/stripeApis");
 const {
   provisionSnApiCustomer,
+  checkSnApiEmailAvailability,
   getSnApiPortalContext,
   listSnApiKeys,
   createSnApiKey,
@@ -176,6 +178,25 @@ app.post(
       return res.status(400).json({ message: "plan_id or price_id is required" });
     }
 
+    // Block checkout before payment if the email already belongs to a
+    // different Auth0 identity, so the customer never pays into a conflict.
+    try {
+      const availability = await checkSnApiEmailAvailability(req.user);
+      if (availability && availability.conflict) {
+        return res.status(409).json({
+          code: "email_identity_conflict",
+          message:
+            "This email is already registered with a different sign-in method. Please log in using your original method.",
+        });
+      }
+    } catch (availabilityError) {
+      // A transient check failure should not block a legitimate checkout;
+      // provisioning still guards the conflict as a backstop.
+      if (availabilityError.status && availabilityError.status !== 404) {
+        console.error("Email availability check failed:", availabilityError);
+      }
+    }
+
     try {
       const session = planId
         ? await createStripePlanCheckoutSession(email, planId, req?.user)
@@ -332,10 +353,12 @@ app.post(
   portalAuthMiddleware,
   function (req, res) {
     const checkout_session_id = req.params.checkout_session_id;
+    let orphanSubscriptionId = null;
 
     verifyStripeSession(checkout_session_id)
       .then(async (result) => {
         const stripeCheckOutSessionInfo = result;
+        orphanSubscriptionId = result?.subscription?.id || null;
         console.log("in stripe register");
         if (result.status !== "complete") {
           return res.status(409).json({ message: "Stripe checkout is not complete" });
@@ -388,8 +411,28 @@ app.post(
         console.log(JSON.stringify(stripeCheckOutSessionInfo));
         res.status(201).json(stripeCheckOutSessionInfo);
       })
-      .catch((err) => {
+      .catch(async (err) => {
         console.error("Error registering user", err);
+        const conflict =
+          err.status === 409 &&
+          typeof err.detail === "string" &&
+          err.detail.toLowerCase().includes("already linked");
+        if (conflict) {
+          // Cannot provision under this identity; cancel the just-created
+          // subscription so there is no orphaned paid plan.
+          if (orphanSubscriptionId) {
+            try {
+              await cancelStripeSubscription(orphanSubscriptionId);
+            } catch (cancelError) {
+              console.error("Failed to cancel orphaned subscription", cancelError);
+            }
+          }
+          return res.status(409).json({
+            code: "email_identity_conflict",
+            message:
+              "This email is already registered with a different sign-in method. Please log in using your original method.",
+          });
+        }
         res.status(500).json({
           message: "Failed to provision user. " + err.toString(),
         });
