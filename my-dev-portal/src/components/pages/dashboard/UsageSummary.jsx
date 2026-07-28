@@ -49,7 +49,7 @@ function UsageSummary({ idToken }) {
     <section className="usage-summary">
       <div className="usage-summary__cards">
         <div className="usage-summary__metric">
-          <span className="usage-summary__label">This billing period</span>
+          <span className="usage-summary__label">Usage this period</span>
           <span className="usage-summary__value">
             {formatMoney(accrued, currency)}
           </span>

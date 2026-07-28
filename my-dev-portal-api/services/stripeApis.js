@@ -416,16 +416,25 @@ async function getUsageSummary(email, authUser) {
       };
     });
 
+  // Gross usage accrued so far this period (same total as the breakdown).
+  const grossUsage = lines.reduce(
+    (sum, l) => sum + (l.amount > 0 ? l.amount : 0),
+    0
+  );
+
   const granted = (grants.data || []).reduce(
     (sum, g) => sum + (g.amount?.monetary?.value || 0),
     0
   );
   let credit = null;
   if (granted > 0) {
-    const remaining = (balance?.balances || []).reduce(
+    // The ledger balance only decrements when the invoice finalises at period
+    // end, so subtract this period's accrued usage to show the drawdown live.
+    const ledgerAvailable = (balance?.balances || []).reduce(
       (sum, b) => sum + (b.available_balance?.monetary?.value || 0),
       0
     );
+    const remaining = Math.max(0, ledgerAvailable - grossUsage);
     credit = { granted, remaining, used: Math.max(0, granted - remaining) };
   }
 
@@ -445,7 +454,7 @@ async function getUsageSummary(email, authUser) {
         subscription.current_period_end ??
         null,
     },
-    accrued: preview?.amount_due ?? 0,
+    accrued: grossUsage,
     lines,
     credit,
   };
