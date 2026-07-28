@@ -292,36 +292,57 @@ const CREDIT_GRANTS = {
 
 // Create the tier's credit grant once. Idempotent: skips if a grant with the
 // same marker already exists for the customer.
-async function ensureCreditGrant(customerId, planKey, { currency = "gbp", marker } = {}) {
-  const config = CREDIT_GRANTS[String(planKey || "").toLowerCase()];
-  if (!customerId || !config) return null;
+// Low-level: create a credit grant once, idempotent by marker.
+async function createCreditGrantOnce(customerId, opts) {
+  const {
+    value,
+    currency = "gbp",
+    category = "paid",
+    name,
+    marker,
+    planKey,
+    expiresAt = null,
+  } = opts;
+  if (!customerId || !value) return null;
 
-  const grantMarker = marker || `oo_${planKey}_grant`;
   const existing = await stripe.billing.creditGrants.list({
     customer: customerId,
     limit: 100,
   });
-  if (
-    existing.data.some((g) => g.metadata && g.metadata.oo_marker === grantMarker)
-  ) {
+  if (existing.data.some((g) => g.metadata && g.metadata.oo_marker === marker)) {
     return null;
   }
 
   const params = {
-    name: config.name,
+    name,
     customer: customerId,
     amount: {
       type: "monetary",
-      monetary: { currency: currency.toLowerCase(), value: config.value },
+      monetary: { currency: currency.toLowerCase(), value },
     },
     applicability_config: { scope: { price_type: "metered" } },
-    category: config.category,
-    metadata: { oo_marker: grantMarker, plan_key: String(planKey) },
+    category,
+    metadata: { oo_marker: marker, plan_key: String(planKey || "") },
   };
-  if (config.expiresInSeconds) {
-    params.expires_at = Math.floor(Date.now() / 1000) + config.expiresInSeconds;
-  }
+  if (expiresAt) params.expires_at = expiresAt;
   return stripe.billing.creditGrants.create(params);
+}
+
+// Basic development credit at checkout (fixed amount from config).
+async function ensureCreditGrant(customerId, planKey, { currency = "gbp", marker } = {}) {
+  const config = CREDIT_GRANTS[String(planKey || "").toLowerCase()];
+  if (!config) return null;
+  return createCreditGrantOnce(customerId, {
+    value: config.value,
+    currency,
+    category: config.category,
+    name: config.name,
+    marker: marker || `oo_${planKey}_grant`,
+    planKey,
+    expiresAt: config.expiresInSeconds
+      ? Math.floor(Date.now() / 1000) + config.expiresInSeconds
+      : null,
+  });
 }
 
 // Aggregate current-period spend + credit balance for the usage dashboard.
@@ -436,12 +457,33 @@ async function grantCommitmentFromInvoice(invoice) {
     } catch (err) {
       continue;
     }
-    if (price?.metadata?.billing_category === "commitment") {
-      await ensureCreditGrant(customerId, price.metadata.plan_key, {
-        currency: invoice.currency || "gbp",
-        marker: `oo_commitment_${invoice.id}`,
-      });
+
+    const md = price?.metadata || {};
+    const isCommitment =
+      md.billing_model === "prepaid_credit" ||
+      md.billing_category === "commitment" ||
+      md.commitment_amount != null;
+    const amountMajor = Number(md.commitment_amount);
+    if (!isCommitment || !amountMajor || Number.isNaN(amountMajor)) continue;
+
+    // commitment_amount is in major units (e.g. 5000 = £5,000).
+    const period = String(md.commitment_period || "").toLowerCase();
+    let expiresAt = null;
+    if (period === "annual" || period === "yearly") {
+      expiresAt = Math.floor(Date.now() / 1000) + YEAR_SECONDS;
+    } else if (period === "monthly") {
+      expiresAt = Math.floor(Date.now() / 1000) + 31 * 24 * 60 * 60;
     }
+
+    await createCreditGrantOnce(customerId, {
+      value: Math.round(amountMajor * 100),
+      currency: md.commitment_currency || invoice.currency || "gbp",
+      category: "paid",
+      name: `${md.plan_key || "Plan"} prepaid commitment`,
+      marker: `oo_commitment_${invoice.id}`,
+      planKey: md.plan_key,
+      expiresAt,
+    });
   }
 }
 
