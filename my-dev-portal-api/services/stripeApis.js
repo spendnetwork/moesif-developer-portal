@@ -292,16 +292,18 @@ const CREDIT_GRANTS = {
 
 // Create the tier's credit grant once. Idempotent: skips if a grant with the
 // same marker already exists for the customer.
-async function ensureCreditGrant(customerId, planKey, currency = "gbp") {
+async function ensureCreditGrant(customerId, planKey, { currency = "gbp", marker } = {}) {
   const config = CREDIT_GRANTS[String(planKey || "").toLowerCase()];
   if (!customerId || !config) return null;
 
-  const marker = `oo_${planKey}_grant`;
+  const grantMarker = marker || `oo_${planKey}_grant`;
   const existing = await stripe.billing.creditGrants.list({
     customer: customerId,
     limit: 100,
   });
-  if (existing.data.some((g) => g.metadata && g.metadata.oo_marker === marker)) {
+  if (
+    existing.data.some((g) => g.metadata && g.metadata.oo_marker === grantMarker)
+  ) {
     return null;
   }
 
@@ -314,7 +316,7 @@ async function ensureCreditGrant(customerId, planKey, currency = "gbp") {
     },
     applicability_config: { scope: { price_type: "metered" } },
     category: config.category,
-    metadata: { oo_marker: marker, plan_key: String(planKey) },
+    metadata: { oo_marker: grantMarker, plan_key: String(planKey) },
   };
   if (config.expiresInSeconds) {
     params.expires_at = Math.floor(Date.now() / 1000) + config.expiresInSeconds;
@@ -412,8 +414,41 @@ async function getUsageSummary(email, authUser) {
   };
 }
 
+function constructStripeEvent(rawBody, signature, secret) {
+  return stripe.webhooks.constructEvent(rawBody, signature, secret);
+}
+
+// When a commitment invoice is paid, grant (or annually re-grant) that tier's
+// prepaid credit. Idempotent per invoice via the marker.
+async function grantCommitmentFromInvoice(invoice) {
+  const customerId =
+    typeof invoice.customer === "string"
+      ? invoice.customer
+      : invoice.customer?.id;
+  if (!customerId) return;
+
+  for (const line of invoice.lines?.data || []) {
+    const priceId = line.price?.id || line.pricing?.price_details?.price;
+    if (!priceId) continue;
+    let price;
+    try {
+      price = await stripe.prices.retrieve(priceId);
+    } catch (err) {
+      continue;
+    }
+    if (price?.metadata?.billing_category === "commitment") {
+      await ensureCreditGrant(customerId, price.metadata.plan_key, {
+        currency: invoice.currency || "gbp",
+        marker: `oo_commitment_${invoice.id}`,
+      });
+    }
+  }
+}
+
 module.exports = {
   verifyStripeSession,
+  constructStripeEvent,
+  grantCommitmentFromInvoice,
   ensureCreditGrant,
   getUsageSummary,
   cancelStripeSubscription,

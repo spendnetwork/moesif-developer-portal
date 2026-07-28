@@ -13,6 +13,8 @@ const {
   cancelStripeSubscription,
   ensureCreditGrant,
   getUsageSummary,
+  constructStripeEvent,
+  grantCommitmentFromInvoice,
   getStripeCustomer,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
@@ -225,6 +227,42 @@ app.post(
 let plansCache = { data: null, at: 0 };
 const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
 
+// Stripe webhook (separate from the SN API subscription-status webhook):
+// grants/re-grants prepaid commitment credit when a commitment invoice is paid.
+app.post(
+  "/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const secret = process.env.PORTAL_STRIPE_WEBHOOK_SECRET;
+    if (!secret) {
+      return res.status(503).json({ message: "Webhook not configured" });
+    }
+    let event;
+    try {
+      event = constructStripeEvent(
+        req.body,
+        req.headers["stripe-signature"],
+        secret
+      );
+    } catch (err) {
+      console.error("Stripe webhook signature verification failed", err.message);
+      return res.status(400).json({ message: "Invalid signature" });
+    }
+
+    if (
+      event.type === "invoice.paid" ||
+      event.type === "invoice.payment_succeeded"
+    ) {
+      try {
+        await grantCommitmentFromInvoice(event.data.object);
+      } catch (grantError) {
+        console.error("Commitment grant from invoice failed", grantError);
+      }
+    }
+    return res.status(200).json({ received: true });
+  }
+);
+
 app.get("/plans", jsonParser, async (req, res) => {
   if (plansCache.data && Date.now() - plansCache.at < PLANS_CACHE_TTL_MS) {
     return res.status(200).json(plansCache.data);
@@ -421,15 +459,17 @@ app.post(
             auth0UserId: req.user.sub,
             stripeCustomerId: provisionedCustomer.stripe_customer_id,
           });
-          // Grant the tier's prepaid commitment / dev credit (idempotent).
-          try {
-            await ensureCreditGrant(
-              result.customer.id,
-              provisionedCustomer.plan_key,
-              result.currency || "gbp"
-            );
-          } catch (grantError) {
-            console.error("Failed to create credit grant", grantError);
+          // Grant the Basic development credit at checkout (a card is now on
+          // file). Growth/Enterprise commitments are granted by the Stripe
+          // invoice.paid webhook when the commitment invoice is paid.
+          if (String(provisionedCustomer.plan_key).toLowerCase() === "basic") {
+            try {
+              await ensureCreditGrant(result.customer.id, "basic", {
+                currency: result.currency || "gbp",
+              });
+            } catch (grantError) {
+              console.error("Failed to create dev credit grant", grantError);
+            }
           }
 
           // Drop any pre-provisioning cache entry so the next request
