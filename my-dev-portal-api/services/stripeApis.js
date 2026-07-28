@@ -355,8 +355,18 @@ async function getUsageSummary(email, authUser) {
   // Map each subscription price to its human nickname (e.g. "Growth - API
   // Call") so the breakdown is readable rather than Stripe's raw description.
   const priceNames = {};
+  const commitmentPriceIds = new Set();
   for (const item of subscription.items?.data || []) {
     if (item.price?.id) priceNames[item.price.id] = item.price.nickname || null;
+    const md = item.price?.metadata || {};
+    if (
+      item.price?.id &&
+      (md.billing_model === "prepaid_credit" ||
+        md.billing_category === "commitment" ||
+        md.commitment_amount != null)
+    ) {
+      commitmentPriceIds.add(item.price.id);
+    }
   }
 
   // Run the three independent Stripe reads in parallel for speed.
@@ -388,7 +398,13 @@ async function getUsageSummary(email, authUser) {
   ).toUpperCase();
 
   const lines = (preview?.lines?.data || [])
-    .filter((line) => line.amount !== 0 || line.quantity)
+    .filter((line) => {
+      const priceId =
+        line.price?.id || line.pricing?.price_details?.price || null;
+      // Commitment charges are not usage metrics; keep them out of the breakdown.
+      if (priceId && commitmentPriceIds.has(priceId)) return false;
+      return line.amount !== 0 || line.quantity;
+    })
     .map((line) => {
       const priceId =
         line.price?.id || line.pricing?.price_details?.price || null;
