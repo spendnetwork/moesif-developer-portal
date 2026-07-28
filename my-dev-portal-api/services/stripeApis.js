@@ -311,15 +311,34 @@ async function getUsageSummary(email, authUser) {
     authUser?.sub
   );
 
-  let preview = null;
-  try {
-    preview = await stripe.invoices.createPreview({
-      customer: customer.id,
-      subscription: subscription.id,
-    });
-  } catch (previewError) {
-    console.error("Invoice preview failed:", previewError.message);
+  // Map each subscription price to its human nickname (e.g. "Growth - API
+  // Call") so the breakdown is readable rather than Stripe's raw description.
+  const priceNames = {};
+  for (const item of subscription.items?.data || []) {
+    if (item.price?.id) priceNames[item.price.id] = item.price.nickname || null;
   }
+
+  // Run the three independent Stripe reads in parallel for speed.
+  const [preview, grants, balance] = await Promise.all([
+    stripe.invoices
+      .createPreview({ customer: customer.id, subscription: subscription.id })
+      .catch((e) => {
+        console.error("Invoice preview failed:", e.message);
+        return null;
+      }),
+    stripe.billing.creditGrants
+      .list({ customer: customer.id, limit: 100 })
+      .catch(() => ({ data: [] })),
+    stripe.billing.creditBalanceSummary
+      .retrieve({
+        customer: customer.id,
+        filter: {
+          type: "applicability_scope",
+          applicability_scope: { price_type: "metered" },
+        },
+      })
+      .catch(() => null),
+  ]);
 
   const currency = (
     preview?.currency ||
@@ -329,43 +348,45 @@ async function getUsageSummary(email, authUser) {
 
   const lines = (preview?.lines?.data || [])
     .filter((line) => line.amount !== 0 || line.quantity)
-    .map((line) => ({
-      label: line.description || "Usage",
-      quantity: line.quantity ?? null,
-      amount: line.amount ?? 0,
-    }));
+    .map((line) => {
+      const priceId =
+        line.price?.id || line.pricing?.price_details?.price || null;
+      const nickname = priceId ? priceNames[priceId] : null;
+      return {
+        label: nickname || line.description || "Usage",
+        quantity: line.quantity ?? null,
+        amount: line.amount ?? 0,
+      };
+    });
 
-  const grants = await stripe.billing.creditGrants.list({
-    customer: customer.id,
-    limit: 100,
-  });
-  const granted = grants.data.reduce(
+  const granted = (grants.data || []).reduce(
     (sum, g) => sum + (g.amount?.monetary?.value || 0),
     0
   );
-
   let credit = null;
   if (granted > 0) {
-    const summary = await stripe.billing.creditBalanceSummary.retrieve({
-      customer: customer.id,
-      filter: {
-        type: "applicability_scope",
-        applicability_scope: { price_type: "metered" },
-      },
-    });
-    const remaining = (summary.balances || []).reduce(
+    const remaining = (balance?.balances || []).reduce(
       (sum, b) => sum + (b.available_balance?.monetary?.value || 0),
       0
     );
     credit = { granted, remaining, used: Math.max(0, granted - remaining) };
   }
 
+  // Billing period moved from the subscription to its items in recent Stripe
+  // API versions; read from the item with a fallback to the subscription.
+  const firstItem = subscription.items?.data?.[0];
   return {
     hasSubscription: true,
     currency,
     period: {
-      start: subscription.current_period_start,
-      end: subscription.current_period_end,
+      start:
+        firstItem?.current_period_start ??
+        subscription.current_period_start ??
+        null,
+      end:
+        firstItem?.current_period_end ??
+        subscription.current_period_end ??
+        null,
     },
     accrued: preview?.amount_due ?? 0,
     lines,

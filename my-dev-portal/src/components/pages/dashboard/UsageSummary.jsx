@@ -22,7 +22,18 @@ function formatDate(unixSeconds) {
 }
 
 function UsageSummary({ idToken }) {
-  const { usage } = useUsageSummary({ idToken });
+  const { usage, usageLoading } = useUsageSummary({ idToken });
+
+  if (usageLoading && !usage) {
+    return (
+      <section className="usage-summary" aria-hidden="true">
+        <div className="usage-summary__cards">
+          <div className="usage-summary__metric usage-summary__skeleton" />
+          <div className="usage-summary__metric usage-summary__skeleton" />
+        </div>
+      </section>
+    );
+  }
 
   if (!usage || !usage.hasSubscription) {
     return null;
