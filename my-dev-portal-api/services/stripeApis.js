@@ -428,14 +428,18 @@ async function getUsageSummary(email, authUser) {
   );
   let credit = null;
   if (granted > 0) {
-    // The ledger balance only decrements when the invoice finalises at period
-    // end, so subtract this period's accrued usage to show the drawdown live.
+    // Authoritative balance from Stripe's ledger (only decrements at invoice
+    // finalisation). We also project this period's accrued usage against it.
     const ledgerAvailable = (balance?.balances || []).reduce(
       (sum, b) => sum + (b.available_balance?.monetary?.value || 0),
       0
     );
-    const remaining = Math.max(0, ledgerAvailable - grossUsage);
-    credit = { granted, remaining, used: Math.max(0, granted - remaining) };
+    credit = {
+      granted,
+      remaining: ledgerAvailable,
+      used: Math.max(0, granted - ledgerAvailable),
+      projectedRemaining: Math.max(0, ledgerAvailable - grossUsage),
+    };
   }
 
   // Billing period moved from the subscription to its items in recent Stripe

@@ -44,6 +44,19 @@ function UsageSummary({ idToken }) {
     credit && credit.granted > 0
       ? Math.min(100, Math.round((credit.used / credit.granted) * 100))
       : 0;
+  // Includes the finalised used portion plus this period's projected drawdown.
+  const projectedPct =
+    credit && credit.granted > 0
+      ? Math.min(
+          100,
+          Math.round(
+            ((credit.granted - credit.projectedRemaining) / credit.granted) *
+              100
+          )
+        )
+      : 0;
+  const showProjection =
+    credit && credit.projectedRemaining < credit.remaining;
 
   return (
     <section className="usage-summary">
@@ -78,10 +91,20 @@ function UsageSummary({ idToken }) {
               aria-valuemax={100}
             >
               <span
+                className="usage-summary__bar-projected"
+                style={{ width: `${projectedPct}%` }}
+              />
+              <span
                 className="usage-summary__bar-fill"
                 style={{ width: `${usedPct}%` }}
               />
             </div>
+            {showProjection && (
+              <span className="usage-summary__sub usage-summary__projection">
+                Projected after this period:{" "}
+                {formatMoney(credit.projectedRemaining, currency)}
+              </span>
+            )}
           </div>
         )}
       </div>

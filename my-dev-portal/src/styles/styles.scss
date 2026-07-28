@@ -205,6 +205,7 @@ $nav-bar-color: #ffffff;
 }
 
 .usage-summary__bar {
+  position: relative;
   margin-top: 0.8rem;
   height: 0.8rem;
   border-radius: var(--radius-pill);
@@ -212,11 +213,28 @@ $nav-bar-color: #ffffff;
   overflow: hidden;
 }
 
+.usage-summary__bar-projected,
 .usage-summary__bar-fill {
-  display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
   height: 100%;
   border-radius: var(--radius-pill);
+}
+
+/* Lighter mint = projected drawdown from this period's accrued usage. */
+.usage-summary__bar-projected {
+  background: var(--highlight);
+}
+
+/* Solid = credit already finalised/consumed. */
+.usage-summary__bar-fill {
   background: var(--accent);
+}
+
+.usage-summary__projection {
+  margin-top: 0.4rem;
+  font-style: italic;
 }
 
 .usage-summary__breakdown {
