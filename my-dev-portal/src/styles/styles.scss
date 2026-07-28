@@ -154,3 +154,119 @@ $nav-bar-color: #ffffff;
     padding: 1.6rem;
   }
 }
+
+// Usage summary (spend this period + credit remaining + breakdown)
+.usage-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+  width: 100%;
+}
+
+.usage-summary__cards {
+  display: grid;
+  gap: 1.6rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 700px) {
+  .usage-summary__cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.usage-summary__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 2rem 2.4rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.usage-summary__label {
+  color: var(--muted-text-color);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.usage-summary__value {
+  color: var(--heading-color);
+  font-size: 2.8rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.usage-summary__sub {
+  color: var(--muted-text-color);
+  font-size: 1.3rem;
+}
+
+.usage-summary__bar {
+  margin-top: 0.8rem;
+  height: 0.8rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.usage-summary__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+.usage-summary__breakdown {
+  padding: 2rem 2.4rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.usage-summary__breakdown-title {
+  margin: 0 0 1.2rem;
+  color: var(--muted-text-color);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.usage-summary__breakdown ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.usage-summary__breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 1.4rem;
+}
+
+.usage-summary__breakdown li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.usage-summary__metric-name {
+  color: var(--body-text-color);
+  font-weight: 500;
+}
+
+.usage-summary__metric-usage {
+  display: flex;
+  gap: 1.2rem;
+  color: var(--muted-text-color);
+}
+
+.usage-summary__qty {
+  color: var(--muted-text-color);
+}

@@ -265,8 +265,118 @@ async function hasActiveStripeSubscription(email, authUser) {
   }
 }
 
+// Prepaid commitment / dev-credit amounts per tier, in minor units (pence).
+const CREDIT_GRANTS = {
+  basic: { value: 50000, category: "promotional", name: "Development credit" },
+  growth: { value: 500000, category: "paid", name: "Growth prepaid commitment" },
+  enterprise: {
+    value: 1200000,
+    category: "paid",
+    name: "Enterprise prepaid commitment",
+  },
+};
+
+// Create the tier's credit grant once. Idempotent: skips if a grant with the
+// same marker already exists for the customer.
+async function ensureCreditGrant(customerId, planKey, currency = "gbp") {
+  const config = CREDIT_GRANTS[String(planKey || "").toLowerCase()];
+  if (!customerId || !config) return null;
+
+  const marker = `oo_${planKey}_grant`;
+  const existing = await stripe.billing.creditGrants.list({
+    customer: customerId,
+    limit: 100,
+  });
+  if (existing.data.some((g) => g.metadata && g.metadata.oo_marker === marker)) {
+    return null;
+  }
+
+  return stripe.billing.creditGrants.create({
+    name: config.name,
+    customer: customerId,
+    amount: {
+      type: "monetary",
+      monetary: { currency: currency.toLowerCase(), value: config.value },
+    },
+    applicability_config: { scope: { price_type: "metered" } },
+    category: config.category,
+    metadata: { oo_marker: marker, plan_key: String(planKey) },
+  });
+}
+
+// Aggregate current-period spend + credit balance for the usage dashboard.
+async function getUsageSummary(email, authUser) {
+  const { customer, subscription } = await getActiveStripeSubscription(
+    email,
+    authUser?.sub
+  );
+
+  let preview = null;
+  try {
+    preview = await stripe.invoices.createPreview({
+      customer: customer.id,
+      subscription: subscription.id,
+    });
+  } catch (previewError) {
+    console.error("Invoice preview failed:", previewError.message);
+  }
+
+  const currency = (
+    preview?.currency ||
+    subscription.items?.data?.[0]?.price?.currency ||
+    "gbp"
+  ).toUpperCase();
+
+  const lines = (preview?.lines?.data || [])
+    .filter((line) => line.amount !== 0 || line.quantity)
+    .map((line) => ({
+      label: line.description || "Usage",
+      quantity: line.quantity ?? null,
+      amount: line.amount ?? 0,
+    }));
+
+  const grants = await stripe.billing.creditGrants.list({
+    customer: customer.id,
+    limit: 100,
+  });
+  const granted = grants.data.reduce(
+    (sum, g) => sum + (g.amount?.monetary?.value || 0),
+    0
+  );
+
+  let credit = null;
+  if (granted > 0) {
+    const summary = await stripe.billing.creditBalanceSummary.retrieve({
+      customer: customer.id,
+      filter: {
+        type: "applicability_scope",
+        applicability_scope: { price_type: "metered" },
+      },
+    });
+    const remaining = (summary.balances || []).reduce(
+      (sum, b) => sum + (b.available_balance?.monetary?.value || 0),
+      0
+    );
+    credit = { granted, remaining, used: Math.max(0, granted - remaining) };
+  }
+
+  return {
+    hasSubscription: true,
+    currency,
+    period: {
+      start: subscription.current_period_start,
+      end: subscription.current_period_end,
+    },
+    accrued: preview?.amount_due ?? 0,
+    lines,
+    credit,
+  };
+}
+
 module.exports = {
   verifyStripeSession,
+  ensureCreditGrant,
+  getUsageSummary,
   cancelStripeSubscription,
   hasActiveStripeSubscription,
   createStripeCheckoutSession,

@@ -10,6 +10,7 @@ import dashIcon from "../../../images/icons/bar-chart.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { welcomeStorageKey } from "../../../common/constants";
 import fetchEmbedChartUrls from "./fetchEmbedChartUrls";
+import UsageSummary from "./UsageSummary";
 
 const isNotProvisionedError = (error) =>
   error?.status === 400 || error?.status === 404;
@@ -59,6 +60,7 @@ const Dashboard = (props) => {
           usage for your Open Opportunities API access.
         </p>
       </div>
+      {!error && <UsageSummary idToken={idToken} />}
       {!error && (
         <MoesifEmbeddedTemplate embedTemplateUrls={embedTemplateUrls || []} />
       )}

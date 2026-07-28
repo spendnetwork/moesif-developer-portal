@@ -11,6 +11,8 @@ const {
   verifyStripeSession,
   hasActiveStripeSubscription,
   cancelStripeSubscription,
+  ensureCreditGrant,
+  getUsageSummary,
   getStripeCustomer,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
@@ -285,6 +287,16 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
   }
 });
 
+app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
+  try {
+    const summary = await getUsageSummary(req.user?.email, req.user);
+    return res.status(200).json(summary);
+  } catch (error) {
+    // No active subscription yet - not an error state for this widget.
+    return res.status(200).json({ hasSubscription: false });
+  }
+});
+
 app.post("/okta/register", jsonParser, async (req, res) => {
   try {
     const oktaClient = new Client({
@@ -409,6 +421,17 @@ app.post(
             auth0UserId: req.user.sub,
             stripeCustomerId: provisionedCustomer.stripe_customer_id,
           });
+          // Grant the tier's prepaid commitment / dev credit (idempotent).
+          try {
+            await ensureCreditGrant(
+              result.customer.id,
+              provisionedCustomer.plan_key,
+              result.currency || "gbp"
+            );
+          } catch (grantError) {
+            console.error("Failed to create credit grant", grantError);
+          }
+
           // Drop any pre-provisioning cache entry so the next request
           // fetches the full canonical context from the SN API.
           invalidatePortalContext(req.user.sub);
