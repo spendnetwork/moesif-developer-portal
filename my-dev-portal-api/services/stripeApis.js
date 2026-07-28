@@ -266,13 +266,27 @@ async function hasActiveStripeSubscription(email, authUser) {
 }
 
 // Prepaid commitment / dev-credit amounts per tier, in minor units (pence).
+// Commitments are annual, so their credit expires after a year and is
+// re-granted on renewal. The dev credit does not expire.
+const YEAR_SECONDS = 365 * 24 * 60 * 60;
 const CREDIT_GRANTS = {
-  basic: { value: 50000, category: "promotional", name: "Development credit" },
-  growth: { value: 500000, category: "paid", name: "Growth prepaid commitment" },
+  basic: {
+    value: 50000,
+    category: "promotional",
+    name: "Development credit",
+    expiresInSeconds: null,
+  },
+  growth: {
+    value: 500000,
+    category: "paid",
+    name: "Growth prepaid commitment",
+    expiresInSeconds: YEAR_SECONDS,
+  },
   enterprise: {
     value: 1200000,
     category: "paid",
     name: "Enterprise prepaid commitment",
+    expiresInSeconds: YEAR_SECONDS,
   },
 };
 
@@ -291,7 +305,7 @@ async function ensureCreditGrant(customerId, planKey, currency = "gbp") {
     return null;
   }
 
-  return stripe.billing.creditGrants.create({
+  const params = {
     name: config.name,
     customer: customerId,
     amount: {
@@ -301,7 +315,11 @@ async function ensureCreditGrant(customerId, planKey, currency = "gbp") {
     applicability_config: { scope: { price_type: "metered" } },
     category: config.category,
     metadata: { oo_marker: marker, plan_key: String(planKey) },
-  });
+  };
+  if (config.expiresInSeconds) {
+    params.expires_at = Math.floor(Date.now() / 1000) + config.expiresInSeconds;
+  }
+  return stripe.billing.creditGrants.create(params);
 }
 
 // Aggregate current-period spend + credit balance for the usage dashboard.
