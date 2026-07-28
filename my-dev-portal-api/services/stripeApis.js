@@ -1,6 +1,18 @@
 const StripeSDK = require("stripe");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
+// A price represents a prepaid commitment (draws down into credit) if it
+// carries the commitment metadata. Kept in one place so checkout, the webhook
+// and the usage summary all agree.
+function isCommitmentPrice(price) {
+  const md = price?.metadata || {};
+  return (
+    md.billing_model === "prepaid_credit" ||
+    md.billing_category === "commitment" ||
+    md.commitment_amount != null
+  );
+}
+
 function verifyStripeSession(checkoutSessionId) {
   return stripe.checkout.sessions.retrieve(checkoutSessionId, {
     expand: ["customer", "subscription", "line_items.data.price.product"],
@@ -140,8 +152,7 @@ async function createStripePlanCheckoutSession(email, planId, authUser) {
 
   const commitmentPrices = prices.data.filter(
     (price) =>
-      price.metadata?.billing_category === "commitment" ||
-      price.recurring?.usage_type === "licensed"
+      isCommitmentPrice(price) || price.recurring?.usage_type === "licensed"
   );
   const meteredPrices = prices.data.filter(
     (price) => price.recurring?.usage_type === "metered"
@@ -358,13 +369,7 @@ async function getUsageSummary(email, authUser) {
   const commitmentPriceIds = new Set();
   for (const item of subscription.items?.data || []) {
     if (item.price?.id) priceNames[item.price.id] = item.price.nickname || null;
-    const md = item.price?.metadata || {};
-    if (
-      item.price?.id &&
-      (md.billing_model === "prepaid_credit" ||
-        md.billing_category === "commitment" ||
-        md.commitment_amount != null)
-    ) {
+    if (item.price?.id && isCommitmentPrice(item.price)) {
       commitmentPriceIds.add(item.price.id);
     }
   }
@@ -488,12 +493,10 @@ async function grantCommitmentFromInvoice(invoice) {
     }
 
     const md = price?.metadata || {};
-    const isCommitment =
-      md.billing_model === "prepaid_credit" ||
-      md.billing_category === "commitment" ||
-      md.commitment_amount != null;
     const amountMajor = Number(md.commitment_amount);
-    if (!isCommitment || !amountMajor || Number.isNaN(amountMajor)) continue;
+    if (!isCommitmentPrice(price) || !amountMajor || Number.isNaN(amountMajor)) {
+      continue;
+    }
 
     // commitment_amount is in major units (e.g. 5000 = £5,000).
     const period = String(md.commitment_period || "").toLowerCase();
