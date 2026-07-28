@@ -20,7 +20,12 @@ function getCatalogPlanKey(plan) {
 function MoesifPlans(props) {
   const { isAuthenticated } = useAuth0();
 
-  const { plans, plansLoading: loading, plansError: error } = usePlans();
+  const {
+    plans,
+    plansLoading: loading,
+    plansValidating: validating,
+    plansError: error,
+  } = usePlans();
 
   const getActionButton = (price, plan, options) => {
     // Helper to determine if price needs quantity
@@ -79,7 +84,9 @@ function MoesifPlans(props) {
         PLAN_KEY_ORDER.indexOf(a.planKey) - PLAN_KEY_ORDER.indexOf(b.planKey)
     );
 
-  if (loading) {
+  // Keep the loader up while a first load (or its retries) is still in
+  // flight so a transient failure does not flash a red error.
+  if (loading || (validating && !plans && error)) {
     return <LineLoader />;
   }
 
@@ -93,7 +100,7 @@ function MoesifPlans(props) {
           usage.
         </p>
       </div>
-      {error && (
+      {error && !validating && (!plans || plans.length === 0) && (
         <div className="alert-error" role="alert">
           We could not load the plans. Please refresh the page or try again
           shortly.

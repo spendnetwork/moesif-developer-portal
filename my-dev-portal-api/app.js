@@ -217,17 +217,28 @@ app.post(
   }
 );
 
+// The plan catalogue rarely changes, and Moesif's catalogue API can be slow
+// or intermittently fail. Cache it briefly and serve the last good copy on
+// error so the plans page loads fast and does not flash an error.
+let plansCache = { data: null, at: 0 };
+const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
+
 app.get("/plans", jsonParser, async (req, res) => {
-  // if you created your "stripe" or "zoura" plans through moesif.
-  // it is better
-  getPlansFromMoesif()
-    .then((result) => {
-      res.status(200).json(result);
-    })
-    .catch((err) => {
-      console.error("Error getting plans from Moesif", err);
-      res.status(500).json({ message: "Error getting plans from Moesif" });
-    });
+  if (plansCache.data && Date.now() - plansCache.at < PLANS_CACHE_TTL_MS) {
+    return res.status(200).json(plansCache.data);
+  }
+  try {
+    const result = await getPlansFromMoesif();
+    plansCache = { data: result, at: Date.now() };
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("Error getting plans from Moesif", err);
+    if (plansCache.data) {
+      // Serve the last good catalogue rather than failing the page.
+      return res.status(200).json(plansCache.data);
+    }
+    return res.status(500).json({ message: "Error getting plans from Moesif" });
+  }
 });
 
 app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => {
