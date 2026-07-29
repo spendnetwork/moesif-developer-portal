@@ -2,9 +2,8 @@ import useSWR from "swr";
 
 import { authedFetcher } from "../lib/portal-api";
 
-// Subscriptions are fetched from the portal backend (which reads Moesif).
-// Cached with SWR keyed by email + token so revisiting is instant and a
-// checkout can refresh it via mutate.
+// Subscriptions are fetched from the portal backend, which verifies Stripe and
+// repairs stale SN API entitlement state before returning the current plan.
 export default function useSubscriptions({ user, idToken }) {
   const key =
     user?.email && idToken

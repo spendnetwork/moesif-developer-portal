@@ -8,7 +8,7 @@ const cors = require("cors");
 
 const {
   verifyStripeSession,
-  hasActiveStripeSubscription,
+  getActiveStripeSubscription,
   cancelStripeSubscription,
   ensureCreditGrant,
   getUsageSummary,
@@ -23,7 +23,10 @@ const {
   activateStripePlanChange,
   getStripeSubscription,
   listStripeInvoices,
-  attachPlanMeteredPrices,
+  ensureSubscriptionMeteredPrices,
+  getPlanKeyForProduct,
+  getStripeProduct,
+  LIVE_SUBSCRIPTION_STATUSES,
   updateStripeCustomerIdentity,
 } = require("./services/stripeApis");
 const {
@@ -42,6 +45,7 @@ const {
   getSnApiPlanChangeByCustomer,
   listSnApiDuePlanChanges,
   updateSnApiPlanChange,
+  updateSnApiSubscriptionStatus,
 } = require("./services/snApiProvisioning");
 const {
   processPaidInvoice,
@@ -49,10 +53,15 @@ const {
   reconcileDuePlanChanges,
 } = require("./services/planChangeService");
 const {
+  reconcileActiveSubscription,
+  reconcileCheckoutSession,
+  resolveAuthenticatedEntitlement,
+  processSubscriptionLifecycle,
+} = require("./services/subscriptionReconciliation");
+const {
   syncToMoesif,
   getInfoForEmbeddedWorkspaces,
   getPlansFromMoesif,
-  getSubscriptionsForUserId,
   sendSubscriptionToMoesif,
 } = require("./services/moesifApis");
 
@@ -113,6 +122,25 @@ const planChangeDeps = {
   updateStripeCustomerIdentity,
 };
 
+const subscriptionReconciliationDeps = {
+  verifyStripeSession,
+  getActiveStripeSubscription,
+  getStripeSubscription,
+  getStripeCustomerById,
+  getStripeProduct,
+  getPlanKeyForProduct,
+  ensureSubscriptionMeteredPrices,
+  provisionSnApiCustomer,
+  updateStripeCustomerIdentity,
+  ensureCreditGrant,
+  grantCommitmentFromInvoice,
+  syncToMoesif,
+  liveStatuses: LIVE_SUBSCRIPTION_STATUSES,
+  updateSnApiSubscriptionStatus,
+  handleSubscriptionEnded,
+  listStripeSubscriptions,
+};
+
 const moesifMiddleware = moesif({
   applicationId: process.env.MOESIF_APPLICATION_ID,
 
@@ -135,6 +163,7 @@ function applyPortalContext(req, context) {
   req.user.moesif_company_id = context.moesif_company_id;
   req.user.sn_api_user_id = context.user_id;
   req.user.sn_api_organization_id = context.organization_id;
+  req.user.stripe_customer_id = context.stripe_customer_id;
 }
 
 function invalidatePortalContext(auth0UserId) {
@@ -176,13 +205,37 @@ async function attachSnApiPortalContext(req, _res, next) {
 
 const portalAuthMiddleware = [authMiddleware, attachSnApiPortalContext];
 
+async function ensureRequestEntitlement(req) {
+  if (req.entitlement) return req.entitlement;
+  const entitlement = await resolveAuthenticatedEntitlement(
+    req.user,
+    req.portalContext,
+    subscriptionReconciliationDeps
+  );
+  req.entitlement = entitlement;
+  if (entitlement.reconciled) {
+    invalidatePortalContext(req.user?.sub);
+    try {
+      const refreshedContext = await getSnApiPortalContext(req.user);
+      portalContextCache.set(req.user.sub, {
+        context: refreshedContext,
+        fetchedAt: Date.now(),
+      });
+      applyPortalContext(req, refreshedContext);
+    } catch (error) {
+      console.error("Entitlement reconciled but context refresh failed", error);
+    }
+  }
+  return entitlement;
+}
+
 // API keys grant API access, so they may only be created or rotated while the
 // customer has a live subscription. Checked against Stripe directly so a
 // cancellation takes effect immediately, not after Moesif sync.
 async function requireActiveSubscription(req, res, next) {
   try {
-    const active = await hasActiveStripeSubscription(req.user?.email, req.user);
-    if (!active) {
+    const entitlement = await ensureRequestEntitlement(req);
+    if (!entitlement.active) {
       return res.status(403).json({
         code: "no_active_subscription",
         message: "An active subscription is required to manage API keys.",
@@ -190,9 +243,16 @@ async function requireActiveSubscription(req, res, next) {
     }
   } catch (error) {
     console.error("Subscription check failed:", error);
-    return res.status(403).json({
-      code: "no_active_subscription",
-      message: "We could not verify your subscription. Please try again.",
+    const conflict = [
+      "multiple_active_subscriptions",
+      "multiple_stripe_customers",
+      "ambiguous_stripe_customer",
+    ].includes(error.code);
+    return res.status(conflict ? 409 : 503).json({
+      code: error.code || "subscription_verification_failed",
+      message: conflict
+        ? "Your billing account needs support review before API keys can be managed."
+        : "We could not verify your subscription. Please try again.",
     });
   }
   return next();
@@ -306,11 +366,12 @@ const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
 //   - invoice.paid       -> grant/re-grant prepaid commitment credit
 //   - subscription ended -> revoke that customer's API keys
 //
-// Required Stripe events: invoice.paid, invoice.payment_succeeded,
-// customer.subscription.deleted, customer.subscription.updated,
-// customer.subscription.paused. Without the subscription events a cancelled
-// customer keeps a working API key. See README "Subscription enforcement".
+// Required Stripe events: checkout.session.completed/async_payment_succeeded, invoice.paid,
+// invoice.payment_failed, customer.subscription.created/updated/deleted/paused.
+// Checkout and lifecycle events are both handled because Stripe does not
+// guarantee event delivery order and the browser return is not reliable.
 const SUBSCRIPTION_LIFECYCLE_EVENTS = [
+  "customer.subscription.created",
   "customer.subscription.deleted",
   "customer.subscription.updated",
   "customer.subscription.paused",
@@ -341,8 +402,28 @@ app.post(
       return res.status(400).json({ message: "Invalid signature" });
     }
 
+    if (
+      event.type === "checkout.session.completed" ||
+      event.type === "checkout.session.async_payment_succeeded"
+    ) {
+      try {
+        await reconcileCheckoutSession(
+          event.data.object,
+          null,
+          subscriptionReconciliationDeps
+        );
+      } catch (reconciliationError) {
+        if (reconciliationError.code === "checkout_payment_pending") {
+          return res.status(200).json({ received: true, payment_pending: true });
+        }
+        console.error("Checkout webhook reconciliation failed", reconciliationError);
+        return res.status(500).json({ message: "Checkout reconciliation failed" });
+      }
+    }
+
     if (event.type === "invoice.paid") {
       try {
+        await grantCommitmentFromInvoice(event.data.object);
         await processPaidInvoice(event.data.object, planChangeDeps);
       } catch (planChangeError) {
         console.error("Paid invoice plan-change processing failed", planChangeError);
@@ -361,10 +442,10 @@ app.post(
 
     if (SUBSCRIPTION_LIFECYCLE_EVENTS.includes(event.type)) {
       try {
-        const result = await handleSubscriptionEnded(event.data.object, {
-          getStripeCustomerById,
-          listStripeSubscriptions,
-        });
+        const result = await processSubscriptionLifecycle(
+          event.data.object,
+          subscriptionReconciliationDeps
+        );
         // Returning 500 asks Stripe to retry, which is what we want when keys
         // are still live: revocation is the whole point of this handler.
         if (result?.failed?.length) {
@@ -405,47 +486,63 @@ app.get("/plans", jsonParser, async (req, res) => {
   }
 });
 
+function stripeSubscriptionForPortal(entitlement) {
+  const subscription = entitlement.subscription;
+  const meteredItems = subscription.items.data.filter(
+    (item) => item.price?.recurring?.usage_type === "metered"
+  );
+  const periodItems = meteredItems.length ? meteredItems : subscription.items.data;
+  const periodStarts = periodItems
+    .map((item) => item.current_period_start)
+    .filter(Number.isFinite);
+  const periodEnds = periodItems
+    .map((item) => item.current_period_end)
+    .filter(Number.isFinite);
+  return {
+    subscription_id: subscription.id,
+    status: subscription.status,
+    current_period_start: periodStarts.length
+      ? new Date(Math.min(...periodStarts) * 1000).toISOString()
+      : null,
+    current_period_end: periodEnds.length
+      ? new Date(Math.max(...periodEnds) * 1000).toISOString()
+      : null,
+    cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+    items: subscription.items.data.map((item) => {
+      const price = item.price;
+      const productId =
+        typeof price.product === "string" ? price.product : price.product?.id;
+      return {
+        subscription_item_id: item.id,
+        plan_id: productId,
+        price_id: price.id,
+        price: {
+          id: price.id,
+          name: price.nickname,
+          nickname: price.nickname,
+          currency: price.currency,
+          price_in_decimal:
+            price.unit_amount_decimal == null
+              ? null
+              : Number(price.unit_amount_decimal) / 100,
+          pricing_model: price.billing_scheme,
+        },
+      };
+    }),
+  };
+}
+
 app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => {
-  // But in this project, we get from Moesif, because
-  // Moesif syncs subscriptions from several billing providers.
-  // - from moesif, you can get a list of associated subscriptions
-  //   using companyId, userId or email.
-  // - Your use case needs and data model/mapping inform the best approach. (See DATA_MODEL.md)
-  //   for assumptions in this project.
-  // - In this project, since Stripe customer id is mapped to user_id in Moesif,
-  //   We use that as the user_id to fetch subscriptions.
-
-  const sanitizedEmail = req.query.email.replace(/\n|\r/g, "");
-  console.log("query email " + sanitizedEmail);
-  console.log("verified email from claims " + req.user.email);
-  const email = req.user?.email;
-
-  let moesifUserId;
   try {
-    moesifUserId = await getUnifiedCustomerId(req.user, email);
-    // see DATA_MODEL.md regarding how customer ids are mapped.
-    // please modify if you decides to use some other data mapping model.
-    if (!moesifUserId) {
-      return res.status(200).json([]);
-    }
-
-    const subscriptions = await getSubscriptionsForUserId({
-      userId: moesifUserId,
-    });
-
-    console.log(
-      "got subscriptions from moesif " + JSON.stringify(subscriptions)
-    );
-    res.status(200).json(subscriptions);
+    const entitlement = await ensureRequestEntitlement(req);
+    if (!entitlement.active) return res.status(200).json([]);
+    return res.status(200).json([stripeSubscriptionForPortal(entitlement)]);
   } catch (err) {
-    console.error(
-      "Error getting subscription from moesif for " +
-        email +
-        " " +
-        moesifUserId,
-      err
-    );
-    res.status(404).json({ message: err.toString() });
+    console.error("Error getting authoritative Stripe subscription", err);
+    return res.status(503).json({
+      code: err.code || "subscription_lookup_failed",
+      message: "We could not verify your current subscription.",
+    });
   }
 });
 
@@ -473,105 +570,58 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
 app.post(
   "/register/stripe/:checkout_session_id",
   portalAuthMiddleware,
-  function (req, res) {
-    const checkout_session_id = req.params.checkout_session_id;
+  async function (req, res) {
+    const checkoutSessionId = req.params.checkout_session_id;
     let orphanSubscriptionId = null;
-
-    verifyStripeSession(checkout_session_id)
-      .then(async (result) => {
-        const stripeCheckOutSessionInfo = result;
-        orphanSubscriptionId = result?.subscription?.id || null;
-        console.log("in stripe register");
-        if (result.status !== "complete") {
-          return res.status(409).json({ message: "Stripe checkout is not complete" });
-        }
-        await attachPlanMeteredPrices(result);
-        if (result.customer && result.subscription) {
-          console.log("customer and subscription present");
-          const email = result.customer_details?.email || result.customer.email;
-          const price = result.line_items?.data?.[0]?.price;
-          const provisionedCustomer = await provisionSnApiCustomer({
-            authUser: req.user,
-            customer: result.customer,
-            subscription: result.subscription,
-            price,
-            product: price?.product,
-          });
-          console.log("provisioned SN API customer:", JSON.stringify({
-            user_id: provisionedCustomer.user_id,
-            organization_id: provisionedCustomer.organization_id,
-            api_key_created: provisionedCustomer.api_key_created,
-          }));
-          req.user.moesif_user_id = String(provisionedCustomer.user_id);
-          req.user.moesif_company_id = String(
-            provisionedCustomer.moesif_company_id ||
-              provisionedCustomer.organization_id
-          );
-          await updateStripeCustomerIdentity(result.customer.id, {
-            moesifUserId: req.user.moesif_user_id,
-            moesifCompanyId: req.user.moesif_company_id,
-            auth0UserId: req.user.sub,
-            subscriptionId: result.subscription.id,
-          });
-          syncToMoesif({
-            companyId: req.user.moesif_company_id,
-            userId: req.user.moesif_user_id,
-            email,
-            auth0UserId: req.user.sub,
-            stripeCustomerId: provisionedCustomer.stripe_customer_id,
-          });
-          // Grant the Basic development credit at checkout (a card is now on
-          // file). Growth/Enterprise commitments are granted by the Stripe
-          // invoice.paid webhook when the commitment invoice is paid.
-          if (String(provisionedCustomer.plan_key).toLowerCase() === "basic") {
-            try {
-              await ensureCreditGrant(result.customer.id, "basic", {
-                currency: result.currency || "gbp",
-              });
-            } catch (grantError) {
-              console.error("Failed to create dev credit grant", grantError);
-            }
-          }
-
-          // Drop any pre-provisioning cache entry so the next request
-          // fetches the full canonical context from the SN API.
-          invalidatePortalContext(req.user.sub);
-          stripeCheckOutSessionInfo.sn_api = {
-            user_id: provisionedCustomer.user_id,
-            organization_id: provisionedCustomer.organization_id,
-            api_key_created: provisionedCustomer.api_key_created,
-          };
-        }
-        // we still pass on result.
-        console.log(JSON.stringify(stripeCheckOutSessionInfo));
-        res.status(201).json(stripeCheckOutSessionInfo);
-      })
-      .catch(async (err) => {
-        console.error("Error registering user", err);
-        const conflict =
-          err.status === 409 &&
-          typeof err.detail === "string" &&
-          err.detail.toLowerCase().includes("already linked");
-        if (conflict) {
-          // Cannot provision under this identity; cancel the just-created
-          // subscription so there is no orphaned paid plan.
-          if (orphanSubscriptionId) {
-            try {
-              await cancelStripeSubscription(orphanSubscriptionId);
-            } catch (cancelError) {
-              console.error("Failed to cancel orphaned subscription", cancelError);
-            }
-          }
-          return res.status(409).json({
-            code: "email_identity_conflict",
-            message:
-              "This email is already registered with a different sign-in method. Please log in using your original method.",
-          });
-        }
-        res.status(500).json({
-          message: "Failed to provision user. " + err.toString(),
-        });
+    try {
+      const session = await verifyStripeSession(checkoutSessionId);
+      orphanSubscriptionId =
+        typeof session.subscription === "string"
+          ? session.subscription
+          : session.subscription?.id;
+      const reconciled = await reconcileCheckoutSession(
+        session,
+        req.user,
+        subscriptionReconciliationDeps
+      );
+      invalidatePortalContext(req.user.sub);
+      return res.status(201).json({
+        status: "complete",
+        customer_email: reconciled.customer.email,
+        subscription_id: reconciled.subscription.id,
+        plan_key: reconciled.planKey,
+        sn_api: {
+          user_id: reconciled.provisioned.user_id,
+          organization_id: reconciled.provisioned.organization_id,
+          api_key_created: reconciled.provisioned.api_key_created,
+        },
       });
+    } catch (err) {
+      console.error("Error registering user", err);
+      const conflict =
+        err.code === "stripe_customer_identity_mismatch" ||
+        (err.status === 409 &&
+          typeof err.detail === "string" &&
+          err.detail.toLowerCase().includes("already linked"));
+      if (conflict) {
+        if (orphanSubscriptionId) {
+          try {
+            await cancelStripeSubscription(orphanSubscriptionId);
+          } catch (cancelError) {
+            console.error("Failed to cancel orphaned subscription", cancelError);
+          }
+        }
+        return res.status(409).json({
+          code: "email_identity_conflict",
+          message:
+            "This email is already registered with a different sign-in method. Please log in using your original method.",
+        });
+      }
+      return res.status(err.code === "checkout_incomplete" ? 409 : 503).json({
+        code: err.code || "provisioning_failed",
+        message: "We could not finish synchronizing your paid subscription.",
+      });
+    }
   }
 );
 
@@ -661,23 +711,36 @@ app.get("/portal-context", portalAuthMiddleware, function (req, res) {
 
 function sendKeyManagementError(res, error) {
   console.error("API key management error:", error);
-  res.status(error.status || 500).json({
+  const conflict = [
+    "multiple_active_subscriptions",
+    "multiple_stripe_customers",
+    "ambiguous_stripe_customer",
+  ].includes(error.code);
+  res.status(error.status || (conflict ? 409 : 503)).json({
+    code: error.code || "api_key_management_failed",
     message: error.message || "API key request failed",
   });
 }
 
 app.get("/api-keys", portalAuthMiddleware, async function (req, res) {
   try {
-    const [keyData, hasActiveSubscription] = await Promise.all([
-      listSnApiKeys(req.user),
-      hasActiveStripeSubscription(req.user?.email, req.user),
-    ]);
+    const entitlement = await ensureRequestEntitlement(req);
+    let keyData = { keys: [], active_count: 0, max_active_keys: 2 };
+    if (req.portalContext) {
+      try {
+        keyData = await listSnApiKeys(req.user);
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+    }
     const normalizedKeyData = Array.isArray(keyData)
       ? { keys: keyData, active_count: keyData.length, max_active_keys: 2 }
       : keyData;
     res.status(200).json({
       ...normalizedKeyData,
-      has_active_subscription: hasActiveSubscription,
+      has_active_subscription: entitlement.active,
+      current_plan_key: entitlement.planKey || null,
+      subscription_status: entitlement.subscription?.status || null,
     });
   } catch (error) {
     sendKeyManagementError(res, error);

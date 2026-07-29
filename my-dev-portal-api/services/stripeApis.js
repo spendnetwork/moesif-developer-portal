@@ -5,6 +5,7 @@ const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
 const USAGE_SUMMARY_CACHE_MAX_ENTRIES = 1000;
 const usageSummaryCache = new Map();
+const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
 
 function cacheUsageSummary(cacheKey, summary) {
   if (!cacheKey) return;
@@ -40,24 +41,101 @@ function verifyStripeSession(checkoutSessionId) {
   });
 }
 
-async function getActiveStripeSubscription(email, authUserId) {
+function stripeLookupError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+function assertCustomerIdentity(customer, { email, authUserId }) {
+  const customerEmail = String(customer?.email || "").trim().toLowerCase();
+  const expectedEmail = String(email || "").trim().toLowerCase();
+  if (customerEmail && expectedEmail && customerEmail !== expectedEmail) {
+    throw stripeLookupError(
+      "stripe_customer_identity_mismatch",
+      "The Stripe customer does not match the authenticated email"
+    );
+  }
+  const linkedAuthUserId = customer?.metadata?.authUserId;
+  if (linkedAuthUserId && authUserId && linkedAuthUserId !== authUserId) {
+    throw stripeLookupError(
+      "stripe_customer_identity_mismatch",
+      "The Stripe customer is linked to a different authenticated user"
+    );
+  }
+}
+
+async function resolveStripeCustomer(email, authUserId, preferredCustomerId) {
+  if (preferredCustomerId) {
+    const preferred = await stripe.customers.retrieve(preferredCustomerId);
+    if (preferred.deleted) {
+      throw stripeLookupError("stripe_customer_not_found", "Stripe customer was deleted");
+    }
+    assertCustomerIdentity(preferred, { email, authUserId });
+    if (authUserId && preferred.metadata?.authUserId !== authUserId) {
+      return stripe.customers.update(preferred.id, {
+        metadata: { authUserId },
+      });
+    }
+    return preferred;
+  }
+
   const customers = await stripe.customers.search({
     query: `email:"${email.replace(/"/g, "\\\"")}"`,
-    limit: 10,
+    limit: 100,
   });
-  const customer =
-    customers.data.find(
-      (candidate) => candidate.metadata?.authUserId === authUserId
-    ) || customers.data[0];
-  if (!customer) throw new Error("Stripe customer not found");
+  const candidates = customers.data.filter(
+    (candidate) =>
+      !candidate.deleted &&
+      String(candidate.email || "").trim().toLowerCase() ===
+        String(email || "").trim().toLowerCase()
+  );
+  const identityMatches = candidates.filter(
+    (candidate) => candidate.metadata?.authUserId === authUserId
+  );
+  if (identityMatches.length > 1) {
+    throw stripeLookupError(
+      "multiple_stripe_customers",
+      "Multiple Stripe customers are linked to this account",
+      { customerIds: identityMatches.map((candidate) => candidate.id) }
+    );
+  }
+  let customer = identityMatches[0];
+  if (!customer && candidates.length === 1) customer = candidates[0];
+  if (!customer && candidates.length > 1) {
+    throw stripeLookupError(
+      "ambiguous_stripe_customer",
+      "Multiple Stripe customers use this email and none is linked to this login",
+      { customerIds: candidates.map((candidate) => candidate.id) }
+    );
+  }
+  if (!customer) {
+    throw stripeLookupError("stripe_customer_not_found", "Stripe customer not found");
+  }
+  assertCustomerIdentity(customer, { email, authUserId });
+  if (authUserId && customer.metadata?.authUserId !== authUserId) {
+    customer = await stripe.customers.update(customer.id, {
+      metadata: { authUserId },
+    });
+  }
+  return customer;
+}
+
+async function getActiveStripeSubscription(email, authUserId, preferredCustomerId) {
+  const customer = await resolveStripeCustomer(
+    email,
+    authUserId,
+    preferredCustomerId
+  );
 
   const subscriptions = await stripe.subscriptions.list({
     customer: customer.id,
     status: "all",
-    limit: 10,
+    limit: 100,
   });
   const activeSubscriptions = subscriptions.data.filter((candidate) =>
-    ["active", "trialing", "past_due"].includes(candidate.status)
+    LIVE_SUBSCRIPTION_STATUSES.includes(candidate.status)
   );
   if (!activeSubscriptions.length) {
     const error = new Error("Active Stripe subscription not found");
@@ -77,10 +155,9 @@ async function getActiveStripeSubscription(email, authUserId) {
   const price = subscription.items.data[0]?.price;
   if (!price) throw new Error("Stripe subscription price not found");
 
-  const product =
-    typeof price.product === "string"
-      ? await stripe.products.retrieve(price.product)
-      : price.product;
+  const product = typeof price.product === "string"
+    ? await stripe.products.retrieve(price.product)
+    : price.product;
 
   return { customer, subscription, price, product };
 }
@@ -111,10 +188,20 @@ async function getPlanPrices(planId) {
   return { commitmentPrices, meteredPrices };
 }
 
+function getStripeProduct(productId) {
+  return stripe.products.retrieve(productId);
+}
+
 async function getPlanKeyForProduct(productId) {
   const product = await stripe.products.retrieve(productId);
   const configured = product.metadata?.plan_key;
-  if (configured) return String(configured).trim().toLowerCase();
+  if (configured) {
+    const normalized = String(configured).trim().toLowerCase();
+    if (["basic", "growth", "enterprise"].includes(normalized)) {
+      return normalized;
+    }
+    throw new Error(`Product ${productId} has unsupported plan_key ${configured}`);
+  }
   const name = String(product.name || "").toLowerCase();
   const planKey = ["basic", "growth", "enterprise"].find((key) =>
     name.includes(key)
@@ -155,44 +242,22 @@ async function listStripeSubscriptions(customerId) {
   return subscriptions.data;
 }
 
-// Developers: you might consider have something like reddis
-// make id/mapping look up easier and faster
-const EMAIL_TO_STRIPE_CUSTOMER_CACHE = {};
-
-function getStripeCustomerIdFromCache(email) {
-  return EMAIL_TO_STRIPE_CUSTOMER_CACHE[email];
-}
-
-async function getStripeCustomerId(email) {
-  if (EMAIL_TO_STRIPE_CUSTOMER_CACHE[email]) {
-    return EMAIL_TO_STRIPE_CUSTOMER_CACHE[email];
-  }
-
-  const stripeCustomer = await getStripeCustomer(email);
-  const stripeCustomerId =
-    stripeCustomer.data && stripeCustomer.data[0]
-      ? stripeCustomer.data[0].id
-      : undefined;
-
-  if (stripeCustomerId) {
-    EMAIL_TO_STRIPE_CUSTOMER_CACHE[email] = stripeCustomerId;
-  }
-
-  return stripeCustomerId;
-}
-
 async function getOrCreateStripeCustomerId(email, authUser) {
-  // make sure only one stripe customer per email
-  let customerId = await getStripeCustomerId(email);
-
-  if (!customerId) {
-    // If no customerId exists, create a new one
+  let customer;
+  try {
+    customer = await resolveStripeCustomer(
+      email,
+      authUser?.sub,
+      authUser?.stripe_customer_id
+    );
+  } catch (error) {
+    if (error.code !== "stripe_customer_not_found") throw error;
     const identity = authUser?.sub || email.toLowerCase();
     const identityHash = crypto
       .createHash("sha256")
       .update(identity)
       .digest("hex");
-    const customer = await stripe.customers.create(
+    customer = await stripe.customers.create(
       {
         email: email,
         metadata: {
@@ -202,10 +267,8 @@ async function getOrCreateStripeCustomerId(email, authUser) {
       { idempotencyKey: `portal-customer-${identityHash}` }
     );
 
-    customerId = customer.id;
   }
-
-  return customerId;
+  return customer.id;
 }
 
 async function createStripeCheckoutSession(email, priceId, quantity, authUser, requestId) {
@@ -298,7 +361,11 @@ async function createStripePlanCheckoutSession(email, planId, authUser, requestI
 
 async function prepareStripePlanChange(email, planId, authUser) {
   const { customer, subscription, product } =
-    await getActiveStripeSubscription(email, authUser?.sub);
+    await getActiveStripeSubscription(
+      email,
+      authUser?.sub,
+      authUser?.stripe_customer_id
+    );
   if (["past_due", "unpaid", "incomplete"].includes(subscription.status)) {
     const error = new Error(
       "Resolve the outstanding subscription payment before changing plans"
@@ -399,7 +466,7 @@ async function activateStripePlanChange(planChange) {
 function getStripeSubscription(subscriptionId) {
   return stripe.subscriptions.retrieve(subscriptionId, {
     expand: ["items.data.price.product", "latest_invoice.payment_intent"],
-  }, requestId ? { idempotencyKey: `checkout-${requestId}` } : undefined);
+  });
 }
 
 async function listStripeInvoices(subscriptionId, limit = 10) {
@@ -419,6 +486,18 @@ async function attachPlanMeteredPrices(checkoutSession) {
     throw new Error("Checkout session is missing its plan or subscription ID");
   }
 
+  return ensureSubscriptionMeteredPrices(
+    subscriptionId,
+    planId,
+    `checkout-${checkoutSession.id}`
+  );
+}
+
+async function ensureSubscriptionMeteredPrices(
+  subscriptionId,
+  planId,
+  idempotencyNamespace = "subscription-reconcile"
+) {
   const [prices, subscription] = await Promise.all([
     stripe.prices.list({ product: planId, active: true, limit: 100 }),
     stripe.subscriptions.retrieve(subscriptionId, {
@@ -444,9 +523,12 @@ async function attachPlanMeteredPrices(checkoutSession) {
         price: price.id,
         proration_behavior: "none",
       },
-      { idempotencyKey: `portal-${checkoutSession.id}-${price.id}` }
+      { idempotencyKey: `${idempotencyNamespace}-${subscriptionId}-${price.id}` }
     );
   }
+  return stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ["items.data.price.product", "latest_invoice"],
+  });
 }
 
 async function updateStripeCustomerIdentity(
@@ -460,9 +542,16 @@ async function updateStripeCustomerIdentity(
     sn_organization_id: String(moesifCompanyId),
     authUserId: auth0UserId,
     current_subscription_id: subscriptionId || "",
+    entitlement_sync_version: "1",
   };
 
-  const customer = await stripe.customers.update(customerId, { metadata });
+  const existingCustomer = await stripe.customers.retrieve(customerId);
+  const customerNeedsUpdate = Object.entries(metadata).some(
+    ([key, value]) => existingCustomer.metadata?.[key] !== value
+  );
+  const customer = customerNeedsUpdate
+    ? await stripe.customers.update(customerId, { metadata })
+    : existingCustomer;
 
   // The subscription webhook fires before provisioning writes the customer
   // metadata, so Moesif can process the subscription without a company
@@ -470,7 +559,13 @@ async function updateStripeCustomerIdentity(
   // customer.subscription.updated, making Moesif reprocess it with the
   // mapping in place.
   if (subscriptionId) {
-    await stripe.subscriptions.update(subscriptionId, { metadata });
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    const subscriptionNeedsUpdate = Object.entries(metadata).some(
+      ([key, value]) => subscription.metadata?.[key] !== value
+    );
+    if (subscriptionNeedsUpdate) {
+      await stripe.subscriptions.update(subscriptionId, { metadata });
+    }
   }
 
   return customer;
@@ -481,9 +576,13 @@ async function cancelStripeSubscription(subscriptionId) {
   return stripe.subscriptions.cancel(subscriptionId);
 }
 
-async function hasActiveStripeSubscription(email, authUser) {
+async function hasActiveStripeSubscription(email, authUser, preferredCustomerId) {
   try {
-    await getActiveStripeSubscription(email, authUser?.sub);
+    await getActiveStripeSubscription(
+      email,
+      authUser?.sub,
+      preferredCustomerId || authUser?.stripe_customer_id
+    );
     return true;
   } catch (error) {
     if (error.code === "no_active_subscription") return false;
@@ -551,7 +650,9 @@ async function createCreditGrantOnce(customerId, opts) {
     metadata: { oo_marker: marker, plan_key: String(planKey || "") },
   };
   if (expiresAt) params.expires_at = expiresAt;
-  return stripe.billing.creditGrants.create(params);
+  return stripe.billing.creditGrants.create(params, {
+    idempotencyKey: `credit-grant-${marker}`,
+  });
 }
 
 // Basic development credit at checkout (fixed amount from config).
@@ -581,7 +682,8 @@ async function getUsageSummary(email, authUser) {
 
   const { customer, subscription } = await getActiveStripeSubscription(
     email,
-    authUser?.sub
+    authUser?.sub,
+    authUser?.stripe_customer_id
   );
 
   // Map each subscription price to its human nickname (e.g. "Growth - API
@@ -761,7 +863,11 @@ module.exports = {
   getStripeCustomer,
   getStripeCustomerById,
   listStripeSubscriptions,
-  getStripeCustomerId,
-  getStripeCustomerIdFromCache,
   getActiveStripeSubscription,
+  getPlanKeyForProduct,
+  getStripeProduct,
+  getPlanPrices,
+  ensureSubscriptionMeteredPrices,
+  resolveStripeCustomer,
+  LIVE_SUBSCRIPTION_STATUSES,
 };

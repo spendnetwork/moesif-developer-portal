@@ -14,7 +14,10 @@ import { PageLoader } from "../../page-loader";
 // - Confirmation for customer
 // - receive the returned sessionId from Stripe and call backend API to provision services.
 
-function registerPurchaseStripe({
+const wait = (milliseconds) =>
+  new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+async function registerPurchaseStripe({
   planId,
   priceId,
   sessionId,
@@ -24,46 +27,60 @@ function registerPurchaseStripe({
   setLoading,
   setProvisionError,
 }) {
-  if (sessionId && idToken) {
-    setLoading(true);
+  if (!sessionId || !idToken) {
+    console.error("no session id found for stripe");
+    return;
+  }
 
-    fetch(
-      `${import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER}/register/stripe/${sessionId}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
-      }
-    )
-      .then(async (res) => {
-        if (!res.ok) {
-          const errorBody = await res.json().catch(() => ({}));
-          const message =
-            errorBody.code === "email_identity_conflict"
-              ? errorBody.message
-              : `Failed provision: ${res.status}, body: ${JSON.stringify(
-                  errorBody
-                )}`;
-          const provisionErr = new Error(message);
-          provisionErr.code = errorBody.code;
+  setLoading(true);
+  setProvisionError(null);
+  const retryDelays = [0, 1000, 2000, 4000, 8000];
+  try {
+    for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+      if (retryDelays[attempt]) await wait(retryDelays[attempt]);
+      try {
+        const res = await fetch(
+          `${import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER}/register/stripe/${sessionId}`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${idToken}` },
+          }
+        );
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setStatus(body.status);
+          setCustomerEmail(body.customer_email);
+          return;
+        }
+        const provisionErr = new Error(
+          body.message || `Subscription synchronization failed (${res.status})`
+        );
+        provisionErr.code = body.code;
+        provisionErr.status = res.status;
+        const retryable =
+          res.status >= 500 || body.code === "checkout_incomplete";
+        if (!retryable || attempt === retryDelays.length - 1) {
           throw provisionErr;
         }
-        return res.json();
-      })
-      .then((data) => {
-        setStatus(data.status);
-        setCustomerEmail(data.customer_email);
-      })
-      .catch((err) => {
-        setProvisionError(err);
-      })
-      .finally(() => {
-        setLoading(false);
-        moesifIdentifyUserFrontEndIfPossible(idToken);
-      });
-  } else {
-    console.error("no session id found for stripe");
+      } catch (error) {
+        const retryable =
+          !error.status ||
+          error.status >= 500 ||
+          error.code === "checkout_incomplete";
+        if (
+          error.code === "email_identity_conflict" ||
+          !retryable ||
+          attempt === retryDelays.length - 1
+        ) {
+          throw error;
+        }
+      }
+    }
+  } catch (error) {
+    setProvisionError(error);
+  } finally {
+    setLoading(false);
+    moesifIdentifyUserFrontEndIfPossible(idToken);
   }
 }
 
@@ -121,6 +138,7 @@ function Return(props) {
   const [loading, setLoading] = useState(false);
   const [customerEmail, setCustomerEmail] = useState("");
   const [provisionError, setProvisionError] = useState(null);
+  const [registrationAttempt, setRegistrationAttempt] = useState(0);
   const { idToken, user } = useAuthCombined();
 
   const queryString = window.location.search;
@@ -161,7 +179,7 @@ function Return(props) {
         setProvisionError,
       });
     }
-  }, [sessionId, idToken, isCustom, user, priceId, planId]);
+  }, [sessionId, idToken, isCustom, user, priceId, planId, registrationAttempt]);
 
   if (status === "open") {
     return <Navigate to={`/checkout?price_id_to_purchase=${priceId}`} />;
@@ -215,11 +233,20 @@ function Return(props) {
               : "Seems you didn't checkout successfully?"
         }
         actions={
-          <Link to="/plans" rel="noreferrer noopener">
-            <button className="button button--outline-secondary">
-              Go to Plans
+          provisionError && provisionError.code !== "email_identity_conflict" ? (
+            <button
+              className="button button--primary"
+              onClick={() => setRegistrationAttempt((attempt) => attempt + 1)}
+            >
+              Retry synchronization
             </button>
-          </Link>
+          ) : (
+            <Link to="/plans" rel="noreferrer noopener">
+              <button className="button button--outline-secondary">
+                Go to Plans
+              </button>
+            </Link>
+          )
         }
       />
     </PageLayout>

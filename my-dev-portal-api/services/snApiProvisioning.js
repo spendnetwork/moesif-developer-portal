@@ -10,9 +10,29 @@ function unixTimestampToIso(value) {
   return value ? new Date(value * 1000).toISOString() : undefined;
 }
 
+function subscriptionPeriod(subscription) {
+  const allItems = subscription?.items?.data || [];
+  const meteredItems = allItems.filter(
+    (item) => item.price?.recurring?.usage_type === "metered"
+  );
+  const items = meteredItems.length ? meteredItems : allItems;
+  const starts = items.map((item) => item.current_period_start).filter(Number.isFinite);
+  const ends = items.map((item) => item.current_period_end).filter(Number.isFinite);
+  return {
+    start: starts.length ? Math.min(...starts) : subscription?.current_period_start,
+    end: ends.length ? Math.max(...ends) : subscription?.current_period_end,
+  };
+}
+
 function getPlanKey(price, product) {
   const configured = price?.metadata?.plan_key || product?.metadata?.plan_key;
-  if (configured) return configured;
+  if (configured) {
+    const normalized = String(configured).trim().toLowerCase();
+    if (["basic", "growth", "enterprise"].includes(normalized)) {
+      return normalized;
+    }
+    throw new Error(`Unsupported plan_key metadata: ${configured}`);
+  }
 
   const name = `${product?.name || ""} ${price?.nickname || ""}`.toLowerCase();
   for (const planKey of ["enterprise", "growth", "basic"]) {
@@ -55,6 +75,7 @@ async function provisionSnApiCustomer({
     throw new Error("Stripe customer does not match the authenticated user");
   }
 
+  const period = subscriptionPeriod(subscription);
   const response = await fetch(
     `${snApiBaseUrl}/api/v3/developer-portal/provision`,
     {
@@ -74,8 +95,8 @@ async function provisionSnApiCustomer({
         stripe_price_id: price?.id,
         plan_key: getPlanKey(price, product),
         subscription_status: subscription.status,
-        current_period_start: unixTimestampToIso(subscription.current_period_start),
-        current_period_end: unixTimestampToIso(subscription.current_period_end),
+        current_period_start: unixTimestampToIso(period.start),
+        current_period_end: unixTimestampToIso(period.end),
         cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
         rotate_api_key: rotateApiKey,
         metadata: { source: "moesif_developer_portal" },
@@ -213,6 +234,25 @@ function updateSnApiPlanChange(requestId, update) {
   );
 }
 
+function updateSnApiSubscriptionStatus(subscription, customerId) {
+  const period = subscriptionPeriod(subscription);
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/subscriptions/${encodeURIComponent(
+      subscription.id
+    )}/status`,
+    {
+      method: "PATCH",
+      body: {
+        stripe_customer_id: customerId,
+        status: subscription.status,
+        current_period_start: unixTimestampToIso(period.start),
+        current_period_end: unixTimestampToIso(period.end),
+        cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+      },
+    }
+  );
+}
+
 module.exports = {
   provisionSnApiCustomer,
   checkSnApiEmailAvailability,
@@ -226,4 +266,6 @@ module.exports = {
   getSnApiPlanChangeByCustomer,
   listSnApiDuePlanChanges,
   updateSnApiPlanChange,
+  updateSnApiSubscriptionStatus,
+  subscriptionPeriod,
 };

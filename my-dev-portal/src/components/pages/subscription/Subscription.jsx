@@ -76,8 +76,7 @@ function Subscription(props) {
             create a key and start making calls.
           </p>
           <p className="empty-state__hint">
-            Just checked out? New subscriptions can take a few minutes to
-            appear here.
+            Just checked out? We will synchronize your access automatically.
           </p>
           <Link to="/plans">
             <button className="button button--primary">View plans</button>
@@ -98,7 +97,7 @@ function Subscription(props) {
       )}
       {subscriptions?.length > 0 && (
         <p className="text-muted">
-          Recent changes to your plan can take a few minutes to appear here.
+          Subscription status is verified directly with Stripe.
         </p>
       )}
     </PageLayout>

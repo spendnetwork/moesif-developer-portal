@@ -12,8 +12,11 @@
 
 Configure the portal backend `/stripe/webhook` endpoint with:
 
+- `checkout.session.completed`
+- `checkout.session.async_payment_succeeded`
 - `invoice.paid`
 - `invoice.payment_failed`
+- `customer.subscription.created`
 - `customer.subscription.updated`
 - `customer.subscription.deleted`
 - `customer.subscription.paused`
@@ -25,12 +28,24 @@ on the persisted plan-change request ID.
 ## Deployment order
 
 1. Deploy SN API code.
-2. Run Alembic migration `a7b8c9d0e1f2`.
-3. Verify the new `/api/v3/developer-portal/plan-changes` routes.
-4. Configure and verify the Stripe webhook events above.
-5. Deploy the developer portal backend.
-6. Deploy the developer portal frontend.
-7. Run a Stripe test-mode Basic to Growth change through a complete billing cycle.
+2. Check for duplicate portal organizations before applying the uniqueness migration:
+
+   ```sql
+   SELECT stripe_customer_id, count(*)
+   FROM authorganization
+   WHERE stripe_customer_id IS NOT NULL
+     AND developer_portal_created = true
+   GROUP BY stripe_customer_id
+   HAVING count(*) > 1;
+   ```
+
+3. Resolve any returned duplicates, then run Alembic migrations through
+   `b8c9d0e1f2a3`.
+4. Verify the developer-portal subscription and plan-change routes.
+5. Configure and verify the Stripe webhook events above.
+6. Deploy the developer portal backend.
+7. Deploy the developer portal frontend.
+8. Run a Stripe test-mode Basic to Growth change through a complete billing cycle.
 
 Do not deploy the portal orchestration before the SN API migration and routes exist.
 
@@ -70,3 +85,25 @@ plan change.
 
 Other transitions require support until unused paid commitment-credit handling is
 defined and implemented.
+
+## Entitlement reconciliation
+
+Stripe is the billing authority and SN API is the entitlement authority. Moesif
+is used for metering and analytics, but never decides whether an API key works.
+
+The same idempotent reconciliation operation runs from the Checkout return,
+`checkout.session.completed`, active subscription lifecycle events, and as a
+self-heal when the Billing or API Keys page detects stale SN API context. It:
+
+- resolves the Stripe customer by canonical customer ID or Auth0 metadata;
+- refuses to guess when duplicate customers or subscriptions exist;
+- ensures all metered prices for the selected product are attached;
+- updates the SN API subscription, plan, billing status, and role;
+- clears cached SN API permissions;
+- writes canonical user/company IDs back to Stripe and Moesif;
+- grants credits using Stripe idempotency keys.
+
+An existing unscoped portal API key immediately receives the permissions of the
+new role after a successful plan change. A key created with explicit scopes stays
+bounded by those scopes. Cancelled or revoked keys are never resurrected after a
+new purchase; the customer creates a fresh key.
