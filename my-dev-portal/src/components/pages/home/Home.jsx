@@ -7,6 +7,7 @@ import { LoginButton } from "../../buttons/login-button";
 import openOpportunitiesLogo from "../../../images/assets/open-opportunities-logo.png";
 import { PageLoader } from "../../page-loader";
 import useAuthCombined from "../../../hooks/useAuthCombined";
+import SessionExpiredNotice from "../../session-expired-notice";
 
 function Home() {
   const { isAuthenticated, isLoading } = useAuthCombined();
@@ -21,6 +22,7 @@ function Home() {
           <div className="brand-lockup brand-lockup--body">
             <img src={openOpportunitiesLogo} alt="Open Opportunities" />
           </div>
+          <SessionExpiredNotice />
           <div className="hero-kicker">Open Opportunities API</div>
           <h1>Developer Portal</h1>
           <p>

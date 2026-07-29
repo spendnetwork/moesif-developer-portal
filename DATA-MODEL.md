@@ -44,7 +44,7 @@ Moesif have following "entities", for more info see https://www.moesif.com/docs/
 - User
   - There is concept of user_id in auth provider.
   - Assume each user is uniq by email.
-  - For Okta and Auth0, the jwt generated for idToken include the email as part of the claim, which will be used look up corresponding "Stripe Customer".
+  - For Auth0, the jwt generated for idToken include the email as part of the claim, which will be used look up corresponding "Stripe Customer".
   - Thus, email is required as part of the idToken or accessToken generated.
 - Organization:
   - Some identity providers have a concept of organization, it is like a company with many users. Not used in this example. But if your business is B2B, you might leverage this feature.

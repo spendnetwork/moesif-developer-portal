@@ -1,16 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { LoginCallback } from "@okta/okta-react";
-import { useAuth0 } from "@auth0/auth0-react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Dashboard from "./components/pages/dashboard/Dashboard";
 import Settings from "./components/pages/settings/Settings";
-import { OktaProviderWithNavigate } from "./OktaProviderWithNavigate";
 import { Auth0ProviderWithNavigate } from "./Auth0ProviderWithNavigate";
 import Keys from "./components/pages/keys/Keys";
-import SecureRoute from "./components/okta/SecureRoute";
 import { AuthenticationGuard } from "./components/authentication-guard";
-import SignUp from "./components/pages/signup/SignUp";
-import RedirectToSignIn from "./components/pages/signup/OktaPostCreate";
 import Return from "./components/pages/checkout/Return";
 import Plans from "./components/pages/plans/Plans";
 import Home from "./components/pages/home/Home";
@@ -18,162 +12,57 @@ import Checkout from "./components/pages/checkout/Checkout";
 import Subscription from "./components/pages/subscription/Subscription";
 import Welcome from "./components/pages/welcome/Welcome";
 import { PageFooter } from "./components/page-footer";
-import { PageLoader } from "./components/page-loader";
 import SessionTimeout from "./components/session-timeout";
 
-function Auth0HomeRoute() {
-  const { isAuthenticated, isLoading } = useAuth0();
-
-  if (isLoading) return <PageLoader />;
-  return isAuthenticated ? <Navigate replace to="/dashboard" /> : <Home />;
-}
-
 function App() {
-  const { isAuthenticated } = useAuth0();
-
-  if (import.meta.env.REACT_APP_AUTH_PROVIDER === "Okta") {
-    return (
+  return (
+    <div>
       <div>
-        <div>
-          <BrowserRouter>
-            <OktaProviderWithNavigate>
-              <SessionTimeout />
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/signup" element={<SignUp />} />
-                <Route path="login/callback" element={<LoginCallback />} />
-                <Route path="/return" element={<Return />} />
-                <Route path="/plans" element={<Plans />} />
-                <Route
-                  path="login/oktapostcreate"
-                  element={<RedirectToSignIn />}
-                />
-                <Route
-                  path="/checkout"
-                  element={
-                    <SecureRoute>
-                      <Checkout />
-                    </SecureRoute>
-                  }
-                />
-                <Route
-                  path="/return"
-                  element={
-                    <SecureRoute>
-                      <Return />
-                    </SecureRoute>
-                  }
-                />
-                <Route
-                  path="dashboard"
-                  element={
-                    <SecureRoute>
-                      <Dashboard />
-                    </SecureRoute>
-                  }
-                />
-                <Route
-                  path="settings"
-                  element={
-                    <SecureRoute>
-                      <Settings />
-                    </SecureRoute>
-                  }
-                />
-                <Route
-                  path="keys"
-                  element={
-                    <SecureRoute>
-                      <Keys />
-                    </SecureRoute>
-                  }
-                />
-                <Route
-                  path="welcome"
-                  element={
-                    <SecureRoute>
-                      <Welcome />
-                    </SecureRoute>
-                  }
-                />
-                <Route
-                  path="subscriptions"
-                  element={
-                    <SecureRoute>
-                      <Subscription />
-                    </SecureRoute>
-                  }
-                />
-              </Routes>
-            </OktaProviderWithNavigate>
-          </BrowserRouter>
-        </div>
-        <PageFooter />
+        <BrowserRouter>
+          <Auth0ProviderWithNavigate>
+            <SessionTimeout />
+            <Routes>
+              {/* Home redirects signed-in users to /dashboard itself. The
+                  redirect can't live here: App sits above Auth0Provider, so a
+                  useAuth0() call at this level would always read the default
+                  (unauthenticated) context. */}
+              <Route path="/" element={<Home />} />
+              <Route path="/plans" element={<Plans />} />
+              <Route
+                path="/checkout"
+                element={<AuthenticationGuard component={Checkout} />}
+              />
+              <Route
+                path="/return"
+                element={<AuthenticationGuard component={Return} />}
+              />
+              <Route
+                path="dashboard"
+                element={<AuthenticationGuard component={Dashboard} />}
+              />
+              <Route
+                path="settings"
+                element={<AuthenticationGuard component={Settings} />}
+              />
+              <Route
+                path="keys"
+                element={<AuthenticationGuard component={Keys} />}
+              />
+              <Route
+                path="welcome"
+                element={<AuthenticationGuard component={Welcome} />}
+              />
+              <Route
+                path="subscription"
+                element={<AuthenticationGuard component={Subscription} />}
+              />
+            </Routes>
+          </Auth0ProviderWithNavigate>
+        </BrowserRouter>
       </div>
-    );
-  } else if (import.meta.env.REACT_APP_AUTH_PROVIDER === "Auth0") {
-    return (
-      <div>
-        <div>
-          <BrowserRouter>
-            <Auth0ProviderWithNavigate>
-              <SessionTimeout />
-              <Routes>
-                <Route
-                  path="/"
-                  element={
-                    !isAuthenticated ? (
-                      <Home />
-                    ) : (
-                      <Navigate replace to={"dashboard"} />
-                    )
-                  }
-                />
-                <Route path="/return" element={<Return />} />
-                <Route path="/plans" element={<Plans />} />
-                <Route
-                  path="/checkout"
-                  element={<AuthenticationGuard component={Checkout} />}
-                />
-                <Route
-                  path="/return"
-                  element={<AuthenticationGuard component={Return} />}
-                />
-                <Route
-                  path="dashboard"
-                  element={<AuthenticationGuard component={Dashboard} />}
-                />
-                <Route
-                  path="settings"
-                  element={<AuthenticationGuard component={Settings} />}
-                />
-                <Route
-                  path="keys"
-                  element={<AuthenticationGuard component={Keys} />}
-                />
-                <Route
-                  path="welcome"
-                  element={<AuthenticationGuard component={Welcome} />}
-                />
-                <Route
-                  path="subscription"
-                  element={<AuthenticationGuard component={Subscription} />}
-                />
-              </Routes>
-            </Auth0ProviderWithNavigate>
-          </BrowserRouter>
-        </div>
-        <PageFooter />
-      </div>
-    );
-  } else {
-    return (
-      <div className="App">
-        Please check your env files, the REACT_APP_AUTH_PROVIDER variable must
-        be provided.
-      </div>
-    );
-  }
+      <PageFooter />
+    </div>
+  );
 }
 
 export default App;

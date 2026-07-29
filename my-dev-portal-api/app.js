@@ -4,8 +4,6 @@ require("dotenv").config({ path: [".env", ".env.template"] });
 const bodyParser = require("body-parser");
 const moesif = require("moesif-nodejs");
 const cors = require("cors");
-const fetch = require("node-fetch");
-const { Client } = require("@okta/okta-sdk-nodejs");
 
 const {
   verifyStripeSession,
@@ -332,76 +330,6 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
   } catch (error) {
     // No active subscription yet - not an error state for this widget.
     return res.status(200).json({ hasSubscription: false });
-  }
-});
-
-app.post("/okta/register", jsonParser, async (req, res) => {
-  try {
-    const oktaClient = new Client({
-      orgUrl: process.env.OKTA_DOMAIN,
-      token: process.env.OKTA_API_TOKEN,
-    });
-
-    const { firstName, lastName, email, password } = req.body;
-
-    const newUser = {
-      profile: {
-        firstName,
-        lastName,
-        email,
-        login: email,
-      },
-      credentials: {
-        password: {
-          value: password,
-        },
-      },
-    };
-
-    const response = await fetch(`${process.env.OKTA_DOMAIN}/api/v1/users`, {
-      method: "POST",
-      headers: {
-        Authorization: `SSWS ${process.env.OKTA_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(newUser),
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to create user");
-    }
-
-    const createdUser = await response.json();
-
-    res
-      .status(201)
-      .json({ message: "User created successfully", user: createdUser });
-
-    try {
-      console.log(
-        `URL = ${process.env.OKTA_DOMAIN}/api/v1/apps/${process.env.OKTA_APPLICATION_ID}/users/${createdUser.id}`
-      );
-      const assignUserResponse = await fetch(
-        `${process.env.OKTA_DOMAIN}/api/v1/apps/${process.env.OKTA_APPLICATION_ID}/users/${createdUser.id}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `SSWS ${process.env.OKTA_API_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (!assignUserResponse.ok) {
-        throw new Error("Failed to assign user to application");
-      }
-      console.log("User assigned to application successfully.");
-    } catch (error) {
-      console.error("Failed to assign user to application:", error.message);
-    }
-  } catch (error) {
-    console.error("Error creating user:", error);
-    res.status(500).json({ message: "Failed to create user" });
   }
 });
 

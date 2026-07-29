@@ -31,7 +31,6 @@ Below are the currently supported solutions in the developer portal. They may be
 ### Identity / Access Management
 
 - Auth0
-- Okta
 
 ### Payment Provider
 
@@ -62,10 +61,9 @@ Below is a step-by-step guide on how to set up the Moesif Developer Portal. Sinc
 
 ### 1. Configuring Identity Provider
 
-In order for new customers to sign up, you must configure an identity provider. Moesif supports two identity providers:
+In order for new customers to sign up, you must configure an identity provider. This portal uses Auth0:
 
 - [Configure the portal with Auth0](https://www.moesif.com/docs/developer-portal/configuring-auth0-as-an-identity-provider/)
-- [Configure the portal with Okta](https://www.moesif.com/docs/developer-portal/configuring-okta-as-an-identity-provider/)
 
 ### 2. Configuring Billing Provider
 

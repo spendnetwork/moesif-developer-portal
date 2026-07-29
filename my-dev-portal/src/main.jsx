@@ -14,6 +14,12 @@ createRoot(document.getElementById('root')).render(
         keepPreviousData: true,
         revalidateOnFocus: true,
         dedupingInterval: 5000,
+        // Never retry an expired/rejected token: the session is over and the
+        // app is already logging the user out, so retries would only hammer
+        // the API from behind a redirect. Everything else keeps SWR's default
+        // backoff.
+        shouldRetryOnError: (error) =>
+          !(error?.status === 401 || error?.sessionExpired),
       }}
     >
       <App />

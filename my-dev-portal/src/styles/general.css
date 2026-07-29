@@ -209,6 +209,40 @@ code {
   font-size: 1.4rem;
 }
 
+/* Shown on the home page after a session-expiry logout. */
+.session-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.2rem;
+  width: 100%;
+  max-width: 48rem;
+  margin-bottom: 2rem;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid #ead27a;
+  border-radius: var(--radius-control);
+  color: #725300;
+  background: #fff8dc;
+  font-size: 1.4rem;
+  text-align: left;
+}
+
+.session-notice__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.session-notice__dismiss {
+  margin-left: auto;
+  padding: 0 0.4rem;
+  border: 0;
+  color: inherit;
+  background: none;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .empty-state {
   display: grid;
   min-height: 28rem;

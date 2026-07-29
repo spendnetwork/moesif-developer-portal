@@ -9,6 +9,7 @@ import usePlans from "../../../hooks/usePlans";
 import SVG from "react-inlinesvg";
 import noPriceIcon from "../../../images/icons/empty-state-price.svg";
 import SubDisplay from "./SubDisplay";
+import { isSessionExpiredError } from "../../../lib/session-expiry";
 
 function Subscription(props) {
   const { isAuthenticated, isLoading, user, idToken, accessToken } =
@@ -21,12 +22,18 @@ function Subscription(props) {
     });
   const { plansLoading, plans } = usePlans();
 
+  // An expired token is not a load failure — SessionTimeout is already
+  // logging the user out, so show the loader rather than a misleading
+  // "we could not load your subscriptions" message.
+  const sessionExpired = isSessionExpiredError(subscriptionsError);
+
   if (
     isLoading ||
     !finishedLoading ||
     !isAuthenticated ||
     plansLoading ||
-    !idToken
+    !idToken ||
+    sessionExpired
   ) {
     return (
       <PageLayout>

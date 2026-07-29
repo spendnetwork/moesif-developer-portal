@@ -1,46 +1,29 @@
 import { useState, useEffect } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
-import { useOktaAuth } from "@okta/okta-react";
-import { useNavigate } from "react-router-dom";
 import { moesifIdentifyUserFrontEndIfPossible } from "../common/utils";
+import { notifySessionExpired } from "../lib/session-expiry";
 
-// purpose to consolidate the different hooks from auth provider.
-// and have a consistent interface to get idToken, accessToken, and userObject
+// Auth0 errors that mean the underlying session is gone, so a silent token
+// refresh can never succeed. Without treating these as an expiry the app sits
+// on a permanent loading spinner: pages wait for an idToken that will never
+// arrive.
+const AUTH0_SESSION_DEAD = [
+  "login_required",
+  "consent_required",
+  "interaction_required",
+  "invalid_grant",
+  "missing_refresh_token",
+];
 
-function useAuthOktaVersion() {
-  const navigate = useNavigate();
-  const { authState } = useOktaAuth();
-
-  const isAuthenticated = authState?.isAuthenticated;
-
-  let isLoading = !authState || authState?.isPending;
-  let user = authState?.idToken?.claims;
-
-  const userEmail = user?.email || authState?.accessToken?.claims?.sub;
-  const idToken = authState?.idToken;
-  useEffect(() => {
-    if (isAuthenticated && idToken) {
-      moesifIdentifyUserFrontEndIfPossible(idToken);
-    }
-  }, [isAuthenticated, idToken]);
-
-  const handleSignUp = async ({ returnTo }) => {
-    navigate(`/signup?return_to=${encodeURIComponent(returnTo)}`);
-  };
-
-  return {
-    isAuthenticated,
-    isLoading,
-    user,
-    idToken: authState?.idToken,
-    accessToken: authState?.accessToken,
-    oktaAuthState: authState,
-    userEmail,
-    handleSignUp,
-  };
+function isSessionDeadError(err) {
+  return AUTH0_SESSION_DEAD.includes(err?.error);
 }
 
-function useAuthAuth0Version() {
+// Single place to read the current user, the raw idToken sent to the portal
+// API, and the access token. Kept as one hook (rather than pages calling
+// useAuth0 directly) because it also owns the token-refresh failure handling
+// below.
+export default function useAuthCombined() {
   const {
     user: auth0User,
     isLoading: auth0IsLoading,
@@ -78,10 +61,16 @@ function useAuthAuth0Version() {
         })
         .catch((err) => {
           console.error("failed to load access token", err);
+          if (isSessionDeadError(err)) notifySessionExpired();
         });
 
       getIdTokenClaims()
         .then((result) => {
+          // No claims means Auth0 has no usable session left for this user.
+          if (!result?.__raw) {
+            notifySessionExpired();
+            return;
+          }
           const idToken = result.__raw;
           // https://github.com/auth0/auth0-react/issues/262
           setIdToken(idToken);
@@ -89,6 +78,7 @@ function useAuthAuth0Version() {
         })
         .catch((err) => {
           console.error("failed to load id token", err);
+          if (isSessionDeadError(err)) notifySessionExpired();
         });
     }
   }, [isAuthenticated, getAccessTokenSilently, getIdTokenClaims]);
@@ -100,13 +90,7 @@ function useAuthAuth0Version() {
     handleSignUp,
     idToken,
     accessToken,
+    userEmail: auth0User?.email,
     ...rest,
   };
 }
-
-const useAuthCombined =
-  import.meta.env.REACT_APP_AUTH_PROVIDER === "Okta"
-    ? useAuthOktaVersion
-    : useAuthAuth0Version;
-
-export default useAuthCombined;
