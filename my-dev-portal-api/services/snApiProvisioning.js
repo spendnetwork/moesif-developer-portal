@@ -177,6 +177,42 @@ function rotateSnApiKey(authUser, apiKeyId) {
   );
 }
 
+function createSnApiPlanChange(authUser, planChange) {
+  return snApiKeyRequest("/api/v3/developer-portal/plan-changes", {
+    method: "POST",
+    body: { auth0_user_id: authUser.sub, ...planChange },
+  });
+}
+
+function getSnApiCurrentPlanChange(authUser) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/plan-changes/current?auth0_user_id=${encodeURIComponent(
+      authUser.sub
+    )}`
+  );
+}
+
+function getSnApiPlanChangeByCustomer(stripeCustomerId) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/plan-changes/by-customer/${encodeURIComponent(
+      stripeCustomerId
+    )}`
+  );
+}
+
+function listSnApiDuePlanChanges(limit = 100) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/plan-changes/due?limit=${encodeURIComponent(limit)}`
+  );
+}
+
+function updateSnApiPlanChange(requestId, update) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/plan-changes/${encodeURIComponent(requestId)}`,
+    { method: "PATCH", body: update }
+  );
+}
+
 module.exports = {
   provisionSnApiCustomer,
   checkSnApiEmailAvailability,
@@ -185,4 +221,9 @@ module.exports = {
   createSnApiKey,
   revokeSnApiKey,
   rotateSnApiKey,
+  createSnApiPlanChange,
+  getSnApiCurrentPlanChange,
+  getSnApiPlanChangeByCustomer,
+  listSnApiDuePlanChanges,
+  updateSnApiPlanChange,
 };

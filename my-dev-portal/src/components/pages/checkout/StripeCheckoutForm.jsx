@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { loadStripe } from "@stripe/stripe-js";
+import { useNavigate } from "react-router-dom";
 
 import {
   EmbeddedCheckoutProvider,
@@ -14,6 +15,8 @@ const stripePromise = loadStripe(
 // https://docs.stripe.com/checkout/embedded/quickstart
 
 function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
+  const navigate = useNavigate();
+  const checkoutRequestId = useRef(crypto.randomUUID());
   const [clientSecret, setClientSecret] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
 
@@ -24,6 +27,7 @@ function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
     }
 
     const params = new URLSearchParams({ email: user.email });
+    params.set("request_id", checkoutRequestId.current);
     if (planId) {
       params.set("plan_id", planId);
     } else {
@@ -44,12 +48,20 @@ function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
     )
       .then(async (res) => {
         const data = await res.json();
-        if (!res.ok || !data.clientSecret) {
+        if (!res.ok) {
           throw new Error(data.message || "Unable to start checkout");
         }
+        if (data.updated || data.scheduled) {
+          return data;
+        }
+        if (!data.clientSecret) throw new Error("Unable to start checkout");
         return data;
       })
       .then((data) => {
+        if (data.updated || data.scheduled) {
+          navigate("/usage", { replace: true });
+          return;
+        }
         setCheckoutError("");
         setClientSecret(data.clientSecret);
       })
@@ -57,7 +69,7 @@ function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
         console.error("Failed to create checkout session", err);
         setCheckoutError(err.message || "Unable to start checkout");
       });
-  }, [priceId, planId, user, idToken, quantity]);
+  }, [priceId, planId, user, idToken, quantity, navigate]);
 
   return (
     <div id="checkout">

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node app.js",
     "start-server": "node app.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test test/*.test.js",
     "postinstall": "npm run install-plugins",
     "install-plugins": "find ../plugins -maxdepth 1 -type d -exec sh -c 'if [ -f \"{}/package.json\" ]; then cd \"{}\" && npm install; fi' \\;"
   },

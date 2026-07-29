@@ -1,4 +1,5 @@
 const StripeSDK = require("stripe");
+const crypto = require("crypto");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
 const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
@@ -84,6 +85,46 @@ async function getActiveStripeSubscription(email, authUserId) {
   return { customer, subscription, price, product };
 }
 
+async function getPlanPrices(planId) {
+  const prices = await stripe.prices.list({
+    product: planId,
+    active: true,
+    limit: 100,
+  });
+  if (!prices.data.length) {
+    throw new Error(`No active prices found for plan ${planId}`);
+  }
+
+  const commitmentPrices = prices.data.filter(
+    (price) =>
+      isCommitmentPrice(price) || price.recurring?.usage_type === "licensed"
+  );
+  const meteredPrices = prices.data.filter(
+    (price) => price.recurring?.usage_type === "metered"
+  );
+  if (commitmentPrices.length > 1) {
+    throw new Error(`Multiple active commitment prices found for plan ${planId}`);
+  }
+  if (!meteredPrices.length) {
+    throw new Error(`No active metered prices found for plan ${planId}`);
+  }
+  return { commitmentPrices, meteredPrices };
+}
+
+async function getPlanKeyForProduct(productId) {
+  const product = await stripe.products.retrieve(productId);
+  const configured = product.metadata?.plan_key;
+  if (configured) return String(configured).trim().toLowerCase();
+  const name = String(product.name || "").toLowerCase();
+  const planKey = ["basic", "growth", "enterprise"].find((key) =>
+    name.includes(key)
+  );
+  if (!planKey) {
+    throw new Error(`Product ${productId} is missing plan_key metadata`);
+  }
+  return planKey;
+}
+
 function getStripeCustomer(email) {
   return fetch(
     `https://api.stripe.com/v1/customers/search?query=email:"${encodeURIComponent(
@@ -95,6 +136,23 @@ function getStripeCustomer(email) {
       },
     }
   ).then((res) => res.json());
+}
+
+// Webhooks identify the customer by id, not email, so subscription enforcement
+// needs a direct lookup (the metadata carries the Auth0 subject).
+function getStripeCustomerById(customerId) {
+  return stripe.customers.retrieve(customerId);
+}
+
+// Every subscription for a customer, whatever its status, so enforcement can
+// tell "nothing live left" from "one of several ended".
+async function listStripeSubscriptions(customerId) {
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 100,
+  });
+  return subscriptions.data;
 }
 
 // Developers: you might consider have something like reddis
@@ -129,18 +187,20 @@ async function getOrCreateStripeCustomerId(email, authUser) {
 
   if (!customerId) {
     // If no customerId exists, create a new one
-    const customer = await stripe.customers.create({
-      email: email,
-      metadata: {
-        // add the user id from identify provider to
-        // stripe metadata for customer.
-        // Because, an alternative approach is to tie
-        // the identity provider's user id to stripe customer
-        // and look up customer object using user_id instead of
-        // email.
-        authUserId: authUser?.sub,
+    const identity = authUser?.sub || email.toLowerCase();
+    const identityHash = crypto
+      .createHash("sha256")
+      .update(identity)
+      .digest("hex");
+    const customer = await stripe.customers.create(
+      {
+        email: email,
+        metadata: {
+          authUserId: authUser?.sub,
+        },
       },
-    });
+      { idempotencyKey: `portal-customer-${identityHash}` }
+    );
 
     customerId = customer.id;
   }
@@ -148,52 +208,54 @@ async function getOrCreateStripeCustomerId(email, authUser) {
   return customerId;
 }
 
-async function createStripeCheckoutSession(email, priceId, quantity, authUser) {
+async function createStripeCheckoutSession(email, priceId, quantity, authUser, requestId) {
   const customerId = await getOrCreateStripeCustomerId(email, authUser);
 
-  const session = await stripe.checkout.sessions.create({
-    ui_mode: "embedded",
-    line_items: [
-      {
-        // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
-        price: priceId,
-        // for metered billing, do NOT include quantity
-        quantity: quantity ? parseInt(quantity) || 1 : undefined,
-      },
-    ],
+  const subscriptions = await stripe.subscriptions.list({
     customer: customerId,
-    mode: "subscription",
-    return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&price_id=${priceId}`,
+    status: "all",
+    limit: 10,
   });
+  const activeSubscriptions = subscriptions.data.filter((candidate) =>
+    ["active", "trialing", "past_due"].includes(candidate.status)
+  );
+  if (activeSubscriptions.length) {
+    const error = new Error(
+      "An active subscription already exists; select a plan to change it"
+    );
+    error.code =
+      activeSubscriptions.length > 1
+        ? "multiple_active_subscriptions"
+        : "active_subscription_exists";
+    throw error;
+  }
+
+  const session = await stripe.checkout.sessions.create(
+    {
+      ui_mode: "embedded",
+      line_items: [
+        {
+          price: priceId,
+          quantity: quantity ? parseInt(quantity) || 1 : undefined,
+        },
+      ],
+      customer: customerId,
+      client_reference_id: authUser?.sub,
+      mode: "subscription",
+      return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&price_id=${priceId}`,
+    },
+    requestId ? { idempotencyKey: `checkout-${requestId}` } : undefined
+  );
 
   return session;
 }
 
-async function createStripePlanCheckoutSession(email, planId, authUser) {
+async function createStripePlanCheckoutSession(email, planId, authUser, requestId) {
   const customerId = await getOrCreateStripeCustomerId(email, authUser);
 
   // A plan (Stripe product) can carry several usage prices - one per
   // billing meter - so the subscription must include every active price.
-  const prices = await stripe.prices.list({
-    product: planId,
-    active: true,
-    limit: 100,
-  });
-  if (!prices.data.length) {
-    throw new Error(`No active prices found for plan ${planId}`);
-  }
-
-  const commitmentPrices = prices.data.filter(
-    (price) =>
-      isCommitmentPrice(price) || price.recurring?.usage_type === "licensed"
-  );
-  const meteredPrices = prices.data.filter(
-    (price) => price.recurring?.usage_type === "metered"
-  );
-
-  if (commitmentPrices.length > 1) {
-    throw new Error(`Multiple active commitment prices found for plan ${planId}`);
-  }
+  const { commitmentPrices, meteredPrices } = await getPlanPrices(planId);
 
   // Stripe Checkout cannot create a mixed-interval subscription. For a
   // commitment plan, Checkout collects the annual commitment first and the
@@ -211,23 +273,141 @@ async function createStripePlanCheckoutSession(email, planId, authUser) {
     quantity: price.recurring?.usage_type === "metered" ? undefined : 1,
   }));
 
-  const session = await stripe.checkout.sessions.create({
-    ui_mode: "embedded",
-    line_items: lineItems,
-    customer: customerId,
-    mode: "subscription",
-    metadata: {
-      plan_id: planId,
-      attach_metered_prices: commitmentPrices.length ? "true" : "false",
+  const session = await stripe.checkout.sessions.create(
+    {
+      ui_mode: "embedded",
+      line_items: lineItems,
+      customer: customerId,
+      client_reference_id: authUser?.sub,
+      mode: "subscription",
+      metadata: {
+        plan_id: planId,
+        attach_metered_prices: commitmentPrices.length ? "true" : "false",
+      },
+      subscription_data: {
+        billing_mode: { type: "flexible" },
+        metadata: { plan_id: planId },
+      },
+      return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${planId}`,
     },
-    subscription_data: {
-      billing_mode: { type: "flexible" },
-      metadata: { plan_id: planId },
-    },
-    return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${planId}`,
-  });
+    requestId ? { idempotencyKey: `checkout-${requestId}` } : undefined
+  );
 
   return session;
+}
+
+async function prepareStripePlanChange(email, planId, authUser) {
+  const { customer, subscription, product } =
+    await getActiveStripeSubscription(email, authUser?.sub);
+  if (["past_due", "unpaid", "incomplete"].includes(subscription.status)) {
+    const error = new Error(
+      "Resolve the outstanding subscription payment before changing plans"
+    );
+    error.code = "outstanding_payment";
+    throw error;
+  }
+  const openInvoices = await stripe.invoices.list({
+    customer: customer.id,
+    subscription: subscription.id,
+    status: "open",
+    limit: 1,
+  });
+  if (openInvoices.data.some((invoice) => invoice.amount_remaining > 0)) {
+    const error = new Error(
+      "Resolve the outstanding invoice before changing plans"
+    );
+    error.code = "outstanding_payment";
+    throw error;
+  }
+  await getPlanPrices(planId);
+  const currentProductId =
+    typeof product === "string" ? product : product?.id;
+  const [fromPlanKey, toPlanKey] = await Promise.all([
+    getPlanKeyForProduct(currentProductId),
+    getPlanKeyForProduct(planId),
+  ]);
+  if (fromPlanKey === toPlanKey) {
+    const error = new Error("You are already subscribed to this plan");
+    error.code = "already_on_plan";
+    throw error;
+  }
+
+  const periodEnds = subscription.items.data
+    .filter((item) => item.price?.recurring?.usage_type === "metered")
+    .map((item) => item.current_period_end)
+    .filter((value) => Number.isFinite(value));
+  if (!periodEnds.length) {
+    throw new Error("Current subscription has no metered billing period");
+  }
+
+  return {
+    customer,
+    subscription,
+    fromPlanKey,
+    toPlanKey,
+    targetProductId: planId,
+    effectiveAt: Math.min(...periodEnds),
+  };
+}
+
+async function activateStripePlanChange(planChange) {
+  const subscription = await stripe.subscriptions.retrieve(
+    planChange.stripe_subscription_id,
+    { expand: ["items.data.price.product", "latest_invoice.payment_intent"] }
+  );
+  const customerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer?.id;
+  if (customerId !== planChange.stripe_customer_id) {
+    throw new Error("Plan change subscription does not belong to its customer");
+  }
+
+  const { commitmentPrices, meteredPrices } = await getPlanPrices(
+    planChange.target_product_id
+  );
+  const targetPrices = [...commitmentPrices, ...meteredPrices];
+  const items = [
+    ...subscription.items.data.map((item) => ({ id: item.id, deleted: true })),
+    ...targetPrices.map((price) => ({ price: price.id })),
+  ];
+  const updated = await stripe.subscriptions.update(
+    subscription.id,
+    {
+      items,
+      billing_cycle_anchor: "unchanged",
+      proration_behavior: "always_invoice",
+      payment_behavior: "pending_if_incomplete",
+      metadata: {
+        ...subscription.metadata,
+        plan_id: planChange.target_product_id,
+        plan_change_request_id: planChange.request_id,
+      },
+      expand: ["items.data.price.product", "latest_invoice.payment_intent"],
+    },
+    { idempotencyKey: `plan-change-${planChange.request_id}` }
+  );
+  return {
+    subscription: updated,
+    commitmentRequired: commitmentPrices.length > 0,
+    invoice:
+      typeof updated.latest_invoice === "object" ? updated.latest_invoice : null,
+    paymentPending: Boolean(updated.pending_update),
+  };
+}
+
+function getStripeSubscription(subscriptionId) {
+  return stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ["items.data.price.product", "latest_invoice.payment_intent"],
+  }, requestId ? { idempotencyKey: `checkout-${requestId}` } : undefined);
+}
+
+async function listStripeInvoices(subscriptionId, limit = 10) {
+  const invoices = await stripe.invoices.list({
+    subscription: subscriptionId,
+    limit,
+  });
+  return invoices.data;
 }
 
 async function attachPlanMeteredPrices(checkoutSession) {
@@ -279,6 +459,7 @@ async function updateStripeCustomerIdentity(
     sn_user_id: String(moesifUserId),
     sn_organization_id: String(moesifCompanyId),
     authUserId: auth0UserId,
+    current_subscription_id: subscriptionId || "",
   };
 
   const customer = await stripe.customers.update(customerId, { metadata });
@@ -571,9 +752,15 @@ module.exports = {
   hasActiveStripeSubscription,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
+  prepareStripePlanChange,
+  activateStripePlanChange,
+  getStripeSubscription,
+  listStripeInvoices,
   attachPlanMeteredPrices,
   updateStripeCustomerIdentity,
   getStripeCustomer,
+  getStripeCustomerById,
+  listStripeSubscriptions,
   getStripeCustomerId,
   getStripeCustomerIdFromCache,
   getActiveStripeSubscription,

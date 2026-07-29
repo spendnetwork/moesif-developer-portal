@@ -1,6 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
 
 import useUsageSummary from "../../../hooks/useUsageSummary";
+import usePlanChange from "../../../hooks/usePlanChange";
+import { apiRequest } from "../../../lib/portal-api";
 
 // Stripe amounts are in minor units (pence); format to the major currency unit.
 function formatMoney(minorUnits, currency) {
@@ -23,6 +26,22 @@ function formatDate(unixSeconds) {
 
 function UsageSummary({ idToken }) {
   const { usage, usageLoading } = useUsageSummary({ idToken });
+  const { planChange, refreshPlanChange } = usePlanChange({ idToken });
+  const [cancellingChange, setCancellingChange] = useState(false);
+  const [planChangeError, setPlanChangeError] = useState("");
+
+  async function cancelPlanChange() {
+    setCancellingChange(true);
+    setPlanChangeError("");
+    try {
+      await apiRequest("/plan-change", idToken, { method: "DELETE" });
+      await refreshPlanChange();
+    } catch (error) {
+      setPlanChangeError(error.message);
+    } finally {
+      setCancellingChange(false);
+    }
+  }
 
   if (usageLoading && !usage) {
     return (
@@ -66,6 +85,48 @@ function UsageSummary({ idToken }) {
 
   return (
     <section className="usage-summary">
+      {planChange && (
+        <div className={`plan-change-notice plan-change-notice--${planChange.status}`}>
+          <div>
+            <strong>
+              {planChange.status === "payment_failed"
+                ? "Payment required"
+                : `${planChange.to_plan_key} plan scheduled`}
+            </strong>
+            <p>
+              {planChange.status === "payment_failed"
+                ? "We could not collect the payment required to complete your plan change. Your current plan remains active."
+                : `Your current ${planChange.from_plan_key} plan remains active until ${new Date(
+                    planChange.effective_at
+                  ).toLocaleDateString(undefined, {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })}. The new plan activates only after the required payments succeed.`}
+            </p>
+          </div>
+          <div className="plan-change-notice__actions">
+            <span>{planChange.status.replaceAll("_", " ")}</span>
+            {["scheduled", "awaiting_current_invoice", "payment_failed"].includes(
+              planChange.status
+            ) && (
+              <button
+                className="button button--outline-secondary"
+                onClick={cancelPlanChange}
+                disabled={cancellingChange}
+              >
+                {cancellingChange ? "Cancelling..." : "Cancel change"}
+              </button>
+            )}
+            {planChange.status === "payment_failed" && (
+              <Link to="/billing" className="button button--primary">
+                Resolve payment
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+      {planChangeError && <div className="keys-error">{planChangeError}</div>}
       <div className="usage-summary__cards">
         <div className="usage-summary__metric">
           <span className="usage-summary__label">Usage this period</span>

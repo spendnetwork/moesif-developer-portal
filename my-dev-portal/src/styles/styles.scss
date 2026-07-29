@@ -163,6 +163,57 @@ $nav-bar-color: #ffffff;
   width: 100%;
 }
 
+.plan-change-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 1.6rem;
+  border: 1px solid var(--button-outline);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.plan-change-notice strong {
+  text-transform: capitalize;
+}
+
+.plan-change-notice p {
+  margin: 0.5rem 0 0;
+  color: var(--muted-text-color);
+}
+
+.plan-change-notice__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.plan-change-notice__actions > span {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-pill);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  font-size: 1.2rem;
+  text-transform: capitalize;
+}
+
+.plan-change-notice--payment_failed {
+  border-color: #e3aaa3;
+  background: #fff7f6;
+}
+
+.plan-change-catalogue-notice {
+  margin-bottom: 2rem;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--button-outline);
+  border-radius: var(--radius-control);
+  color: var(--body-text-color);
+  background: var(--surface-muted);
+}
+
 .usage-summary__cards {
   display: grid;
   gap: 1.6rem;

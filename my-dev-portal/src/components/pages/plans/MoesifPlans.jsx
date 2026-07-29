@@ -7,6 +7,8 @@ import PlanTile from "./PlanTile";
 import { useAuth0 } from "@auth0/auth0-react";
 import { SignupButton } from "../../buttons/signup-button";
 import usePlans from "../../../hooks/usePlans";
+import useAuthCombined from "../../../hooks/useAuthCombined";
+import usePlanChange from "../../../hooks/usePlanChange";
 
 const PLAN_KEY_ORDER = ["basic", "growth", "enterprise"];
 
@@ -19,6 +21,8 @@ function getCatalogPlanKey(plan) {
 
 function MoesifPlans(props) {
   const { isAuthenticated } = useAuth0();
+  const { idToken } = useAuthCombined();
+  const { planChange } = usePlanChange({ idToken });
 
   const {
     plans,
@@ -66,6 +70,13 @@ function MoesifPlans(props) {
 
   const getPlanActionButton = (plan) => {
     if (isAuthenticated) {
+      if (planChange) {
+        return (
+          <button disabled className="button__price-action">
+            Change scheduled
+          </button>
+        );
+      }
       return (
         <Link to={`/checkout?plan_id_to_purchase=${encodeURIComponent(plan.id)}`}>
           <button className="button__price-action">Select plan</button>
@@ -100,6 +111,12 @@ function MoesifPlans(props) {
           usage.
         </p>
       </div>
+      {planChange && (
+        <div className="plan-change-catalogue-notice">
+          A change from {planChange.from_plan_key} to {planChange.to_plan_key} is
+          already scheduled. Complete or cancel it before selecting another plan.
+        </div>
+      )}
       {error && !validating && (!plans || plans.length === 0) && (
         <div className="alert-error" role="alert">
           We could not load the plans. Please refresh the page or try again

@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const path = require("path");
 require("dotenv").config({ path: [".env", ".env.template"] });
 const bodyParser = require("body-parser");
@@ -14,11 +15,20 @@ const {
   constructStripeEvent,
   grantCommitmentFromInvoice,
   getStripeCustomer,
+  getStripeCustomerById,
+  listStripeSubscriptions,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
+  prepareStripePlanChange,
+  activateStripePlanChange,
+  getStripeSubscription,
+  listStripeInvoices,
   attachPlanMeteredPrices,
   updateStripeCustomerIdentity,
 } = require("./services/stripeApis");
+const {
+  handleSubscriptionEnded,
+} = require("./services/subscriptionEnforcement");
 const {
   provisionSnApiCustomer,
   checkSnApiEmailAvailability,
@@ -27,7 +37,17 @@ const {
   createSnApiKey,
   revokeSnApiKey,
   rotateSnApiKey,
+  createSnApiPlanChange,
+  getSnApiCurrentPlanChange,
+  getSnApiPlanChangeByCustomer,
+  listSnApiDuePlanChanges,
+  updateSnApiPlanChange,
 } = require("./services/snApiProvisioning");
+const {
+  processPaidInvoice,
+  processFailedInvoice,
+  reconcileDuePlanChanges,
+} = require("./services/planChangeService");
 const {
   syncToMoesif,
   getInfoForEmbeddedWorkspaces,
@@ -79,6 +99,19 @@ if (!templateWorkspaceIdLiveEvent) {
 const provisioningService = getApimProvisioningPlugin();
 
 const customBillingProvider = new BillingProvider();
+
+const planChangeDeps = {
+  activateStripePlanChange,
+  getStripeCustomerById,
+  getStripeSubscription,
+  getSnApiPlanChangeByCustomer,
+  listSnApiDuePlanChanges,
+  listStripeInvoices,
+  updateSnApiPlanChange,
+  grantCommitmentFromInvoice,
+  provisionSnApiCustomer,
+  updateStripeCustomerIdentity,
+};
 
 const moesifMiddleware = moesif({
   applicationId: process.env.MOESIF_APPLICATION_ID,
@@ -173,6 +206,7 @@ app.post(
     const planId = req.query?.plan_id;
     const email = req.user?.email;
     const quantity = req.query?.quantity || undefined;
+    const requestId = req.query?.request_id;
 
     console.log(`create-stripe-checkout-session called for ${email} planId ${planId} priceId ${priceId} quantity ${quantity}`);
 
@@ -200,13 +234,42 @@ app.post(
     }
 
     try {
+      if (planId) {
+        try {
+          const prepared = await prepareStripePlanChange(
+            email,
+            planId,
+            req.user
+          );
+          const scheduled = await createSnApiPlanChange(req.user, {
+            request_id: requestId || crypto.randomUUID(),
+            stripe_customer_id: prepared.customer.id,
+            stripe_subscription_id: prepared.subscription.id,
+            from_plan_key: prepared.fromPlanKey,
+            to_plan_key: prepared.toPlanKey,
+            target_product_id: prepared.targetProductId,
+            effective_at: new Date(prepared.effectiveAt * 1000).toISOString(),
+            metadata: { source: "developer_portal" },
+          });
+          return res.status(200).json({
+            scheduled: true,
+            planChange: scheduled,
+          });
+        } catch (planChangeError) {
+          if (planChangeError.code !== "no_active_subscription") {
+            throw planChangeError;
+          }
+        }
+      }
+
       const session = planId
-        ? await createStripePlanCheckoutSession(email, planId, req?.user)
+        ? await createStripePlanCheckoutSession(email, planId, req?.user, requestId)
         : await createStripeCheckoutSession(
             email,
             priceId,
             quantity,
-            req?.user
+            req?.user,
+            requestId
           );
       console.log("got session back from stripe session");
       console.log(JSON.stringify(session));
@@ -214,7 +277,20 @@ app.post(
       res.send({ clientSecret: session.client_secret });
     } catch (err) {
       console.error("Failed to create stripe checkout session", err);
-      res.status(400).json({ message: "Error creating check out session" });
+      const status =
+        err.code === "multiple_active_subscriptions" ||
+        err.code === "active_subscription_exists"
+          ? 409
+          : 400;
+      res.status(status).json({
+        code: err.code || "checkout_failed",
+        message:
+          err.code === "multiple_active_subscriptions"
+            ? "Multiple active subscriptions were found. Please contact support before changing plans."
+            : err.code === "active_subscription_exists"
+              ? "You already have an active subscription. Select a plan to change it."
+            : err.message || "Error creating checkout session",
+      });
     }
   }
 );
@@ -225,14 +301,32 @@ app.post(
 let plansCache = { data: null, at: 0 };
 const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Stripe webhook (separate from the SN API subscription-status webhook):
-// grants/re-grants prepaid commitment credit when a commitment invoice is paid.
+// Stripe webhook (separate from the SN API subscription-status webhook). Two
+// jobs:
+//   - invoice.paid       -> grant/re-grant prepaid commitment credit
+//   - subscription ended -> revoke that customer's API keys
+//
+// Required Stripe events: invoice.paid, invoice.payment_succeeded,
+// customer.subscription.deleted, customer.subscription.updated,
+// customer.subscription.paused. Without the subscription events a cancelled
+// customer keeps a working API key. See README "Subscription enforcement".
+const SUBSCRIPTION_LIFECYCLE_EVENTS = [
+  "customer.subscription.deleted",
+  "customer.subscription.updated",
+  "customer.subscription.paused",
+];
+
 app.post(
   "/stripe/webhook",
   express.raw({ type: "application/json" }),
   async (req, res) => {
     const secret = process.env.PORTAL_STRIPE_WEBHOOK_SECRET;
     if (!secret) {
+      // Loud, because silence here means cancellations are not being enforced.
+      console.error(
+        "Stripe webhook received but PORTAL_STRIPE_WEBHOOK_SECRET is not set; " +
+          "subscription cancellations will NOT revoke API keys"
+      );
       return res.status(503).json({ message: "Webhook not configured" });
     }
     let event;
@@ -247,16 +341,48 @@ app.post(
       return res.status(400).json({ message: "Invalid signature" });
     }
 
-    if (
-      event.type === "invoice.paid" ||
-      event.type === "invoice.payment_succeeded"
-    ) {
+    if (event.type === "invoice.paid") {
       try {
-        await grantCommitmentFromInvoice(event.data.object);
-      } catch (grantError) {
-        console.error("Commitment grant from invoice failed", grantError);
+        await processPaidInvoice(event.data.object, planChangeDeps);
+      } catch (planChangeError) {
+        console.error("Paid invoice plan-change processing failed", planChangeError);
+        return res.status(500).json({ message: "Plan change processing failed" });
       }
     }
+
+    if (event.type === "invoice.payment_failed") {
+      try {
+        await processFailedInvoice(event.data.object, planChangeDeps);
+      } catch (planChangeError) {
+        console.error("Failed invoice plan-change processing failed", planChangeError);
+        return res.status(500).json({ message: "Plan change processing failed" });
+      }
+    }
+
+    if (SUBSCRIPTION_LIFECYCLE_EVENTS.includes(event.type)) {
+      try {
+        const result = await handleSubscriptionEnded(event.data.object, {
+          getStripeCustomerById,
+          listStripeSubscriptions,
+        });
+        // Returning 500 asks Stripe to retry, which is what we want when keys
+        // are still live: revocation is the whole point of this handler.
+        if (result?.failed?.length) {
+          return res
+            .status(500)
+            .json({ message: "Some API keys could not be revoked" });
+        }
+      } catch (enforcementError) {
+        console.error(
+          "Subscription enforcement failed; API keys may still be live",
+          enforcementError
+        );
+        return res
+          .status(500)
+          .json({ message: "Subscription enforcement failed" });
+      }
+    }
+
     return res.status(200).json({ received: true });
   }
 );
@@ -328,6 +454,13 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
     const summary = await getUsageSummary(req.user?.email, req.user);
     return res.status(200).json(summary);
   } catch (error) {
+    if (error.code === "multiple_active_subscriptions") {
+      return res.status(409).json({
+        code: error.code,
+        message:
+          "Multiple active subscriptions were found. Please contact support to correct the account.",
+      });
+    }
     // No active subscription yet - not an error state for this widget.
     return res.status(200).json({ hasSubscription: false });
   }
@@ -551,6 +684,36 @@ app.get("/api-keys", portalAuthMiddleware, async function (req, res) {
   }
 });
 
+app.get("/plan-change", portalAuthMiddleware, async (req, res) => {
+  try {
+    const planChange = await getSnApiCurrentPlanChange(req.user);
+    return res.status(200).json(planChange);
+  } catch (error) {
+    if (error.status === 404) return res.status(200).json(null);
+    return res.status(error.status || 500).json({
+      message: error.message || "Failed to retrieve plan change",
+    });
+  }
+});
+
+app.delete("/plan-change", portalAuthMiddleware, async (req, res) => {
+  try {
+    const planChange = await getSnApiCurrentPlanChange(req.user);
+    if (!planChange) return res.status(204).send();
+    if (["activating", "awaiting_commitment_payment"].includes(planChange.status)) {
+      return res.status(409).json({
+        message: "This plan change is already being activated and can no longer be cancelled.",
+      });
+    }
+    await updateSnApiPlanChange(planChange.request_id, { status: "cancelled" });
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || "Failed to cancel plan change",
+    });
+  }
+});
+
 app.post("/api-keys", portalAuthMiddleware, requireActiveSubscription, jsonParser, async function (req, res) {
   try {
     res.status(201).json(
@@ -642,3 +805,41 @@ app.get(
 app.listen(port, () => {
   console.log(`My Dev Portal Backend is listening at http://localhost:${port}`);
 });
+
+const planChangeReconciliationIntervalMs = Number.parseInt(
+  process.env.PLAN_CHANGE_RECONCILIATION_INTERVAL_MS || "300000",
+  10
+);
+let planChangeReconciliationRunning = false;
+
+async function runPlanChangeReconciliation() {
+  if (planChangeReconciliationRunning) return;
+  planChangeReconciliationRunning = true;
+  try {
+    const results = await reconcileDuePlanChanges(planChangeDeps);
+    const failures = results.filter((result) => result.error);
+    if (failures.length) {
+      console.error("Plan change reconciliation completed with failures", failures);
+    }
+  } catch (error) {
+    console.error("Plan change reconciliation failed", error);
+  } finally {
+    planChangeReconciliationRunning = false;
+  }
+}
+
+if (
+  Number.isFinite(planChangeReconciliationIntervalMs) &&
+  planChangeReconciliationIntervalMs >= 60000
+) {
+  const reconciliationTimer = setInterval(
+    runPlanChangeReconciliation,
+    planChangeReconciliationIntervalMs
+  );
+  reconciliationTimer.unref();
+} else {
+  console.warn(
+    "Plan change reconciliation is disabled; " +
+      "PLAN_CHANGE_RECONCILIATION_INTERVAL_MS must be at least 60000"
+  );
+}
