@@ -35,10 +35,23 @@ async function getActiveStripeSubscription(email, authUserId) {
     status: "all",
     limit: 10,
   });
-  const subscription = subscriptions.data.find((candidate) =>
+  const activeSubscriptions = subscriptions.data.filter((candidate) =>
     ["active", "trialing", "past_due"].includes(candidate.status)
   );
-  if (!subscription) throw new Error("Active Stripe subscription not found");
+  if (!activeSubscriptions.length) {
+    const error = new Error("Active Stripe subscription not found");
+    error.code = "no_active_subscription";
+    throw error;
+  }
+  if (activeSubscriptions.length > 1) {
+    const error = new Error(
+      `Customer has ${activeSubscriptions.length} active subscriptions; resolve duplicates before changing plans`
+    );
+    error.code = "multiple_active_subscriptions";
+    error.subscriptionIds = activeSubscriptions.map((item) => item.id);
+    throw error;
+  }
+  const subscription = activeSubscriptions[0];
 
   const price = subscription.items.data[0]?.price;
   if (!price) throw new Error("Stripe subscription price not found");
@@ -272,7 +285,8 @@ async function hasActiveStripeSubscription(email, authUser) {
     await getActiveStripeSubscription(email, authUser?.sub);
     return true;
   } catch (error) {
-    return false;
+    if (error.code === "no_active_subscription") return false;
+    throw error;
   }
 }
 

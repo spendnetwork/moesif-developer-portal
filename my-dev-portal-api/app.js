@@ -535,7 +535,17 @@ function sendKeyManagementError(res, error) {
 
 app.get("/api-keys", portalAuthMiddleware, async function (req, res) {
   try {
-    res.status(200).json(await listSnApiKeys(req.user));
+    const [keyData, hasActiveSubscription] = await Promise.all([
+      listSnApiKeys(req.user),
+      hasActiveStripeSubscription(req.user?.email, req.user),
+    ]);
+    const normalizedKeyData = Array.isArray(keyData)
+      ? { keys: keyData, active_count: keyData.length, max_active_keys: 2 }
+      : keyData;
+    res.status(200).json({
+      ...normalizedKeyData,
+      has_active_subscription: hasActiveSubscription,
+    });
   } catch (error) {
     sendKeyManagementError(res, error);
   }

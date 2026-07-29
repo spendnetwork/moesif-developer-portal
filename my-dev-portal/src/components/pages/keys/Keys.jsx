@@ -12,7 +12,6 @@ import lockIcon from "../../../images/icons/lock.svg";
 import copyIcon from "../../../images/icons/copy.svg";
 import successIcon from "../../../images/icons/success.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
-import useSubscriptions from "../../../hooks/useSubscriptions";
 import { apiRequest, authedFetcher } from "../../../lib/portal-api";
 
 const modalStyles = {
@@ -61,13 +60,9 @@ function RotationNotice({ apiKey }) {
   );
 }
 
-const ACTIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
-
 function Keys() {
-  const { isLoading: authLoading, idToken, user } = useAuthCombined();
+  const { isLoading: authLoading, idToken } = useAuthCombined();
   const navigate = useNavigate();
-  const { subscriptions, finishedLoading: subscriptionsLoaded } =
-    useSubscriptions({ user, idToken });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null);
@@ -184,24 +179,45 @@ function Keys() {
     }
   }
 
-  const waitingForSubscription =
-    Boolean(idToken && user?.email) && !subscriptionsLoaded;
-
   const keysReady = !keysKey || keysData !== undefined || keysError;
-  if (authLoading || !keysReady || waitingForSubscription) {
+  if (authLoading || !keysReady) {
     return (
       <PageLayout>
-        <PageLoader />
+        <div className="access-activation" role="status" aria-live="polite">
+          <PageLoader />
+          <div className="access-activation__copy">
+            <h1>Preparing your API access</h1>
+            <p>Confirming your subscription and loading your keys.</p>
+          </div>
+        </div>
       </PageLayout>
     );
   }
 
-  const hasActiveSubscription =
-    Array.isArray(subscriptions) &&
-    subscriptions.some((sub) => {
-      const status = sub?.status ? String(sub.status).toLowerCase() : null;
-      return !status || ACTIVE_SUBSCRIPTION_STATUSES.includes(status);
-    });
+  const hasActiveSubscription = keysData?.has_active_subscription === true;
+
+  if (keysError && !notProvisioned) {
+    return (
+      <PageLayout>
+        <section className="keys-page">
+          <header className="keys-header">
+            <div>
+              <p className="page-eyebrow">Access</p>
+              <h1>API keys</h1>
+              <p>Use API keys to make programmatic calls to Open Opportunities.</p>
+            </div>
+          </header>
+          <div className="keys-error-state" role="alert">
+            <h2>We could not confirm your API access</h2>
+            <p>{listError || "Please try again shortly."}</p>
+            <button className="button button--primary" onClick={() => mutateKeys()}>
+              Try again
+            </button>
+          </div>
+        </section>
+      </PageLayout>
+    );
+  }
 
   if (notProvisioned || !hasActiveSubscription) {
     return (
