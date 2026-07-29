@@ -40,6 +40,12 @@ function UsageSummary({ idToken }) {
   }
 
   const { currency, period, accrued, lines, credit } = usage;
+  const displayedAccrued = Array.isArray(lines)
+    ? lines.reduce(
+        (total, line) => total + Math.max(0, Number(line.amount) || 0),
+        0
+      )
+    : accrued;
   const usedPct =
     credit && credit.granted > 0
       ? Math.min(100, Math.round((credit.used / credit.granted) * 100))
@@ -64,7 +70,7 @@ function UsageSummary({ idToken }) {
         <div className="usage-summary__metric">
           <span className="usage-summary__label">Usage this period</span>
           <span className="usage-summary__value">
-            {formatMoney(accrued, currency)}
+            {formatMoney(displayedAccrued, currency)}
           </span>
           {period?.start && period?.end && (
             <span className="usage-summary__sub">

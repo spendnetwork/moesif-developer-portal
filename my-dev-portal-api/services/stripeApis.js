@@ -1,6 +1,26 @@
 const StripeSDK = require("stripe");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
+const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
+const USAGE_SUMMARY_CACHE_MAX_ENTRIES = 1000;
+const usageSummaryCache = new Map();
+
+function cacheUsageSummary(cacheKey, summary) {
+  if (!cacheKey) return;
+  const now = Date.now();
+  if (usageSummaryCache.size >= USAGE_SUMMARY_CACHE_MAX_ENTRIES) {
+    for (const [key, value] of usageSummaryCache) {
+      if (now - value.fetchedAt >= USAGE_SUMMARY_CACHE_TTL_MS) {
+        usageSummaryCache.delete(key);
+      }
+    }
+    if (usageSummaryCache.size >= USAGE_SUMMARY_CACHE_MAX_ENTRIES) {
+      usageSummaryCache.delete(usageSummaryCache.keys().next().value);
+    }
+  }
+  usageSummaryCache.set(cacheKey, { summary, fetchedAt: now });
+}
+
 // A price represents a prepaid commitment (draws down into credit) if it
 // carries the commitment metadata. Kept in one place so checkout, the webhook
 // and the usage summary all agree.
@@ -372,6 +392,12 @@ async function ensureCreditGrant(customerId, planKey, { currency = "gbp", marker
 
 // Aggregate current-period spend + credit balance for the usage dashboard.
 async function getUsageSummary(email, authUser) {
+  const cacheKey = authUser?.sub || email?.toLowerCase();
+  const cached = cacheKey ? usageSummaryCache.get(cacheKey) : null;
+  if (cached && Date.now() - cached.fetchedAt < USAGE_SUMMARY_CACHE_TTL_MS) {
+    return cached.summary;
+  }
+
   const { customer, subscription } = await getActiveStripeSubscription(
     email,
     authUser?.sub
@@ -464,7 +490,7 @@ async function getUsageSummary(email, authUser) {
   // Billing period moved from the subscription to its items in recent Stripe
   // API versions; read from the item with a fallback to the subscription.
   const firstItem = subscription.items?.data?.[0];
-  return {
+  const summary = {
     hasSubscription: true,
     currency,
     period: {
@@ -481,6 +507,8 @@ async function getUsageSummary(email, authUser) {
     lines,
     credit,
   };
+  cacheUsageSummary(cacheKey, summary);
+  return summary;
 }
 
 function constructStripeEvent(rawBody, signature, secret) {

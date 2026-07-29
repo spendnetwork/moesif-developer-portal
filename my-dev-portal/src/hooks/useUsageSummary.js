@@ -7,8 +7,10 @@ import { authedFetcher } from "../lib/portal-api";
 export default function useUsageSummary({ idToken }) {
   const key = idToken ? ["/usage-summary", idToken] : null;
   const { data, error, isLoading } = useSWR(key, authedFetcher, {
-    revalidateOnFocus: false,
-    dedupingInterval: 30000,
+    refreshInterval: 60000,
+    dedupingInterval: 10000,
+    revalidateOnFocus: true,
+    keepPreviousData: true,
   });
 
   return {
