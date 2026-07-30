@@ -368,7 +368,7 @@ async function createBasicTopUpCheckoutSession(
       liveSubscriptions.length > 1
         ? "multiple_active_subscriptions"
         : "active_subscription_exists",
-      "A recurring plan is already active. Complete its plan-change flow before purchasing Basic credit."
+      "Basic credit cannot be purchased while Growth or Enterprise is active. Switch to Basic at renewal before adding credit."
     );
   }
 
@@ -406,6 +406,31 @@ async function createBasicTopUpCheckoutSession(
     requestId ? { idempotencyKey: `basic-top-up-${requestId}` } : undefined
   );
   return session;
+}
+
+async function getBasicTopUpTotalPence(customerId) {
+  let total = 0;
+  const paymentIntents = stripe.paymentIntents.list({
+    customer: customerId,
+    limit: 100,
+    expand: ["data.latest_charge"],
+  });
+  for await (const paymentIntent of paymentIntents) {
+    if (
+      paymentIntent.status !== "succeeded" ||
+      paymentIntent.metadata?.purchase_type !== "basic_credit_top_up"
+    ) {
+      continue;
+    }
+    const charge =
+      typeof paymentIntent.latest_charge === "object"
+        ? paymentIntent.latest_charge
+        : null;
+    const refunded = Number(charge?.amount_refunded || 0);
+    const received = Number(paymentIntent.amount_received || 0);
+    total += Math.max(0, received - refunded);
+  }
+  return total;
 }
 
 async function prepareStripePlanChange(email, planId, authUser) {
@@ -903,6 +928,7 @@ module.exports = {
   hasActiveStripeSubscription,
   createStripePlanCheckoutSession,
   createBasicTopUpCheckoutSession,
+  getBasicTopUpTotalPence,
   prepareStripePlanChange,
   activateStripePlanChange,
   getStripeSubscription,

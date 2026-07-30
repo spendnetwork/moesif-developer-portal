@@ -16,6 +16,7 @@ const {
   listStripeSubscriptions,
   createStripePlanCheckoutSession,
   createBasicTopUpCheckoutSession,
+  getBasicTopUpTotalPence,
   prepareStripePlanChange,
   activateStripePlanChange,
   getStripeSubscription,
@@ -63,12 +64,17 @@ const {
   getPlansFromMoesif,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
+  getMoesifBillingReports,
   getMoesifPrepaidBalance,
 } = require("./services/moesifApis");
 const {
   isBasicTopUpSession,
   reconcileBasicTopUp,
 } = require("./services/prepaidReconciliation");
+const {
+  getBasicPrepaidUsageSummary,
+  invalidateBasicUsageSummary,
+} = require("./services/basicUsageSummary");
 
 const { authMiddleware } = require("./services/authPlugin");
 
@@ -475,6 +481,7 @@ app.post(
             null,
             prepaidReconciliationDeps
           );
+          invalidateBasicUsageSummary();
         } else {
           await reconcileCheckoutSession(
             event.data.object,
@@ -570,6 +577,7 @@ function stripeSubscriptionForPortal(entitlement) {
     .filter(Number.isFinite);
   return {
     subscription_id: subscription.id,
+    plan_key: entitlement.planKey,
     status: subscription.status,
     current_period_start: periodStarts.length
       ? new Date(Math.min(...periodStarts) * 1000).toISOString()
@@ -615,6 +623,7 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
         {
           ...prepaid.subscription,
           subscription_id: prepaid.subscriptionId,
+          plan_key: "basic",
           status: "active",
           billing_model: "prepaid_credit",
           balance: {
@@ -641,26 +650,19 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
       req.portalContext?.current_plan_key === "basic" &&
       !req.portalContext?.current_subscription_id
     ) {
-      const balance = await getMoesifPrepaidBalance({
-        companyId: req.portalContext.moesif_company_id,
-        stripeCustomerId: req.portalContext.stripe_customer_id,
-      });
-      return res.status(200).json({
-        hasSubscription: true,
-        billingModel: "prepaid_credit",
-        currency: balance.currency,
-        period: null,
-        accrued: null,
-        lines: [],
-        credit: {
-          granted: null,
-          used: null,
-          remaining: Math.round(balance.available * 100),
-          current: Math.round(balance.current * 100),
-          pending: Math.round(balance.pending * 100),
-          projectedRemaining: Math.round(balance.available * 100),
+      const summary = await getBasicPrepaidUsageSummary(
+        {
+          companyId: req.portalContext.moesif_company_id,
+          stripeCustomerId: req.portalContext.stripe_customer_id,
         },
-      });
+        {
+          getMoesifPrepaidBalance,
+          getMoesifBillingReports,
+          getPlansFromMoesif,
+          getBasicTopUpTotalPence,
+        }
+      );
+      return res.status(200).json(summary);
     }
     const summary = await getUsageSummary(req.user?.email, req.user);
     return res.status(200).json(summary);
@@ -696,6 +698,7 @@ app.post(
           prepaidReconciliationDeps
         );
         invalidatePortalContext(req.user.sub);
+        invalidateBasicUsageSummary();
         return res.status(201).json({
           status: "complete",
           purchase_type: reconciled.purchaseType,

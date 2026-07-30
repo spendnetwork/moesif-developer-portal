@@ -24,6 +24,10 @@ function formatDate(unixSeconds) {
   }).format(new Date(unixSeconds * 1000));
 }
 
+function formatCount(value) {
+  return Number(value || 0).toLocaleString();
+}
+
 function UsageSummary({ idToken }) {
   const { usage, usageLoading } = useUsageSummary({ idToken });
   const { planChange, refreshPlanChange } = usePlanChange({ idToken });
@@ -58,7 +62,15 @@ function UsageSummary({ idToken }) {
     return null;
   }
 
-  const { currency, period, accrued, lines, credit, billingModel } = usage;
+  const {
+    currency,
+    period,
+    accrued,
+    lines,
+    credit,
+    billingModel,
+    requestCount,
+  } = usage;
   const isPurePrepaid = billingModel === "prepaid_credit";
   const displayedAccrued = Array.isArray(lines)
     ? lines.reduce(
@@ -129,7 +141,20 @@ function UsageSummary({ idToken }) {
       )}
       {planChangeError && <div className="keys-error">{planChangeError}</div>}
       <div className="usage-summary__cards">
-        {!isPurePrepaid && <div className="usage-summary__metric">
+        {isPurePrepaid ? (
+          <div className="usage-summary__metric">
+            <span className="usage-summary__label">API requests</span>
+            <span className="usage-summary__value">
+              {requestCount == null ? "Updating" : formatCount(requestCount)}
+            </span>
+            <span className="usage-summary__sub">
+              {period?.start
+                ? `Since ${formatDate(period.start)}`
+                : "Across all API keys in your company"}
+            </span>
+          </div>
+        ) : (
+          <div className="usage-summary__metric">
           <span className="usage-summary__label">Usage this period</span>
           <span className="usage-summary__value">
             {formatMoney(displayedAccrued, currency)}
@@ -139,7 +164,8 @@ function UsageSummary({ idToken }) {
               {formatDate(period.start)} – {formatDate(period.end)}
             </span>
           )}
-        </div>}
+          </div>
+        )}
 
         {credit && (
           <div className="usage-summary__metric">
@@ -150,8 +176,24 @@ function UsageSummary({ idToken }) {
             {isPurePrepaid ? (
               <>
                 <span className="usage-summary__sub">
-                  Available across all API keys in your company.
+                  {formatMoney(credit.used, currency)} of{" "}
+                  {formatMoney(credit.granted, currency)} used
                 </span>
+                {credit.granted > 0 && (
+                  <div
+                    className="usage-summary__bar"
+                    role="progressbar"
+                    aria-label="Credit used"
+                    aria-valuenow={usedPct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <span
+                      className="usage-summary__bar-fill"
+                      style={{ width: `${usedPct}%` }}
+                    />
+                  </div>
+                )}
                 <Link to="/plans" className="button button--outline-secondary">
                   Add credit
                 </Link>
@@ -192,7 +234,9 @@ function UsageSummary({ idToken }) {
 
       {lines && lines.length > 0 && (
         <div className="usage-summary__breakdown">
-          <p className="usage-summary__breakdown-title">This period by metric</p>
+          <p className="usage-summary__breakdown-title">
+            {isPurePrepaid ? "Usage by metric" : "This period by metric"}
+          </p>
           <ul>
             {lines.map((line, index) => (
               <li key={`${line.label}-${index}`}>

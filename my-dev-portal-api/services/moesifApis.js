@@ -27,7 +27,9 @@ async function readMoesifResponse(response, operation) {
     if (
       [401, 403].includes(response.status) &&
       (normalized.includes("create:billing_meters") ||
-        normalized.includes("create:billing_reports"))
+        normalized.includes("create:billing_reports") ||
+        normalized.includes("read:billing_meters") ||
+        normalized.includes("read:billing_reports"))
     ) {
       error.code = "moesif_management_scope_missing";
     }
@@ -184,6 +186,27 @@ async function getPlansFromMoesif() {
   return readMoesifResponse(response, "Moesif plan catalogue lookup");
 }
 
+async function getMoesifBillingReports({
+  companyId,
+  subscriptionId,
+  from,
+  to,
+}) {
+  const params = new URLSearchParams({
+    company_id: String(companyId),
+    subscription_id: subscriptionId,
+    type: "usage",
+    success: "true",
+  });
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const response = await fetch(
+    `${moesifApiEndpoint}/v1/~/billing/reports?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${moesifManagementToken}` } }
+  );
+  return readMoesifResponse(response, "Moesif billing report lookup");
+}
+
 async function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
   if (!workspaceId) {
     const error = new Error("Moesif embedded workspace is not configured");
@@ -224,6 +247,7 @@ module.exports = {
   getInfoForEmbeddedWorkspaces,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
+  getMoesifBillingReports,
   getMoesifPrepaidBalance,
   basicPrepaidSubscriptionId,
   readMoesifResponse,
