@@ -42,9 +42,12 @@ function SubDisplay({ sub, plans, onManage }) {
   if (!items || items.length === 0) return null;
 
   const status = String(sub.status || "active").toLowerCase();
-  const period = `${formatIsoTimestamp(sub.current_period_start)} – ${formatIsoTimestamp(
-    sub.current_period_end
-  )}`;
+  const isPurePrepaid = sub.billing_model === "prepaid_credit";
+  const period = isPurePrepaid
+    ? "Prepaid credit with no fixed billing period"
+    : `${formatIsoTimestamp(sub.current_period_start)} – ${formatIsoTimestamp(
+        sub.current_period_end
+      )}`;
 
   const lines = items.map((item) => {
     const foundPlan = plans.find((plan) => plan.id === item.plan_id);
@@ -81,14 +84,16 @@ function SubDisplay({ sub, plans, onManage }) {
 
       <div className="subscription-card__footer">
         <span className="subscription-card__hint">
-          Change or cancel your plan in the billing portal.
+          {isPurePrepaid
+            ? "Add credit whenever you need it. There is no recurring charge or overage."
+            : "Change or cancel your plan in the billing portal."}
         </span>
         <button
           className="button button--outline-secondary"
           onClick={onManage}
           disabled={!onManage}
         >
-          Manage billing
+          {isPurePrepaid ? "Add credit" : "Manage billing"}
         </button>
       </div>
     </article>

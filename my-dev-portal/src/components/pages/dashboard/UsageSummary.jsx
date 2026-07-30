@@ -58,7 +58,8 @@ function UsageSummary({ idToken }) {
     return null;
   }
 
-  const { currency, period, accrued, lines, credit } = usage;
+  const { currency, period, accrued, lines, credit, billingModel } = usage;
+  const isPurePrepaid = billingModel === "prepaid_credit";
   const displayedAccrued = Array.isArray(lines)
     ? lines.reduce(
         (total, line) => total + Math.max(0, Number(line.amount) || 0),
@@ -128,7 +129,7 @@ function UsageSummary({ idToken }) {
       )}
       {planChangeError && <div className="keys-error">{planChangeError}</div>}
       <div className="usage-summary__cards">
-        <div className="usage-summary__metric">
+        {!isPurePrepaid && <div className="usage-summary__metric">
           <span className="usage-summary__label">Usage this period</span>
           <span className="usage-summary__value">
             {formatMoney(displayedAccrued, currency)}
@@ -138,7 +139,7 @@ function UsageSummary({ idToken }) {
               {formatDate(period.start)} – {formatDate(period.end)}
             </span>
           )}
-        </div>
+        </div>}
 
         {credit && (
           <div className="usage-summary__metric">
@@ -146,31 +147,44 @@ function UsageSummary({ idToken }) {
             <span className="usage-summary__value">
               {formatMoney(credit.remaining, currency)}
             </span>
-            <span className="usage-summary__sub">
-              {formatMoney(credit.used, currency)} of{" "}
-              {formatMoney(credit.granted, currency)} used
-            </span>
-            <div
-              className="usage-summary__bar"
-              role="progressbar"
-              aria-valuenow={usedPct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            >
-              <span
-                className="usage-summary__bar-projected"
-                style={{ width: `${projectedPct}%` }}
-              />
-              <span
-                className="usage-summary__bar-fill"
-                style={{ width: `${usedPct}%` }}
-              />
-            </div>
-            {showProjection && (
-              <span className="usage-summary__sub usage-summary__projection">
-                Projected after this period:{" "}
-                {formatMoney(credit.projectedRemaining, currency)}
-              </span>
+            {isPurePrepaid ? (
+              <>
+                <span className="usage-summary__sub">
+                  Available across all API keys in your company.
+                </span>
+                <Link to="/plans" className="button button--outline-secondary">
+                  Add credit
+                </Link>
+              </>
+            ) : (
+              <>
+                <span className="usage-summary__sub">
+                  {formatMoney(credit.used, currency)} of{" "}
+                  {formatMoney(credit.granted, currency)} used
+                </span>
+                <div
+                  className="usage-summary__bar"
+                  role="progressbar"
+                  aria-valuenow={usedPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <span
+                    className="usage-summary__bar-projected"
+                    style={{ width: `${projectedPct}%` }}
+                  />
+                  <span
+                    className="usage-summary__bar-fill"
+                    style={{ width: `${usedPct}%` }}
+                  />
+                </div>
+                {showProjection && (
+                  <span className="usage-summary__sub usage-summary__projection">
+                    Projected after this period:{" "}
+                    {formatMoney(credit.projectedRemaining, currency)}
+                  </span>
+                )}
+              </>
             )}
           </div>
         )}

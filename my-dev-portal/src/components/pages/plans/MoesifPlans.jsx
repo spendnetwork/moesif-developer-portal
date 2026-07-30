@@ -69,6 +69,7 @@ function MoesifPlans(props) {
   };
 
   const getPlanActionButton = (plan) => {
+    const planKey = getCatalogPlanKey(plan);
     if (isAuthenticated) {
       if (planChange) {
         return (
@@ -78,8 +79,14 @@ function MoesifPlans(props) {
         );
       }
       return (
-        <Link to={`/checkout?plan_id_to_purchase=${encodeURIComponent(plan.id)}`}>
-          <button className="button__price-action">Select plan</button>
+        <Link
+          to={`/checkout?plan_id_to_purchase=${encodeURIComponent(plan.id)}${
+            planKey === "basic" ? "&purchase_type=basic_credit_top_up" : ""
+          }`}
+        >
+          <button className="button__price-action">
+            {planKey === "basic" ? "Add credit" : "Select plan"}
+          </button>
         </Link>
       );
     }

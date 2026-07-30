@@ -4,7 +4,7 @@ import { PageLayout } from "../../page-layout";
 import useSubscriptions from "../../../hooks/useSubscriptions";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { PageLoader } from "../../page-loader";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import usePlans from "../../../hooks/usePlans";
 import SVG from "react-inlinesvg";
 import noPriceIcon from "../../../images/icons/empty-state-price.svg";
@@ -12,6 +12,7 @@ import SubDisplay from "./SubDisplay";
 import { isSessionExpiredError } from "../../../lib/session-expiry";
 
 function Subscription(props) {
+  const navigate = useNavigate();
   const { isAuthenticated, isLoading, user, idToken, accessToken } =
     useAuthCombined();
   const { subscriptions, finishedLoading, subscriptionsError } =
@@ -90,14 +91,20 @@ function Subscription(props) {
               sub={sub}
               key={sub.subscription_id}
               plans={plans}
-              onManage={openStripeManagement}
+              onManage={
+                sub.billing_model === "prepaid_credit"
+                  ? () => navigate("/plans")
+                  : openStripeManagement
+              }
             />
           ))}
         </div>
       )}
       {subscriptions?.length > 0 && (
         <p className="text-muted">
-          Subscription status is verified directly with Stripe.
+          {subscriptions.some((sub) => sub.billing_model === "prepaid_credit")
+            ? "Basic payments are collected by Stripe and the available credit balance is verified with Moesif."
+            : "Subscription status is verified directly with Stripe."}
         </p>
       )}
     </PageLayout>

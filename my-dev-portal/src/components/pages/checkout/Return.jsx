@@ -146,6 +146,8 @@ function Return(props) {
   const sessionId = urlParams.get("session_id");
   const priceId = urlParams.get("price_id");
   const planId = urlParams.get("plan_id");
+  const purchaseType = urlParams.get("purchase_type");
+  const isBasicTopUp = purchaseType === "basic_credit_top_up";
 
   const isCustom = import.meta.env.REACT_APP_PAYMENT_PROVIDER === "custom";
 
@@ -155,6 +157,7 @@ function Return(props) {
       {
         stripe_session_id: sessionId,
         price_id: priceId,
+        purchase_type: purchaseType,
       }
     );
     if (isCustom && idToken) {
@@ -179,7 +182,16 @@ function Return(props) {
         setProvisionError,
       });
     }
-  }, [sessionId, idToken, isCustom, user, priceId, planId, registrationAttempt]);
+  }, [
+    sessionId,
+    idToken,
+    isCustom,
+    user,
+    priceId,
+    planId,
+    purchaseType,
+    registrationAttempt,
+  ]);
 
   if (status === "open") {
     return <Navigate to={`/checkout?price_id_to_purchase=${priceId}`} />;
@@ -190,11 +202,15 @@ function Return(props) {
   if (status === "complete" && (sessionId || isCustom)) {
     return (
       <PageLayout>
-        <h1>Subscribe</h1>
+        <h1>{isBasicTopUp ? "Payment complete" : "Subscribe"}</h1>
         <NoticeBox
           iconSrc={noPriceIcon}
-          title="Success"
-          description={`You are now subscribed to the plan and price. An email should be sent to ${customerEmail}`}
+          title={isBasicTopUp ? "Credit added" : "Success"}
+          description={
+            isBasicTopUp
+              ? `Your Basic API credit is ready to use. A receipt will be sent to ${customerEmail}.`
+              : `You are now subscribed to the plan and price. An email should be sent to ${customerEmail}`
+          }
           actions={
             <>
               <Link to="/keys" rel="noreferrer noopener">

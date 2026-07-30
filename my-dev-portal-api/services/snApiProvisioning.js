@@ -115,6 +115,63 @@ async function provisionSnApiCustomer({
   return body;
 }
 
+async function provisionSnApiPrepaidCustomer({ authUser, customer, product }) {
+  const snApiBaseUrl = requireConfig("SN_API_BASE_URL");
+  const provisioningToken = requireConfig("SN_API_PROVISIONING_TOKEN");
+  if (!authUser?.sub || !authUser?.email) {
+    throw new Error("Authenticated Auth0 user id and email are required");
+  }
+  if (!customer?.id || !product?.id) {
+    throw new Error("Stripe customer and Basic product are required");
+  }
+  if (
+    customer.email &&
+    customer.email.toLowerCase() !== authUser.email.toLowerCase()
+  ) {
+    throw new Error("Stripe customer does not match the authenticated user");
+  }
+
+  const response = await fetch(
+    `${snApiBaseUrl}/api/v3/developer-portal/provision`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Developer-Portal-Token": provisioningToken,
+      },
+      body: JSON.stringify({
+        auth0_user_id: authUser.sub,
+        email: authUser.email,
+        full_name: authUser.name || authUser.nickname || authUser.email,
+        organization_name: getOrganizationName(authUser, customer),
+        stripe_customer_id: customer.id,
+        stripe_subscription_id: null,
+        stripe_product_id: product.id,
+        stripe_price_id: null,
+        plan_key: "basic",
+        subscription_status: "active",
+        cancel_at_period_end: false,
+        metadata: {
+          source: "moesif_developer_portal",
+          billing_model: "prepaid_credit",
+        },
+      }),
+    }
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(
+      `SN API prepaid provisioning failed (${response.status}): ${JSON.stringify(
+        body
+      )}`
+    );
+    error.status = response.status;
+    error.detail = body?.detail;
+    throw error;
+  }
+  return body;
+}
+
 async function checkSnApiEmailAvailability(authUser) {
   if (!authUser?.sub || !authUser?.email) {
     throw new Error("Authenticated Auth0 user id and email are required");
@@ -255,6 +312,7 @@ function updateSnApiSubscriptionStatus(subscription, customerId) {
 
 module.exports = {
   provisionSnApiCustomer,
+  provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
   listSnApiKeys,

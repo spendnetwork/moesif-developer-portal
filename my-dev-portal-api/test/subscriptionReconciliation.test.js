@@ -182,6 +182,30 @@ test("no live Stripe subscription keeps API keys locked", async () => {
   });
 });
 
+test("prepaid Basic context unlocks keys without a recurring Stripe subscription", async () => {
+  let stripeLookups = 0;
+  const result = await resolveAuthenticatedEntitlement(
+    { sub: "auth0|123", email: "buyer@example.com" },
+    {
+      stripe_customer_id: "cus_123",
+      current_subscription_id: null,
+      current_plan_key: "basic",
+      billing_status: "active",
+    },
+    dependencies({
+      getActiveStripeSubscription: async () => {
+        stripeLookups += 1;
+        throw new Error("Stripe should not be queried");
+      },
+    })
+  );
+
+  assert.equal(result.active, true);
+  assert.equal(result.planKey, "basic");
+  assert.equal(result.source, "prepaid_basic_context");
+  assert.equal(stripeLookups, 0);
+});
+
 test("mixed plan products are rejected instead of granting ambiguous permissions", () => {
   const malformed = subscription();
   malformed.items.data.push({

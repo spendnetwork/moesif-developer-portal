@@ -138,6 +138,7 @@ async function reconcileActiveSubscription(
     email: identity.email,
     auth0UserId: identity.sub,
     stripeCustomerId: customer.id,
+    planKey,
   });
 
   return {
@@ -187,6 +188,23 @@ async function reconcileCheckoutSession(sessionOrId, authUser, deps) {
 }
 
 async function resolveAuthenticatedEntitlement(authUser, portalContext, deps) {
+  // Pure-prepaid Basic accounts intentionally have no recurring Stripe
+  // subscription. The SN API context can only be written through its shared
+  // provisioning secret, while Moesif governance enforces the live balance.
+  if (
+    portalContext?.current_plan_key === "basic" &&
+    !portalContext?.current_subscription_id &&
+    deps.liveStatuses.includes(portalContext?.billing_status)
+  ) {
+    return {
+      active: true,
+      source: "prepaid_basic_context",
+      planKey: "basic",
+      subscription: null,
+      reconciled: false,
+    };
+  }
+
   let active;
   try {
     active = await deps.getActiveStripeSubscription(

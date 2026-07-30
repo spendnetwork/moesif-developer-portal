@@ -6,6 +6,38 @@ const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
 const USAGE_SUMMARY_CACHE_MAX_ENTRIES = 1000;
 const usageSummaryCache = new Map();
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
+const BASIC_TOP_UP_MIN_AMOUNT_GBP = 1;
+
+function getFrontendUrl(pathname) {
+  const configured = String(process.env.FRONT_END_DOMAIN || "").replace(/\/$/, "");
+  if (/^https?:\/\//i.test(configured)) return `${configured}${pathname}`;
+  const scheme = configured.startsWith("localhost") ? "http" : "https";
+  return `${scheme}://${configured}${pathname}`;
+}
+
+function normalizeBasicTopUpAmount(amountGbp) {
+  const amount = Number(amountGbp);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw stripeLookupError(
+      "invalid_top_up_amount",
+      "Enter a valid Basic credit amount"
+    );
+  }
+  const amountPence = Math.round(amount * 100);
+  if (Math.abs(amountPence / 100 - amount) > Number.EPSILON * 100) {
+    throw stripeLookupError(
+      "invalid_top_up_amount",
+      "Basic credit amounts can have at most two decimal places"
+    );
+  }
+  if (amountPence < BASIC_TOP_UP_MIN_AMOUNT_GBP * 100) {
+    throw stripeLookupError(
+      "top_up_below_minimum",
+      `The minimum Basic credit purchase is GBP ${BASIC_TOP_UP_MIN_AMOUNT_GBP.toFixed(2)}`
+    );
+  }
+  return amountPence;
+}
 
 function cacheUsageSummary(cacheKey, summary) {
   if (!cacheKey) return;
@@ -37,7 +69,12 @@ function isCommitmentPrice(price) {
 
 function verifyStripeSession(checkoutSessionId) {
   return stripe.checkout.sessions.retrieve(checkoutSessionId, {
-    expand: ["customer", "subscription", "line_items.data.price.product"],
+    expand: [
+      "customer",
+      "payment_intent",
+      "subscription",
+      "line_items.data.price.product",
+    ],
   });
 }
 
@@ -356,6 +393,76 @@ async function createStripePlanCheckoutSession(email, planId, authUser, requestI
     requestId ? { idempotencyKey: `checkout-${requestId}` } : undefined
   );
 
+  return session;
+}
+
+async function createBasicTopUpCheckoutSession(
+  email,
+  planId,
+  amountGbp,
+  authUser,
+  requestId
+) {
+  const planKey = await getPlanKeyForProduct(planId);
+  if (planKey !== "basic") {
+    throw stripeLookupError(
+      "invalid_top_up_plan",
+      "Flexible credit purchases are only available for the Basic plan"
+    );
+  }
+
+  const amountPence = normalizeBasicTopUpAmount(amountGbp);
+  const customerId = await getOrCreateStripeCustomerId(email, authUser);
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 100,
+  });
+  const liveSubscriptions = subscriptions.data.filter((candidate) =>
+    LIVE_SUBSCRIPTION_STATUSES.includes(candidate.status)
+  );
+  if (liveSubscriptions.length) {
+    throw stripeLookupError(
+      liveSubscriptions.length > 1
+        ? "multiple_active_subscriptions"
+        : "active_subscription_exists",
+      "A recurring plan is already active. Complete its plan-change flow before purchasing Basic credit."
+    );
+  }
+
+  const metadata = {
+    purchase_type: "basic_credit_top_up",
+    plan_id: planId,
+    plan_key: "basic",
+    amount_gbp_pence: String(amountPence),
+    auth0_user_id: authUser?.sub || "",
+  };
+  const session = await stripe.checkout.sessions.create(
+    {
+      ui_mode: "embedded",
+      customer: customerId,
+      client_reference_id: authUser?.sub,
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: "gbp",
+            product: planId,
+            unit_amount: amountPence,
+          },
+          quantity: 1,
+        },
+      ],
+      metadata,
+      payment_intent_data: { metadata },
+      return_url: getFrontendUrl(
+        `/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${encodeURIComponent(
+          planId
+        )}&purchase_type=basic_credit_top_up`
+      ),
+    },
+    requestId ? { idempotencyKey: `basic-top-up-${requestId}` } : undefined
+  );
   return session;
 }
 
@@ -854,6 +961,7 @@ module.exports = {
   hasActiveStripeSubscription,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
+  createBasicTopUpCheckoutSession,
   prepareStripePlanChange,
   activateStripePlanChange,
   getStripeSubscription,

@@ -5,8 +5,8 @@ import { formatPrice } from "../../../common/utils";
 const PLAN_DETAILS = {
   basic: {
     label: "Basic",
-    commitment: "No upfront commitment",
-    note: "Usage billed monthly in arrears.",
+    commitment: "Flexible prepaid credit",
+    note: "Choose any top-up amount. Usage stops at zero credit, with no overage bill.",
   },
   growth: {
     label: "Growth",

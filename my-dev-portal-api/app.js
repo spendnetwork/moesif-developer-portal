@@ -19,6 +19,7 @@ const {
   listStripeSubscriptions,
   createStripeCheckoutSession,
   createStripePlanCheckoutSession,
+  createBasicTopUpCheckoutSession,
   prepareStripePlanChange,
   activateStripePlanChange,
   getStripeSubscription,
@@ -26,6 +27,7 @@ const {
   ensureSubscriptionMeteredPrices,
   getPlanKeyForProduct,
   getStripeProduct,
+  getPlanPrices,
   LIVE_SUBSCRIPTION_STATUSES,
   updateStripeCustomerIdentity,
 } = require("./services/stripeApis");
@@ -34,6 +36,7 @@ const {
 } = require("./services/subscriptionEnforcement");
 const {
   provisionSnApiCustomer,
+  provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
   listSnApiKeys,
@@ -63,7 +66,14 @@ const {
   getInfoForEmbeddedWorkspaces,
   getPlansFromMoesif,
   sendSubscriptionToMoesif,
+  sendPrepaidSubscriptionToMoesif,
+  createMoesifBalanceTransaction,
+  getMoesifPrepaidBalance,
 } = require("./services/moesifApis");
+const {
+  isBasicTopUpSession,
+  reconcileBasicTopUp,
+} = require("./services/prepaidReconciliation");
 
 const { authMiddleware } = require("./services/authPlugin");
 
@@ -139,6 +149,19 @@ const subscriptionReconciliationDeps = {
   updateSnApiSubscriptionStatus,
   handleSubscriptionEnded,
   listStripeSubscriptions,
+};
+
+const prepaidReconciliationDeps = {
+  verifyStripeSession,
+  getStripeCustomerById,
+  getStripeProduct,
+  getPlanKeyForProduct,
+  getPlanPrices,
+  provisionSnApiPrepaidCustomer,
+  updateStripeCustomerIdentity,
+  syncToMoesif,
+  sendPrepaidSubscriptionToMoesif,
+  createMoesifBalanceTransaction,
 };
 
 const moesifMiddleware = moesif({
@@ -267,6 +290,7 @@ app.post(
     const email = req.user?.email;
     const quantity = req.query?.quantity || undefined;
     const requestId = req.query?.request_id;
+    const topUpAmountGbp = req.query?.amount_gbp;
 
     console.log(`create-stripe-checkout-session called for ${email} planId ${planId} priceId ${priceId} quantity ${quantity}`);
 
@@ -294,7 +318,11 @@ app.post(
     }
 
     try {
-      if (planId) {
+      const selectedPlanKey = planId
+        ? await getPlanKeyForProduct(planId)
+        : null;
+
+      if (planId && selectedPlanKey !== "basic") {
         try {
           const prepared = await prepareStripePlanChange(
             email,
@@ -322,7 +350,15 @@ app.post(
         }
       }
 
-      const session = planId
+      const session = selectedPlanKey === "basic"
+        ? await createBasicTopUpCheckoutSession(
+            email,
+            planId,
+            topUpAmountGbp,
+            req.user,
+            requestId
+          )
+        : planId
         ? await createStripePlanCheckoutSession(email, planId, req?.user, requestId)
         : await createStripeCheckoutSession(
             email,
@@ -331,8 +367,7 @@ app.post(
             req?.user,
             requestId
           );
-      console.log("got session back from stripe session");
-      console.log(JSON.stringify(session));
+      console.log(`Stripe Checkout session ${session.id} created`);
 
       res.send({ clientSecret: session.client_secret });
     } catch (err) {
@@ -348,7 +383,7 @@ app.post(
           err.code === "multiple_active_subscriptions"
             ? "Multiple active subscriptions were found. Please contact support before changing plans."
             : err.code === "active_subscription_exists"
-              ? "You already have an active subscription. Select a plan to change it."
+              ? err.message
             : err.message || "Error creating checkout session",
       });
     }
@@ -407,11 +442,19 @@ app.post(
       event.type === "checkout.session.async_payment_succeeded"
     ) {
       try {
-        await reconcileCheckoutSession(
-          event.data.object,
-          null,
-          subscriptionReconciliationDeps
-        );
+        if (isBasicTopUpSession(event.data.object)) {
+          await reconcileBasicTopUp(
+            event.data.object,
+            null,
+            prepaidReconciliationDeps
+          );
+        } else {
+          await reconcileCheckoutSession(
+            event.data.object,
+            null,
+            subscriptionReconciliationDeps
+          );
+        }
       } catch (reconciliationError) {
         if (reconciliationError.code === "checkout_payment_pending") {
           return res.status(200).json({ received: true, payment_pending: true });
@@ -536,6 +579,25 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
   try {
     const entitlement = await ensureRequestEntitlement(req);
     if (!entitlement.active) return res.status(200).json([]);
+    if (entitlement.planKey === "basic" && !entitlement.subscription) {
+      const prepaid = await getMoesifPrepaidBalance({
+        companyId: req.portalContext.moesif_company_id,
+        stripeCustomerId: req.portalContext.stripe_customer_id,
+      });
+      return res.status(200).json([
+        {
+          ...prepaid.subscription,
+          subscription_id: prepaid.subscriptionId,
+          status: "active",
+          billing_model: "prepaid_credit",
+          balance: {
+            current_balance: prepaid.current,
+            pending_activity: prepaid.pending,
+            available_balance: prepaid.available,
+          },
+        },
+      ]);
+    }
     return res.status(200).json([stripeSubscriptionForPortal(entitlement)]);
   } catch (err) {
     console.error("Error getting authoritative Stripe subscription", err);
@@ -548,6 +610,31 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
 
 app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
   try {
+    if (
+      req.portalContext?.current_plan_key === "basic" &&
+      !req.portalContext?.current_subscription_id
+    ) {
+      const balance = await getMoesifPrepaidBalance({
+        companyId: req.portalContext.moesif_company_id,
+        stripeCustomerId: req.portalContext.stripe_customer_id,
+      });
+      return res.status(200).json({
+        hasSubscription: true,
+        billingModel: "prepaid_credit",
+        currency: balance.currency,
+        period: null,
+        accrued: null,
+        lines: [],
+        credit: {
+          granted: null,
+          used: null,
+          remaining: Math.round(balance.available * 100),
+          current: Math.round(balance.current * 100),
+          pending: Math.round(balance.pending * 100),
+          projectedRemaining: Math.round(balance.available * 100),
+        },
+      });
+    }
     const summary = await getUsageSummary(req.user?.email, req.user);
     return res.status(200).json(summary);
   } catch (error) {
@@ -575,6 +662,26 @@ app.post(
     let orphanSubscriptionId = null;
     try {
       const session = await verifyStripeSession(checkoutSessionId);
+      if (isBasicTopUpSession(session)) {
+        const reconciled = await reconcileBasicTopUp(
+          session,
+          req.user,
+          prepaidReconciliationDeps
+        );
+        invalidatePortalContext(req.user.sub);
+        return res.status(201).json({
+          status: "complete",
+          purchase_type: reconciled.purchaseType,
+          customer_email: reconciled.customer.email,
+          plan_key: reconciled.planKey,
+          amount_gbp_pence: reconciled.amountPence,
+          sn_api: {
+            user_id: reconciled.provisioned.user_id,
+            organization_id: reconciled.provisioned.organization_id,
+            api_key_created: reconciled.provisioned.api_key_created,
+          },
+        });
+      }
       orphanSubscriptionId =
         typeof session.subscription === "string"
           ? session.subscription
@@ -740,7 +847,8 @@ app.get("/api-keys", portalAuthMiddleware, async function (req, res) {
       ...normalizedKeyData,
       has_active_subscription: entitlement.active,
       current_plan_key: entitlement.planKey || null,
-      subscription_status: entitlement.subscription?.status || null,
+      subscription_status:
+        entitlement.subscription?.status || req.portalContext?.billing_status || null,
     });
   } catch (error) {
     sendKeyManagementError(res, error);

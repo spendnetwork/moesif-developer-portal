@@ -14,7 +14,14 @@ const stripePromise = loadStripe(
 // used on embedded checkout example code:
 // https://docs.stripe.com/checkout/embedded/quickstart
 
-function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
+function StripeCheckoutForm({
+  priceId,
+  planId,
+  user,
+  idToken,
+  quantity,
+  topUpAmount,
+}) {
   const navigate = useNavigate();
   const checkoutRequestId = useRef(crypto.randomUUID());
   const [clientSecret, setClientSecret] = useState("");
@@ -30,6 +37,7 @@ function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
     params.set("request_id", checkoutRequestId.current);
     if (planId) {
       params.set("plan_id", planId);
+      if (topUpAmount) params.set("amount_gbp", topUpAmount);
     } else {
       params.set("price_id", priceId);
       if (quantity) params.set("quantity", quantity);
@@ -69,7 +77,7 @@ function StripeCheckoutForm({ priceId, planId, user, idToken, quantity }) {
         console.error("Failed to create checkout session", err);
         setCheckoutError(err.message || "Unable to start checkout");
       });
-  }, [priceId, planId, user, idToken, quantity, navigate]);
+  }, [priceId, planId, user, idToken, quantity, topUpAmount, navigate]);
 
   return (
     <div id="checkout">

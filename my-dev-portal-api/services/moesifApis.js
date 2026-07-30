@@ -3,6 +3,25 @@ const moesif = require("moesif-nodejs");
 const moesifManagementToken = process.env.MOESIF_MANAGEMENT_TOKEN;
 const moesifApiEndPoint = "https://api.moesif.com";
 
+function basicPrepaidSubscriptionId(stripeCustomerId) {
+  return `openopps_basic_prepaid_${stripeCustomerId}`;
+}
+
+async function readMoesifResponse(response, operation) {
+  const body = await response.json().catch(async () => ({
+    message: await response.text().catch(() => response.statusText),
+  }));
+  if (!response.ok) {
+    const error = new Error(
+      `${operation} failed (${response.status}): ${JSON.stringify(body)}`
+    );
+    error.status = response.status;
+    error.detail = body;
+    throw error;
+  }
+  return body;
+}
+
 const moesifMiddleware = moesif({
   applicationId: process.env.MOESIF_APPLICATION_ID,
 
@@ -17,12 +36,14 @@ function syncToMoesif({
   email,
   auth0UserId,
   stripeCustomerId,
+  planKey,
 }) {
   if (companyId) {
     var company = {
       companyId: companyId,
       metadata: {
         stripe_customer_id: stripeCustomerId,
+        ...(planKey ? { plan_key: planKey } : {}),
       },
     };
     moesifMiddleware.updateCompany(company);
@@ -36,6 +57,7 @@ function syncToMoesif({
         email: email,
         auth0_user_id: auth0UserId,
         stripe_customer_id: stripeCustomerId,
+        ...(planKey ? { plan_key: planKey } : {}),
       },
     };
     moesifMiddleware.updateUser(user);
@@ -101,6 +123,104 @@ function sendSubscriptionToMoesif({
     .catch((err) => {
       console.error(`failed to send event to ${companyId}`, err);
     });
+}
+
+async function sendPrepaidSubscriptionToMoesif({
+  companyId,
+  stripeCustomerId,
+  planId,
+  priceIds,
+  currentPeriodStart,
+}) {
+  const subscriptionId = basicPrepaidSubscriptionId(stripeCustomerId);
+  const payload = {
+    subscription_id: subscriptionId,
+    company_id: String(companyId),
+    current_period_start: currentPeriodStart,
+    current_period_end: "2099-12-31T23:59:59.999Z",
+    status: "active",
+    items: priceIds.map((priceId) => ({
+      plan_id: planId,
+      price_id: priceId,
+    })),
+    metadata: {
+      billing_model: "prepaid_credit",
+      plan_key: "basic",
+      stripe_customer_id: stripeCustomerId,
+    },
+  };
+  const response = await fetch("https://api.moesif.net/v1/subscriptions", {
+    method: "POST",
+    headers: {
+      "X-Moesif-Application-Id": process.env.MOESIF_APPLICATION_ID,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  await readMoesifResponse(response, "Moesif prepaid subscription update");
+  return subscriptionId;
+}
+
+async function createMoesifBalanceTransaction({
+  companyId,
+  subscriptionId,
+  amountGbp,
+  transactionId,
+  description,
+}) {
+  const response = await fetch(
+    `${moesifApiEndPoint}/~/billing/reports/balance_transactions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${moesifManagementToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        company_id: String(companyId),
+        subscription_id: subscriptionId,
+        amount: amountGbp,
+        type: "credit",
+        transaction_id: transactionId,
+        description: description || "Open Opportunities Basic credit top-up",
+      }),
+    }
+  );
+  return readMoesifResponse(response, "Moesif balance credit");
+}
+
+async function getMoesifPrepaidBalance({ companyId, stripeCustomerId }) {
+  const response = await fetch(
+    `${moesifApiEndPoint}/v1/search/~/companies/${encodeURIComponent(
+      companyId
+    )}/subscriptions`,
+    {
+      headers: { Authorization: `Bearer ${moesifManagementToken}` },
+    }
+  );
+  const body = await readMoesifResponse(response, "Moesif balance lookup");
+  const subscriptions = Array.isArray(body)
+    ? body
+    : body?.data || body?.subscriptions || [];
+  const subscription = subscriptions.find(
+    (candidate) =>
+      candidate.subscription_id === basicPrepaidSubscriptionId(stripeCustomerId) ||
+      candidate.external_id === basicPrepaidSubscriptionId(stripeCustomerId)
+  );
+  if (!subscription) {
+    const error = new Error("Basic prepaid subscription was not found in Moesif");
+    error.code = "moesif_prepaid_subscription_not_found";
+    error.status = 404;
+    throw error;
+  }
+  return {
+    subscriptionId: basicPrepaidSubscriptionId(stripeCustomerId),
+    subscription,
+    currency: String(subscription.currency || "GBP").toUpperCase(),
+    current: Number(subscription.balance?.current_balance || 0),
+    pending: Number(subscription.balance?.pending_activity || 0),
+    available: Number(subscription.balance?.available_balance || 0),
+  };
 }
 
 function getPlansFromMoesif() {
@@ -371,4 +491,8 @@ module.exports = {
   getSubscriptionsForUserId,
   getSubscriptionForUserEmail,
   sendSubscriptionToMoesif,
+  sendPrepaidSubscriptionToMoesif,
+  createMoesifBalanceTransaction,
+  getMoesifPrepaidBalance,
+  basicPrepaidSubscriptionId,
 };
