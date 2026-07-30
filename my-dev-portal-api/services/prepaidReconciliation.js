@@ -138,23 +138,39 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
     email,
     name: authUser?.name || authUser?.nickname || customer.name || email,
   };
-  const provisioned = await deps.provisionSnApiPrepaidCustomer({
+  let existingContext = null;
+  if (deps.getSnApiPortalContext) {
+    try {
+      existingContext = await deps.getSnApiPortalContext(identity);
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  const hasActiveBasicAccess =
+    existingContext?.current_plan_key === "basic" &&
+    existingContext?.billing_status === "active";
+
+  // Create the canonical SN API identity first, but keep API access blocked
+  // until both the Moesif subscription and its paid credit exist. Existing
+  // Basic customers remain active while adding more credit.
+  const pendingProvision = await deps.provisionSnApiPrepaidCustomer({
     authUser: identity,
     customer,
     product,
+    subscriptionStatus: hasActiveBasicAccess ? "active" : "provisioning",
   });
   const companyId = String(
-    provisioned.moesif_company_id || provisioned.organization_id
+    pendingProvision.moesif_company_id || pendingProvision.organization_id
   );
   await deps.updateStripeCustomerIdentity(customerId, {
-    moesifUserId: provisioned.user_id,
+    moesifUserId: pendingProvision.user_id,
     moesifCompanyId: companyId,
     auth0UserId,
     subscriptionId: null,
   });
   await deps.syncToMoesif({
     companyId,
-    userId: String(provisioned.user_id),
+    userId: String(pendingProvision.user_id),
     email,
     auth0UserId,
     stripeCustomerId: customerId,
@@ -178,6 +194,12 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
     amountGbp: amountPence / 100,
     transactionId,
     description: `Open Opportunities Basic top-up from ${session.id}`,
+  });
+  const provisioned = await deps.provisionSnApiPrepaidCustomer({
+    authUser: identity,
+    customer,
+    product,
+    subscriptionStatus: "active",
   });
 
   return {

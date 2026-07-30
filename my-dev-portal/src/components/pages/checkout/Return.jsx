@@ -1,255 +1,131 @@
-import React, { useState, useEffect } from "react";
-import { Navigate } from "react-router-dom";
-import { PageLayout } from "../../page-layout";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+
+import { PageLayout } from "../../page-layout";
 import noPriceIcon from "../../../images/icons/empty-state-price.svg";
 import NoticeBox from "../../notice-box";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { moesifIdentifyUserFrontEndIfPossible } from "../../../common/utils";
 import { PageLoader } from "../../page-loader";
-
-// used on embedded checkout example code:
-// https://docs.stripe.com/checkout/embedded/quickstart
-// Purpose of this page is to
-// - Confirmation for customer
-// - receive the returned sessionId from Stripe and call backend API to provision services.
+import { apiRequest } from "../../../lib/portal-api";
 
 const wait = (milliseconds) =>
   new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
-async function registerPurchaseStripe({
-  planId,
-  priceId,
-  sessionId,
-  idToken,
-  setCustomerEmail,
-  setStatus,
-  setLoading,
-  setProvisionError,
-}) {
-  if (!sessionId || !idToken) {
-    console.error("no session id found for stripe");
-    return;
-  }
-
-  setLoading(true);
-  setProvisionError(null);
+async function registerStripePurchase(sessionId, idToken) {
   const retryDelays = [0, 1000, 2000, 4000, 8000];
-  try {
-    for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
-      if (retryDelays[attempt]) await wait(retryDelays[attempt]);
-      try {
-        const res = await fetch(
-          `${import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER}/register/stripe/${sessionId}`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${idToken}` },
-          }
-        );
-        const body = await res.json().catch(() => ({}));
-        if (res.ok) {
-          setStatus(body.status);
-          setCustomerEmail(body.customer_email);
-          return;
-        }
-        const provisionErr = new Error(
-          body.message || `Subscription synchronization failed (${res.status})`
-        );
-        provisionErr.code = body.code;
-        provisionErr.status = res.status;
-        const retryable =
-          res.status >= 500 || body.code === "checkout_incomplete";
-        if (!retryable || attempt === retryDelays.length - 1) {
-          throw provisionErr;
-        }
-      } catch (error) {
-        const retryable =
-          !error.status ||
-          error.status >= 500 ||
-          error.code === "checkout_incomplete";
-        if (
-          error.code === "email_identity_conflict" ||
-          !retryable ||
-          attempt === retryDelays.length - 1
-        ) {
-          throw error;
-        }
-      }
+  let lastError;
+  for (const delay of retryDelays) {
+    if (delay) await wait(delay);
+    try {
+      return await apiRequest(`/register/stripe/${sessionId}`, idToken, {
+        method: "POST",
+      });
+    } catch (error) {
+      lastError = error;
+      const retryable =
+        error.code !== "moesif_configuration_error" &&
+        error.code !== "email_identity_conflict" &&
+        (error.status >= 500 || error.code === "checkout_incomplete");
+      if (!retryable) throw error;
     }
-  } catch (error) {
-    setProvisionError(error);
-  } finally {
-    setLoading(false);
-    moesifIdentifyUserFrontEndIfPossible(idToken);
   }
+  throw lastError;
 }
 
-function registerPurchaseCustom({
-  planId,
-  priceId,
-  sessionId,
-  idToken,
-  user,
-  setCustomerEmail,
-  setStatus,
-  setLoading,
-  setProvisionError,
-}) {
-  setLoading(true);
-
-  fetch(`${import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER}/register/custom`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      plan_id: planId,
-      price_id: priceId,
-      // session_id:
-      // you may have a some sort of session id or checkout id from your payment provider that you can
-      // use to verify purchase on the backend.
-    }),
-  })
-    .then(async (res) => {
-      if (!res.ok) {
-        const errorBody = await res.json();
-        throw new Error(
-          `Failed provision: ${res.status}, body: ${JSON.stringify(errorBody)}`
-        );
-      }
-      return res.json();
-    })
-    .then((data) => {
-      setStatus("complete");
-      setCustomerEmail(user?.email);
-    })
-    .catch((err) => {
-      setProvisionError(err);
-    })
-    .finally(() => {
-      setLoading(false);
-      moesifIdentifyUserFrontEndIfPossible(idToken, user);
-    });
-}
-
-function Return(props) {
-  const [status, setStatus] = useState(null);
+function Return() {
+  const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [customerEmail, setCustomerEmail] = useState("");
   const [provisionError, setProvisionError] = useState(null);
   const [registrationAttempt, setRegistrationAttempt] = useState(0);
-  const { idToken, user } = useAuthCombined();
+  const { idToken } = useAuthCombined();
 
-  const queryString = window.location.search;
-  const urlParams = new URLSearchParams(queryString);
+  const urlParams = new URLSearchParams(window.location.search);
   const sessionId = urlParams.get("session_id");
-  const priceId = urlParams.get("price_id");
-  const planId = urlParams.get("plan_id");
   const purchaseType = urlParams.get("purchase_type");
   const isBasicTopUp = purchaseType === "basic_credit_top_up";
 
-  const isCustom = import.meta.env.REACT_APP_PAYMENT_PROVIDER === "custom";
-
   useEffect(() => {
-    window.moesif?.track(
-      isCustom ? "custom-checkout-returned" : "stripe-checkout-returned",
-      {
-        stripe_session_id: sessionId,
-        price_id: priceId,
-        purchase_type: purchaseType,
-      }
-    );
-    if (isCustom && idToken) {
-      registerPurchaseCustom({
-        planId,
-        priceId,
-        sessionId,
-        idToken,
-        user,
-        setCustomerEmail,
-        setStatus,
-        setLoading,
-        setProvisionError,
-      });
-    } else if (!isCustom && idToken) {
-      registerPurchaseStripe({
-        sessionId,
-        idToken,
-        setCustomerEmail,
-        setStatus,
-        setLoading,
-        setProvisionError,
-      });
-    }
-  }, [
-    sessionId,
-    idToken,
-    isCustom,
-    user,
-    priceId,
-    planId,
-    purchaseType,
-    registrationAttempt,
-  ]);
+    if (!sessionId || !idToken) return;
+    window.moesif?.track("stripe-checkout-returned", {
+      purchase_type: purchaseType || "subscription",
+    });
 
-  if (status === "open") {
-    return <Navigate to={`/checkout?price_id_to_purchase=${priceId}`} />;
-  }
+    let cancelled = false;
+    setLoading(true);
+    setProvisionError(null);
+    registerStripePurchase(sessionId, idToken)
+      .then((data) => {
+        if (!cancelled) setResult(data);
+      })
+      .catch((error) => {
+        if (!cancelled) setProvisionError(error);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          moesifIdentifyUserFrontEndIfPossible(idToken);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, idToken, purchaseType, registrationAttempt]);
 
-  // for stripe sessionId is required, but if isCustom, for developers you may have to determine
-  // what is considered success.
-  if (status === "complete" && (sessionId || isCustom)) {
+  if (loading) return <PageLoader />;
+
+  if (result?.status === "complete") {
     return (
       <PageLayout>
-        <h1>{isBasicTopUp ? "Payment complete" : "Subscribe"}</h1>
+        <h1>{isBasicTopUp ? "Payment complete" : "Subscription active"}</h1>
         <NoticeBox
           iconSrc={noPriceIcon}
-          title={isBasicTopUp ? "Credit added" : "Success"}
+          title={isBasicTopUp ? "Credit added" : "Access ready"}
           description={
             isBasicTopUp
-              ? `Your Basic API credit is ready to use. A receipt will be sent to ${customerEmail}.`
-              : `You are now subscribed to the plan and price. An email should be sent to ${customerEmail}`
+              ? `Your Basic API credit is ready to use. A receipt will be sent to ${result.customer_email}.`
+              : `Your subscription and API access are ready. A confirmation will be sent to ${result.customer_email}.`
           }
           actions={
-            <>
-              <Link to="/keys" rel="noreferrer noopener">
-                <button className="button button--outline-secondary">
-                  Get API Key
-                </button>
-              </Link>
-            </>
+            <Link to="/keys" rel="noreferrer noopener">
+              <button className="button button--outline-secondary">
+                Manage API keys
+              </button>
+            </Link>
           }
         />
       </PageLayout>
     );
   }
 
-  if (loading) {
-    return <PageLoader />;
-  }
-
+  const configurationError =
+    provisionError?.code === "moesif_configuration_error";
+  const identityConflict = provisionError?.code === "email_identity_conflict";
   return (
     <PageLayout>
-      <h1>Subscribe Status</h1>
+      <h1>Checkout status</h1>
       <NoticeBox
         iconSrc={noPriceIcon}
         title={
-          provisionError?.code === "email_identity_conflict"
+          identityConflict
             ? "Use your original sign-in"
-            : provisionError
-              ? "Provision Service Failed"
-              : "Checkout Failed"
+            : configurationError
+              ? "Payment received"
+              : provisionError
+                ? "Access setup delayed"
+                : "Checkout incomplete"
         }
         description={
-          provisionError?.code === "email_identity_conflict"
+          identityConflict
             ? provisionError.message
-            : provisionError
-              ? "We could not finish setting up your access. Please try again shortly."
-              : "Seems you didn't checkout successfully?"
+            : configurationError
+              ? "Your payment is safe, but account setup needs support. Please do not pay again."
+              : provisionError
+                ? "We could not finish synchronizing your access yet. You can retry without making another payment."
+                : "We could not confirm a completed checkout session."
         }
         actions={
-          provisionError && provisionError.code !== "email_identity_conflict" ? (
+          provisionError && !identityConflict && !configurationError ? (
             <button
               className="button button--primary"
               onClick={() => setRegistrationAttempt((attempt) => attempt + 1)}
@@ -257,9 +133,9 @@ function Return(props) {
               Retry synchronization
             </button>
           ) : (
-            <Link to="/plans" rel="noreferrer noopener">
+            <Link to={configurationError ? "/settings" : "/plans"}>
               <button className="button button--outline-secondary">
-                Go to Plans
+                {configurationError ? "Account settings" : "View plans"}
               </button>
             </Link>
           )

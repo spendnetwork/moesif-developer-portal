@@ -2,7 +2,6 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { LineLoader } from "../../line-loader";
 import NoPriceFound from "./NoPriceFound";
-import PriceTile from "./PriceTile";
 import PlanTile from "./PlanTile";
 import { useAuth0 } from "@auth0/auth0-react";
 import { SignupButton } from "../../buttons/signup-button";
@@ -14,12 +13,11 @@ const PLAN_KEY_ORDER = ["basic", "growth", "enterprise"];
 
 function getCatalogPlanKey(plan) {
   const configured = plan?.metadata?.plan_key;
-  if (configured) return configured.trim().toLowerCase();
-  const name = (plan?.name || "").toLowerCase();
-  return PLAN_KEY_ORDER.find((key) => name.includes(key));
+  const normalized = configured?.trim().toLowerCase();
+  return PLAN_KEY_ORDER.includes(normalized) ? normalized : null;
 }
 
-function MoesifPlans(props) {
+function MoesifPlans() {
   const { isAuthenticated } = useAuth0();
   const { idToken } = useAuthCombined();
   const { planChange } = usePlanChange({ idToken });
@@ -30,43 +28,6 @@ function MoesifPlans(props) {
     plansValidating: validating,
     plansError: error,
   } = usePlans();
-
-  const getActionButton = (price, plan, options) => {
-    // Helper to determine if price needs quantity
-    const needsQuantity = (() => {
-      // Stripe price object: usage_type === 'metered' means do NOT include quantity
-      // For other pricing models, quantity is required
-      // If price has price meter or usage_aggregator, quantity is not needed
-      if (price.usage_type === "metered") return false;
-      if (price.price_meter) return false;
-      if (price.usage_aggregator) return false;
-      // Otherwise, quantity is needed
-      return true;
-    })();
-
-    const quantityParam = needsQuantity ? "&quantity=1" : "";
-
-    if (options?.disable) {
-      return (
-        <button disabled className="button__price-action">
-          Sign Up <span className="button__price-action-note">example</span>
-        </button>
-      );
-    }
-    if (isAuthenticated) {
-      return (
-        <Link
-          to={`/checkout?price_id_to_purchase=${encodeURIComponent(
-            price.id
-          )}&plan_id_to_purchase=${encodeURIComponent(plan?.id)}${quantityParam}`}
-        >
-          <button className="button__price-action">Select</button>
-        </Link>
-      );
-    } else {
-      return <SignupButton isPriceAction />;
-    }
-  };
 
   const getPlanActionButton = (plan) => {
     const planKey = getCatalogPlanKey(plan);
@@ -101,6 +62,9 @@ function MoesifPlans(props) {
       (a, b) =>
         PLAN_KEY_ORDER.indexOf(a.planKey) - PLAN_KEY_ORDER.indexOf(b.planKey)
     );
+  const invalidActivePlans = (plans || []).filter(
+    (plan) => plan.status === "active" && !getCatalogPlanKey(plan)
+  );
 
   // Keep the loader up while a first load (or its retries) is still in
   // flight so a transient failure does not flash a red error.
@@ -131,30 +95,21 @@ function MoesifPlans(props) {
         </div>
       )}
       {!loading && !error && (!plans || plans.length === 0) && <NoPriceFound />}
+      {invalidActivePlans.length > 0 && (
+        <div className="alert-error" role="alert">
+          One or more active plans are missing valid plan_key metadata. Billing
+          checkout is disabled for those plans until the catalogue is corrected.
+        </div>
+      )}
       <div className="plans--container">
-        {tierPlans.length > 0
-          ? tierPlans.map(({ plan, planKey }) => (
-              <PlanTile
-                key={plan.id}
-                plan={plan}
-                planKey={planKey}
-                actionButton={getPlanActionButton(plan)}
-              />
-            ))
-          : plans &&
-            plans
-              .filter((plan) => plan.status === "active")
-              .map((plan) =>
-                plan?.prices?.map((price) => (
-                  <PriceTile
-                    key={`${plan.id}${price.id}`}
-                    plan={plan}
-                    price={price}
-                    actionButton={getActionButton(price, plan)}
-                  />
-                ))
-              )
-              .flat()}
+        {tierPlans.map(({ plan, planKey }) => (
+          <PlanTile
+            key={plan.id}
+            plan={plan}
+            planKey={planKey}
+            actionButton={getPlanActionButton(plan)}
+          />
+        ))}
       </div>
     </div>
   );

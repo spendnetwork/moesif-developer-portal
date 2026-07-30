@@ -5,27 +5,22 @@ import { PageLoader } from "../../page-loader";
 import { PageLayout } from "../../page-layout";
 import StripeCheckoutForm from "./StripeCheckoutForm";
 import { Navigate } from "react-router-dom";
-import CustomCheckoutForm from "./CustomCheckoutForm";
 import BasicTopUpCheckout from "./BasicTopUpCheckout";
 
-function Checkout(props) {
-  const { isLoading, user, idToken } = useAuthCombined();
+function Checkout() {
+  const { isLoading, idToken } = useAuthCombined();
 
   const queryString = window.location.search;
   const urlParams = new URLSearchParams(queryString);
-  const urlPriceIdToPurchase = urlParams.get("price_id_to_purchase");
   const urlPlanIdToPurchase = urlParams.get("plan_id_to_purchase");
-  const urlQuantity = urlParams.get("quantity");
   const purchaseType = urlParams.get("purchase_type");
   const isBasicTopUp = purchaseType === "basic_credit_top_up";
 
   useEffect(() => {
     window.moesif?.track("about-to-checkout", {
-      price_id: urlPriceIdToPurchase,
       plan_id: urlPlanIdToPurchase,
-      quantity: urlQuantity,
     });
-  }, [urlPriceIdToPurchase, urlPlanIdToPurchase, urlQuantity]);
+  }, [urlPlanIdToPurchase]);
 
   if (isLoading || !idToken) {
     return (
@@ -35,7 +30,7 @@ function Checkout(props) {
     );
   }
 
-  if (!urlPriceIdToPurchase && !urlPlanIdToPurchase) {
+  if (!urlPlanIdToPurchase) {
     return <Navigate replace to="/plans" />;
   }
 
@@ -51,28 +46,15 @@ function Checkout(props) {
         </p>
       </div>
       <div className="page-layout__focus">
-        {isBasicTopUp &&
-        import.meta.env.REACT_APP_PAYMENT_PROVIDER !== "custom" ? (
+        {isBasicTopUp ? (
           <BasicTopUpCheckout
             planId={urlPlanIdToPurchase}
-            user={user}
-            idToken={idToken}
-          />
-        ) : import.meta.env.REACT_APP_PAYMENT_PROVIDER === "custom" ? (
-          <CustomCheckoutForm
-            key={urlPriceIdToPurchase}
-            priceId={urlPriceIdToPurchase}
-            planId={urlPlanIdToPurchase}
-            user={user}
             idToken={idToken}
           />
         ) : (
           <StripeCheckoutForm
-            key={urlPriceIdToPurchase || urlPlanIdToPurchase}
-            priceId={urlPriceIdToPurchase}
+            key={urlPlanIdToPurchase}
             planId={urlPlanIdToPurchase}
-            quantity={urlQuantity}
-            user={user}
             idToken={idToken}
           />
         )}

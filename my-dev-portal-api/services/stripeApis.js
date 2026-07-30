@@ -239,27 +239,7 @@ async function getPlanKeyForProduct(productId) {
     }
     throw new Error(`Product ${productId} has unsupported plan_key ${configured}`);
   }
-  const name = String(product.name || "").toLowerCase();
-  const planKey = ["basic", "growth", "enterprise"].find((key) =>
-    name.includes(key)
-  );
-  if (!planKey) {
-    throw new Error(`Product ${productId} is missing plan_key metadata`);
-  }
-  return planKey;
-}
-
-function getStripeCustomer(email) {
-  return fetch(
-    `https://api.stripe.com/v1/customers/search?query=email:"${encodeURIComponent(
-      email
-    )}"`,
-    {
-      headers: {
-        Authorization: `bearer ${process.env.STRIPE_API_KEY}`,
-      },
-    }
-  ).then((res) => res.json());
+  throw new Error(`Product ${productId} is missing plan_key metadata`);
 }
 
 // Webhooks identify the customer by id, not email, so subscription enforcement
@@ -308,48 +288,6 @@ async function getOrCreateStripeCustomerId(email, authUser) {
   return customer.id;
 }
 
-async function createStripeCheckoutSession(email, priceId, quantity, authUser, requestId) {
-  const customerId = await getOrCreateStripeCustomerId(email, authUser);
-
-  const subscriptions = await stripe.subscriptions.list({
-    customer: customerId,
-    status: "all",
-    limit: 10,
-  });
-  const activeSubscriptions = subscriptions.data.filter((candidate) =>
-    ["active", "trialing", "past_due"].includes(candidate.status)
-  );
-  if (activeSubscriptions.length) {
-    const error = new Error(
-      "An active subscription already exists; select a plan to change it"
-    );
-    error.code =
-      activeSubscriptions.length > 1
-        ? "multiple_active_subscriptions"
-        : "active_subscription_exists";
-    throw error;
-  }
-
-  const session = await stripe.checkout.sessions.create(
-    {
-      ui_mode: "embedded",
-      line_items: [
-        {
-          price: priceId,
-          quantity: quantity ? parseInt(quantity) || 1 : undefined,
-        },
-      ],
-      customer: customerId,
-      client_reference_id: authUser?.sub,
-      mode: "subscription",
-      return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&price_id=${priceId}`,
-    },
-    requestId ? { idempotencyKey: `checkout-${requestId}` } : undefined
-  );
-
-  return session;
-}
-
 async function createStripePlanCheckoutSession(email, planId, authUser, requestId) {
   const customerId = await getOrCreateStripeCustomerId(email, authUser);
 
@@ -388,7 +326,11 @@ async function createStripePlanCheckoutSession(email, planId, authUser, requestI
         billing_mode: { type: "flexible" },
         metadata: { plan_id: planId },
       },
-      return_url: `http://${process.env.FRONT_END_DOMAIN}/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${planId}`,
+      return_url: getFrontendUrl(
+        `/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${encodeURIComponent(
+          planId
+        )}`
+      ),
     },
     requestId ? { idempotencyKey: `checkout-${requestId}` } : undefined
   );
@@ -959,7 +901,6 @@ module.exports = {
   getUsageSummary,
   cancelStripeSubscription,
   hasActiveStripeSubscription,
-  createStripeCheckoutSession,
   createStripePlanCheckoutSession,
   createBasicTopUpCheckoutSession,
   prepareStripePlanChange,
@@ -968,7 +909,6 @@ module.exports = {
   listStripeInvoices,
   attachPlanMeteredPrices,
   updateStripeCustomerIdentity,
-  getStripeCustomer,
   getStripeCustomerById,
   listStripeSubscriptions,
   getActiveStripeSubscription,

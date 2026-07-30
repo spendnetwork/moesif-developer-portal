@@ -20,6 +20,7 @@ async function parseBody(response) {
 function throwWithStatus(body, response) {
   const error = new Error(body?.message || "Request failed");
   error.status = response.status;
+  error.code = body?.code;
   throw error;
 }
 
@@ -31,6 +32,7 @@ function throwWithStatus(body, response) {
 function throwAuthError(body, response) {
   const error = new Error(body?.message || "Your session has expired");
   error.status = response.status;
+  error.code = body?.code;
   error.sessionExpired = true;
   notifySessionExpired();
   throw error;

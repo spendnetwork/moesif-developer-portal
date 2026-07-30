@@ -1,8 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
-const path = require("path");
-require("dotenv").config({ path: [".env", ".env.template"] });
-const bodyParser = require("body-parser");
+require("dotenv").config();
 const moesif = require("moesif-nodejs");
 const cors = require("cors");
 
@@ -14,10 +12,8 @@ const {
   getUsageSummary,
   constructStripeEvent,
   grantCommitmentFromInvoice,
-  getStripeCustomer,
   getStripeCustomerById,
   listStripeSubscriptions,
-  createStripeCheckoutSession,
   createStripePlanCheckoutSession,
   createBasicTopUpCheckoutSession,
   prepareStripePlanChange,
@@ -65,7 +61,6 @@ const {
   syncToMoesif,
   getInfoForEmbeddedWorkspaces,
   getPlansFromMoesif,
-  sendSubscriptionToMoesif,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
   getMoesifPrepaidBalance,
@@ -77,15 +72,10 @@ const {
 
 const { authMiddleware } = require("./services/authPlugin");
 
-const { getApimProvisioningPlugin } = require("./config/pluginLoader");
-const {
-  getUnifiedCustomerId,
-  getUnifiedCustomerIdCached,
-} = require("./services/commonUtils");
-const { BillingProvider } = require("./services/billingProvider");
+const { getUnifiedCustomerIdCached } = require("./services/commonUtils");
 
 const app = express();
-app.use(express.static(path.join(__dirname)));
+app.disable("x-powered-by");
 const port = 3030;
 
 // Keep the load-balancer health check independent of Moesif, Stripe, Auth0,
@@ -95,29 +85,40 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-const moesifManagementToken = process.env.MOESIF_MANAGEMENT_TOKEN;
 const templateWorkspaceIdLiveEvent =
   process.env.MOESIF_TEMPLATE_WORKSPACE_ID_LIVE_EVENT_LOG;
 const templateWorkspaceIdTimeSeries =
   process.env.MOESIF_TEMPLATE_WORKSPACE_ID_TIME_SERIES;
 
-var jsonParser = bodyParser.json();
+const jsonParser = express.json({ limit: "100kb" });
 
-if (!moesifManagementToken) {
-  console.error(
-    "No MOESIF_MANAGEMENT_TOKEN found. Please create an .env file with MOESIF_MANAGEMENT_TOKEN & MOESIF_TEMPLATE_WORKSPACE_ID."
-  );
+function validateConfiguration() {
+  const required = [
+    "AUTH0_DOMAIN",
+    "AUTH0_CLIENT_ID",
+    "FRONT_END_DOMAIN",
+    "MOESIF_APPLICATION_ID",
+    "MOESIF_MANAGEMENT_TOKEN",
+    "MOESIF_TEMPLATE_WORKSPACE_ID_LIVE_EVENT_LOG",
+    "MOESIF_TEMPLATE_WORKSPACE_ID_TIME_SERIES",
+    "PORTAL_STRIPE_WEBHOOK_SECRET",
+    "SN_API_BASE_URL",
+    "SN_API_PROVISIONING_TOKEN",
+    "STRIPE_API_KEY",
+  ];
+  const missing = required.filter((name) => !process.env[name]?.trim());
+  if (missing.length) {
+    throw new Error(`Missing required configuration: ${missing.join(", ")}`);
+  }
+  if (
+    process.env.APP_PAYMENT_PROVIDER &&
+    process.env.APP_PAYMENT_PROVIDER.toLowerCase() !== "stripe"
+  ) {
+    throw new Error("APP_PAYMENT_PROVIDER must be stripe");
+  }
 }
 
-if (!templateWorkspaceIdLiveEvent) {
-  console.error(
-    "No MOESIF_TEMPLATE_WORKSPACE_ID found. Please create an .env file with MOESIF_MANAGEMENT_TOKEN & MOESIF_TEMPLATE_WORKSPACE_ID."
-  );
-}
-
-const provisioningService = getApimProvisioningPlugin();
-
-const customBillingProvider = new BillingProvider();
+validateConfiguration();
 
 const planChangeDeps = {
   activateStripePlanChange,
@@ -157,6 +158,7 @@ const prepaidReconciliationDeps = {
   getStripeProduct,
   getPlanKeyForProduct,
   getPlanPrices,
+  getSnApiPortalContext,
   provisionSnApiPrepaidCustomer,
   updateStripeCustomerIdentity,
   syncToMoesif,
@@ -175,7 +177,30 @@ const moesifMiddleware = moesif({
   },
 });
 
-app.use(moesifMiddleware, cors());
+function getFrontendOrigin() {
+  const configured = process.env.FRONT_END_DOMAIN.trim().replace(/\/$/, "");
+  const url = /^https?:\/\//i.test(configured)
+    ? configured
+    : `${configured.startsWith("localhost") || configured.startsWith("127.0.0.1") ? "http" : "https"}://${configured}`;
+  return new URL(url).origin;
+}
+
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+app.use(
+  moesifMiddleware,
+  cors({
+    origin: getFrontendOrigin(),
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Authorization", "Content-Type", "Stripe-Signature"],
+    maxAge: 600,
+  })
+);
 
 const PORTAL_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
 const portalContextCache = new Map();
@@ -285,17 +310,23 @@ app.post(
   "/create-stripe-checkout-session",
   portalAuthMiddleware,
   async (req, res) => {
-    const priceId = req.query?.price_id;
     const planId = req.query?.plan_id;
     const email = req.user?.email;
-    const quantity = req.query?.quantity || undefined;
-    const requestId = req.query?.request_id;
+    const suppliedRequestId = req.query?.request_id;
+    const requestId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(suppliedRequestId || "")
+      ? suppliedRequestId
+      : crypto.randomUUID();
     const topUpAmountGbp = req.query?.amount_gbp;
 
-    console.log(`create-stripe-checkout-session called for ${email} planId ${planId} priceId ${priceId} quantity ${quantity}`);
+    console.log(
+      `Checkout requested by ${req.user?.sub || "unknown"} for plan ${planId || "missing"}`
+    );
 
-    if (!priceId && !planId) {
-      return res.status(400).json({ message: "plan_id or price_id is required" });
+    if (!planId) {
+      return res.status(400).json({
+        code: "plan_required",
+        message: "plan_id is required",
+      });
     }
 
     // Block checkout before payment if the email already belongs to a
@@ -310,19 +341,18 @@ app.post(
         });
       }
     } catch (availabilityError) {
-      // A transient check failure should not block a legitimate checkout;
-      // provisioning still guards the conflict as a backstop.
-      if (availabilityError.status && availabilityError.status !== 404) {
-        console.error("Email availability check failed:", availabilityError);
-      }
+      console.error("Email availability check failed:", availabilityError);
+      return res.status(503).json({
+        code: "provisioning_dependency_unavailable",
+        message:
+          "We could not verify that your API account can be provisioned. Please try again shortly.",
+      });
     }
 
     try {
-      const selectedPlanKey = planId
-        ? await getPlanKeyForProduct(planId)
-        : null;
+      const selectedPlanKey = await getPlanKeyForProduct(planId);
 
-      if (planId && selectedPlanKey !== "basic") {
+      if (selectedPlanKey !== "basic") {
         try {
           const prepared = await prepareStripePlanChange(
             email,
@@ -358,13 +388,10 @@ app.post(
             req.user,
             requestId
           )
-        : planId
-        ? await createStripePlanCheckoutSession(email, planId, req?.user, requestId)
-        : await createStripeCheckoutSession(
+        : await createStripePlanCheckoutSession(
             email,
-            priceId,
-            quantity,
-            req?.user,
+            planId,
+            req.user,
             requestId
           );
       console.log(`Stripe Checkout session ${session.id} created`);
@@ -511,7 +538,7 @@ app.post(
   }
 );
 
-app.get("/plans", jsonParser, async (req, res) => {
+app.get("/plans", async (_req, res) => {
   if (plansCache.data && Date.now() - plansCache.at < PLANS_CACHE_TTL_MS) {
     return res.status(200).json(plansCache.data);
   }
@@ -724,88 +751,23 @@ app.post(
             "This email is already registered with a different sign-in method. Please log in using your original method.",
         });
       }
+      if (err.code === "moesif_management_scope_missing") {
+        return res.status(503).json({
+          code: "moesif_configuration_error",
+          message:
+            "Your payment was received, but account setup requires support. Please do not pay again.",
+        });
+      }
       return res.status(err.code === "checkout_incomplete" ? 409 : 503).json({
         code: err.code || "provisioning_failed",
-        message: "We could not finish synchronizing your paid subscription.",
+        message:
+          err.code === "checkout_incomplete"
+            ? "Stripe is still finalizing this checkout."
+            : "Your payment was received, but access synchronization is still pending. Please do not pay again.",
       });
     }
   }
 );
-
-// if you are using customer billing provider
-// this should be triggered upon return from successful payment:
-// - verify the purchase
-// - create subscription object.
-// - send the data to moesif.
-// - provision the by calling API gateway plugin.
-app.post(
-  "/register/custom",
-  portalAuthMiddleware,
-  jsonParser,
-  async function (req, res) {
-    const customerId = await getUnifiedCustomerId(req.user);
-    const email = req.user?.email;
-    // verify plans and subscription using your custom billing provider.
-    try {
-      const { subscription } =
-        await customBillingProvider.verifyPurchaseAndCreateSubscription(req, {
-          user: req.user,
-          ...req.body,
-        });
-
-      console.log("custom subscription created", subscription);
-
-      syncToMoesif({
-        companyId: customerId,
-        userId: customerId,
-        email: email,
-      });
-
-      sendSubscriptionToMoesif({
-        companyId: customerId,
-        subscriptionId: subscription.id,
-        planId: subscription.plan_id,
-        priceId: subscription.price_id,
-        currentPeriodStart: subscription.current_period_start,
-        currentPeriodEnd: subscription.current_period_end,
-        metadata: {
-          // additional metadata you might want add.
-        },
-      });
-
-      const user = await provisioningService.provisionUser(
-        customerId,
-        email,
-        subscription.id
-      );
-      res.status(201).json({ status: "provisioned" });
-    } catch (err) {
-      console.error("Error registering user", err);
-      res.status(500).json({
-        message: "Failed to provision user. " + err.toString(),
-      });
-    }
-  }
-);
-
-app.get("/stripe/customer", portalAuthMiddleware, function (req, res) {
-  const email = req.user?.email;
-
-  getStripeCustomer(email)
-    .then((result) => {
-      if (result.data && result.data[0]) {
-        res.status(200).json(result.data[0]);
-      } else {
-        res.status(404).json("stripe customer not found");
-      }
-    })
-    .catch((err) => {
-      console.error("Error getting customer info from stripe", err);
-      res.status(500).json({
-        message: "Failed to retrieve customer info from stripe",
-      });
-    });
-});
 
 app.get("/portal-context", portalAuthMiddleware, function (req, res) {
   if (!req.portalContext) {
@@ -922,35 +884,16 @@ app.post(
   }
 );
 
-app.post("/create-key", portalAuthMiddleware, requireActiveSubscription, jsonParser, async function (req, res) {
-  try {
-    const apiKey = await createSnApiKey(req.user, {
-      name: req.body?.name || "API key",
-      description: req.body?.description,
-    });
-    res.status(200).send({ apikey: apiKey.api_key });
-  } catch (error) {
-    sendKeyManagementError(res, error);
-  }
-});
-
 app.get(
-  "/embed-charts(/:authUserId)",
+  "/embed-charts",
   portalAuthMiddleware,
   async function (req, res) {
-    // if authMiddleware is enabled, the data for user should come from the auth data.
-    // otherwise use query param.
-    const email = req.user?.email;
-
-    // depends your data model (see assumptions in DATA_MODEL.md),
-    // and if in your API gateway if you identifyUser using stripeCustomerId
-    // or the userId from authorization provider.
-    // Perhaps, you have your own userId for your own system.
-    // the most important aspect is the user_id used in your identifyUser hook
     try {
       const companyId = req.user?.moesif_company_id;
       if (!companyId) {
-        console.error("Canonical company ID not found when fetching for " + email);
+        console.error(
+          `Canonical company ID not found for ${req.user?.sub || "unknown"}`
+        );
         return res.status(400).json({
           message: "Your API organization has not been provisioned yet.",
         });

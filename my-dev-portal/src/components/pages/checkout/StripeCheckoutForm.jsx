@@ -6,6 +6,7 @@ import {
   EmbeddedCheckoutProvider,
   EmbeddedCheckout,
 } from "@stripe/react-stripe-js";
+import { apiRequest } from "../../../lib/portal-api";
 
 const stripePromise = loadStripe(
   import.meta.env.REACT_APP_STRIPE_PUBLISHABLE_KEY
@@ -15,11 +16,8 @@ const stripePromise = loadStripe(
 // https://docs.stripe.com/checkout/embedded/quickstart
 
 function StripeCheckoutForm({
-  priceId,
   planId,
-  user,
   idToken,
-  quantity,
   topUpAmount,
 }) {
   const navigate = useNavigate();
@@ -29,36 +27,21 @@ function StripeCheckoutForm({
 
   useEffect(() => {
     // Create a Checkout Session as soon as the page loads
-    if (!idToken || (!priceId && !planId) || !user?.email) {
+    if (!idToken || !planId) {
       return;
     }
 
-    const params = new URLSearchParams({ email: user.email });
+    const params = new URLSearchParams();
     params.set("request_id", checkoutRequestId.current);
-    if (planId) {
-      params.set("plan_id", planId);
-      if (topUpAmount) params.set("amount_gbp", topUpAmount);
-    } else {
-      params.set("price_id", priceId);
-      if (quantity) params.set("quantity", quantity);
-    }
+    params.set("plan_id", planId);
+    if (topUpAmount) params.set("amount_gbp", topUpAmount);
 
-    fetch(
-      `${
-        import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER
-      }/create-stripe-checkout-session?${params.toString()}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
-      }
+    apiRequest(
+      `/create-stripe-checkout-session?${params.toString()}`,
+      idToken,
+      { method: "POST" }
     )
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.message || "Unable to start checkout");
-        }
+      .then((data) => {
         if (data.updated || data.scheduled) {
           return data;
         }
@@ -67,7 +50,7 @@ function StripeCheckoutForm({
       })
       .then((data) => {
         if (data.updated || data.scheduled) {
-          navigate("/usage", { replace: true });
+          navigate("/dashboard", { replace: true });
           return;
         }
         setCheckoutError("");
@@ -77,7 +60,7 @@ function StripeCheckoutForm({
         console.error("Failed to create checkout session", err);
         setCheckoutError(err.message || "Unable to start checkout");
       });
-  }, [priceId, planId, user, idToken, quantity, topUpAmount, navigate]);
+  }, [planId, idToken, topUpAmount, navigate]);
 
   return (
     <div id="checkout">

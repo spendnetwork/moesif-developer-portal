@@ -1,34 +1,52 @@
 const moesif = require("moesif-nodejs");
 
 const moesifManagementToken = process.env.MOESIF_MANAGEMENT_TOKEN;
-const moesifApiEndPoint = "https://api.moesif.com";
+const moesifApiEndpoint = "https://api.moesif.com";
 
 function basicPrepaidSubscriptionId(stripeCustomerId) {
   return `openopps_basic_prepaid_${stripeCustomerId}`;
 }
 
 async function readMoesifResponse(response, operation) {
-  const body = await response.json().catch(async () => ({
-    message: await response.text().catch(() => response.statusText),
-  }));
+  const text = await response.text();
+  let body = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { message: text };
+    }
+  }
+
   if (!response.ok) {
-    const error = new Error(
-      `${operation} failed (${response.status}): ${JSON.stringify(body)}`
-    );
+    const detail = JSON.stringify(body || { message: response.statusText });
+    const error = new Error(`${operation} failed (${response.status}): ${detail}`);
     error.status = response.status;
     error.detail = body;
+    const normalized = detail.toLowerCase();
+    if (
+      [401, 403].includes(response.status) &&
+      (normalized.includes("create:billing_meters") ||
+        normalized.includes("create:billing_reports"))
+    ) {
+      error.code = "moesif_management_scope_missing";
+    }
     throw error;
   }
   return body;
 }
 
-const moesifMiddleware = moesif({
-  applicationId: process.env.MOESIF_APPLICATION_ID,
+let profileMiddleware;
 
-  identifyUser: function (req, _res) {
-    return req.user ? req.user.id : undefined;
-  },
-});
+function getProfileMiddleware() {
+  if (!profileMiddleware) {
+    profileMiddleware = moesif({
+      applicationId: process.env.MOESIF_APPLICATION_ID,
+      identifyUser: (req) => req.user?.id,
+    });
+  }
+  return profileMiddleware;
+}
 
 function syncToMoesif({
   companyId,
@@ -38,91 +56,28 @@ function syncToMoesif({
   stripeCustomerId,
   planKey,
 }) {
+  const moesifMiddleware = getProfileMiddleware();
   if (companyId) {
-    var company = {
-      companyId: companyId,
+    moesifMiddleware.updateCompany({
+      companyId,
       metadata: {
         stripe_customer_id: stripeCustomerId,
         ...(planKey ? { plan_key: planKey } : {}),
       },
-    };
-    moesifMiddleware.updateCompany(company);
+    });
   }
   if (userId) {
-    var user = {
-      userId: userId,
-      companyId: companyId,
+    moesifMiddleware.updateUser({
+      userId,
+      companyId,
       metadata: {
-        // feel free to add additional profile data here.
-        email: email,
+        email,
         auth0_user_id: auth0UserId,
         stripe_customer_id: stripeCustomerId,
         ...(planKey ? { plan_key: planKey } : {}),
       },
-    };
-    moesifMiddleware.updateUser(user);
-  }
-}
-
-// for Stripe, if you set up webhook in Stripe, below is NOT needed
-// since Moesif automatically listen to Stripe's webhook for Subscription updates.
-// but if you are building a custom billing provider, you must send
-// the subscription data to Moesif.
-function sendSubscriptionToMoesif({
-  companyId,
-  subscriptionId,
-  planId,
-  priceId,
-  currentPeriodStart,
-  currentPeriodEnd,
-  metadata,
-}) {
-  const payload = {
-    subscription_id: subscriptionId,
-    company_id: companyId,
-    current_period_start: currentPeriodStart,
-    current_period_end: currentPeriodEnd,
-    status: "active",
-    items: [
-      {
-        plan_id: planId,
-        price_id: priceId,
-      },
-    ],
-    metadata: {
-      // this is custom data you would like to be available.
-      subscription_type: "PAYG",
-      subscription_tier: "Pro",
-      ...metadata,
-    },
-  };
-
-  console.log(
-    "about to send subscription data to moesif" +
-      JSON.stringify(payload, null, "  ")
-  );
-
-  return fetch(`https://api.moesif.net/v1/subscriptions`, {
-    method: "POST",
-    headers: {
-      "X-Moesif-Application-Id": process.env.MOESIF_APPLICATION_ID,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  })
-    .then(async (res) => {
-      if (res.ok) {
-        console.log(
-          `subscription sent to moesif successfully for ${companyId}`
-        );
-      } else {
-        const text = await res.text();
-        console.error("failed to log to moesif", text);
-      }
-    })
-    .catch((err) => {
-      console.error(`failed to send event to ${companyId}`, err);
     });
+  }
 }
 
 async function sendPrepaidSubscriptionToMoesif({
@@ -134,29 +89,25 @@ async function sendPrepaidSubscriptionToMoesif({
   currentPeriodEnd,
 }) {
   const subscriptionId = basicPrepaidSubscriptionId(stripeCustomerId);
-  const payload = {
-    subscription_id: subscriptionId,
-    company_id: String(companyId),
-    current_period_start: currentPeriodStart,
-    current_period_end: currentPeriodEnd,
-    status: "active",
-    items: priceIds.map((priceId) => ({
-      plan_id: planId,
-      price_id: priceId,
-    })),
-    metadata: {
-      billing_model: "prepaid_credit",
-      plan_key: "basic",
-      stripe_customer_id: stripeCustomerId,
-    },
-  };
   const response = await fetch("https://api.moesif.net/v1/subscriptions", {
     method: "POST",
     headers: {
       "X-Moesif-Application-Id": process.env.MOESIF_APPLICATION_ID,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      subscription_id: subscriptionId,
+      company_id: String(companyId),
+      current_period_start: currentPeriodStart,
+      current_period_end: currentPeriodEnd,
+      status: "active",
+      items: priceIds.map((priceId) => ({ plan_id: planId, price_id: priceId })),
+      metadata: {
+        billing_model: "prepaid_credit",
+        plan_key: "basic",
+        stripe_customer_id: stripeCustomerId,
+      },
+    }),
   });
   await readMoesifResponse(response, "Moesif prepaid subscription update");
   return subscriptionId;
@@ -170,7 +121,7 @@ async function createMoesifBalanceTransaction({
   description,
 }) {
   const response = await fetch(
-    `${moesifApiEndPoint}/~/billing/reports/balance_transactions`,
+    `${moesifApiEndpoint}/~/billing/reports/balance_transactions`,
     {
       method: "POST",
       headers: {
@@ -192,21 +143,19 @@ async function createMoesifBalanceTransaction({
 
 async function getMoesifPrepaidBalance({ companyId, stripeCustomerId }) {
   const response = await fetch(
-    `${moesifApiEndPoint}/v1/search/~/companies/${encodeURIComponent(
+    `${moesifApiEndpoint}/v1/search/~/companies/${encodeURIComponent(
       companyId
     )}/subscriptions`,
-    {
-      headers: { Authorization: `Bearer ${moesifManagementToken}` },
-    }
+    { headers: { Authorization: `Bearer ${moesifManagementToken}` } }
   );
   const body = await readMoesifResponse(response, "Moesif balance lookup");
   const subscriptions = Array.isArray(body)
     ? body
     : body?.data || body?.subscriptions || [];
+  const expectedId = basicPrepaidSubscriptionId(stripeCustomerId);
   const subscription = subscriptions.find(
     (candidate) =>
-      candidate.subscription_id === basicPrepaidSubscriptionId(stripeCustomerId) ||
-      candidate.external_id === basicPrepaidSubscriptionId(stripeCustomerId)
+      candidate.subscription_id === expectedId || candidate.external_id === expectedId
   );
   if (!subscription) {
     const error = new Error("Basic prepaid subscription was not found in Moesif");
@@ -215,7 +164,7 @@ async function getMoesifPrepaidBalance({ companyId, stripeCustomerId }) {
     throw error;
   }
   return {
-    subscriptionId: basicPrepaidSubscriptionId(stripeCustomerId),
+    subscriptionId: expectedId,
     subscription,
     currency: String(subscription.currency || "GBP").toUpperCase(),
     current: Number(subscription.balance?.current_balance || 0),
@@ -224,276 +173,58 @@ async function getMoesifPrepaidBalance({ companyId, stripeCustomerId }) {
   };
 }
 
-function getPlansFromMoesif() {
-  return fetch(
-    `https://api.moesif.com/v1/~/billing/catalog/plans?includes=prices&provider=${process.env.APP_PAYMENT_PROVIDER}`,
-    {
-      headers: {
-        Authorization: `Bearer ${moesifManagementToken}`,
-      },
-    }
-  )
-    .then((res) => {
-      if (!res.ok) {
-        console.error("get plans from moesif not successful" + res.statusText);
-      }
-      return res;
-    })
-    .then((res) => res.json());
-}
-
-function getCompany({ companyId }) {
-  return fetch(
-    `https://api.moesif.com/v1/search/~/companies/${encodeURIComponent(
-      companyId
+async function getPlansFromMoesif() {
+  const provider = process.env.APP_PAYMENT_PROVIDER || "stripe";
+  const response = await fetch(
+    `${moesifApiEndpoint}/v1/~/billing/catalog/plans?includes=prices&provider=${encodeURIComponent(
+      provider
     )}`,
-    {
-      headers: {
-        Authorization: `Bearer ${moesifManagementToken}`,
-      },
-    }
-  )
-    .then((res) => {
-      if (!res.ok) {
-        console.error(
-          "get company from moesif not successful" + res.statusText
-        );
-      }
-      return res;
-    })
-    .then((res) => res.json());
+    { headers: { Authorization: `Bearer ${moesifManagementToken}` } }
+  );
+  return readMoesifResponse(response, "Moesif plan catalogue lookup");
 }
 
-function getUser({ userId }) {
-  return fetch(
-    `https://api.moesif.com/v1/search/~/users/${encodeURIComponent(userId)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${moesifManagementToken}`,
-      },
-    }
-  )
-    .then((res) => {
-      if (!res.ok) {
-        console.error("get user from moesif not successful" + res.statusText);
-      }
-      return res;
-    })
-    .then((res) => res.json());
-}
-
-function extractSubscriptionsFromCompanyObject(companyObject) {
-  // for MOESIF_MONETIZATION_VERSION V2, subscriptions are directly under companyObject
-  if (companyObject?.subscriptions) {
-    return companyObject?.subscriptions;
-  } else if (companyObject?.metadata?.stripe?.subscription) {
-    // for MOESIF_MONETIZATION_VERSION V2, the subscription is under metadata billing provider
-    return [companyObject?.metadata?.stripe?.subscription];
+async function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
+  if (!workspaceId) {
+    const error = new Error("Moesif embedded workspace is not configured");
+    error.code = "moesif_workspace_not_configured";
+    throw error;
   }
-  return null;
-}
-
-function getSubscriptionsForCompanyId({ companyId }) {
-  return getCompany({ companyId }).then((companyObject) => {
-    return extractSubscriptionsFromCompanyObject(companyObject);
-  });
-}
-
-// it simply gets the userObject from Moesif.
-// subscriptions are under "company.subscriptions"
-function getSubscriptionsForUserId({ userId }) {
-  return getUser({ userId }).then((userObject) => {
-    return extractSubscriptionsFromCompanyObject(userObject?.company);
-  });
-}
-
-function getSubscriptionForUserEmail({ email }) {
-  const query = {
-    query: { term: { "email.raw": email } },
-    size: 50,
-    _source: [
-      "user_id",
-      "identified_user_id",
-      "email",
-      "company_id",
-      "company.subscriptions",
-      "name",
-    ],
-  };
-
-  return fetch(`https://api.moesif.com/v1/search/~/search/users`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${moesifManagementToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(query),
-  })
-    .then(async (res) => {
-      if (!res.ok) {
-        const body = await res.json();
-        console.log("error fetching this");
-        throw new Error(
-          `Error fetching subscriptions: ${res.status} ${JSON.stringify(body)}`
-        );
-      }
-      return res.json();
-    })
-    .then((data) => {
-      console.log(`got moesif user object for ${email}`);
-      console.log(JSON.stringify(data));
-      // const exampleReturnValue = {
-      //   "hits": {
-      //     "hits": [
-      //       {
-      //         "_source": {
-      //           "company_id": "sub_1OUHDjKjbeAxuumJy6ko1gXu",
-      //           "name": "Foo Bar",
-      //           "company": {
-      //             "subscriptions": [
-      //               {
-      //                 "cancel_time": null,
-      //                 "metadata": {},
-      //                 "company_id": "sub_1OUHDjKjbeAxuumJy6ko1gXu",
-      //                 "items": [
-      //                   {
-      //                     "subscription_item_id": "si_PIszPQaPC3zIZL",
-      //                     "price": {
-      //                       "tax_behavior": "unspecified",
-      //                       "period": 1,
-      //                       "metadata": {},
-      //                       "created_at": "2024-01-02T18:55:23.000",
-      //                       "price_in_decimal": 50,
-      //                       "provider": "stripe",
-      //                       "pricing_model": "flat",
-      //                       "usage_aggregator": null,
-      //                       "currency": "USD",
-      //                       "period_units": "M",
-      //                       "id": "price_1OUD7XKjbeAxuumJwK5agr87",
-      //                       "plan_id": "prod_PIolHSJQuNP5Wm",
-      //                       "status": "active"
-      //                     },
-      //                     "price_id": "price_1OUD7XKjbeAxuumJwK5agr87",
-      //                     "created_at": "2024-01-02T23:18:03.000Z",
-      //                     "plan": {
-      //                       "metadata": {},
-      //                       "provider": "stripe",
-      //                       "created_at": "2024-01-02T18:55:23.000",
-      //                       "id": "prod_PIolHSJQuNP5Wm",
-      //                       "status": "active"
-      //                     },
-      //                     "plan_id": "prod_PIolHSJQuNP5Wm",
-      //                     "status": "active"
-      //                   },
-      //                   {
-      //                     "subscription_item_id": "si_PIwfDNLxCl3oxz",
-      //                     "price": {
-      //                       "tax_behavior": "unspecified",
-      //                       "period": 1,
-      //                       "metadata": {},
-      //                       "created_at": "2024-01-02T22:03:55.000",
-      //                       "price_in_decimal": 1,
-      //                       "provider": "stripe",
-      //                       "pricing_model": "per_unit",
-      //                       "usage_aggregator": "sum",
-      //                       "currency": "USD",
-      //                       "period_units": "M",
-      //                       "id": "price_1OUG3zKjbeAxuumJ3Zmidpum",
-      //                       "plan_id": "prod_PIolHSJQuNP5Wm",
-      //                       "status": "active"
-      //                     },
-      //                     "price_id": "price_1OUG3zKjbeAxuumJ3Zmidpum",
-      //                     "created_at": "2024-01-03T03:06:09.000Z",
-      //                     "plan": {
-      //                       "metadata": {},
-      //                       "provider": "stripe",
-      //                       "created_at": "2024-01-02T22:03:55.000",
-      //                       "id": "prod_PIolHSJQuNP5Wm",
-      //                       "status": "active"
-      //                     },
-      //                     "plan_id": "prod_PIolHSJQuNP5Wm",
-      //                     "status": "active"
-      //                   }
-      //                 ],
-      //                 "app_id": "660:387",
-      //                 "current_period_start": "2024-03-02T23:18:03.000Z",
-      //                 "status": "active",
-      //                 "start_date": "2024-01-02T23:18:03.000Z"
-      //               }
-      //             ]
-      //           },
-      //           "identified_user_id": "cus_PIsz7TqLLrheqX",
-      //           "email": "foo_bar@moesif.com"
-      //         },
-      //         "_id": "cus_PIsz7TqLLrheqX"
-      //       }
-      //     ],
-      //     "total": 1
-      //   },
-      // }
-
-      const firstUserObject = data?.hits?.hits?.[0]?._source;
-      return extractSubscriptionsFromCompanyObject(firstUserObject?.company);
-    });
-}
-
-function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
   const to = new Date();
   const from = new Date(to);
   from.setUTCDate(from.getUTCDate() - 30);
+  const expiration = new Date(to);
+  expiration.setUTCDate(expiration.getUTCDate() + 7);
 
-  const templateData = {
-    template: {
-      values: {
-        // The embedded template filters "company_id in {{company_id}}", and the
-        // "in" operator expects a list of values, so wrap the id in an array.
-        company_id: [String(companyId)],
+  const response = await fetch(
+    `${moesifApiEndpoint}/v1/portal/~/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/access_token?expiration=${encodeURIComponent(expiration.toISOString())}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${moesifManagementToken}`,
       },
-      from: from.toISOString(),
-      to: to.toISOString(),
-    },
-  };
-
-  // Set your desired expiration for the generated workspace token.
-  // Moesif's recommendation is to match or be larger than your user's session time while keeping time period less than 30 days.
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 7);
-  const expiration = tomorrow.toISOString();
-
-  const moesif_url_live_event = `${moesifApiEndPoint}/v1/portal/~/workspaces/${workspaceId}/access_token?expiration=${expiration}`;
-
-  return fetch(moesif_url_live_event, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${moesifManagementToken}`,
-    },
-    body: JSON.stringify(templateData),
-  })
-    .then((response) => {
-      if (response.ok) {
-        return response;
-      } else {
-        console.log("Api call to moesif not successful. server response is:");
-        console.error(response.statusText);
-        throw Error(response.statusText);
-      }
-    })
-    .then((response) => {
-      return response.json();
-    });
+      body: JSON.stringify({
+        template: {
+          values: { company_id: [String(companyId)] },
+          from: from.toISOString(),
+          to: to.toISOString(),
+        },
+      }),
+    }
+  );
+  return readMoesifResponse(response, "Moesif embedded workspace token");
 }
 
 module.exports = {
   syncToMoesif,
   getPlansFromMoesif,
   getInfoForEmbeddedWorkspaces,
-  getSubscriptionsForCompanyId,
-  getSubscriptionsForUserId,
-  getSubscriptionForUserEmail,
-  sendSubscriptionToMoesif,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
   getMoesifPrepaidBalance,
   basicPrepaidSubscriptionId,
+  readMoesifResponse,
 };

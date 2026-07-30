@@ -1,9 +1,20 @@
-const fetch = require("node-fetch");
-
-function requireConfig(name) {
+function requireConfig(name, { url = false } = {}) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required for SN API provisioning`);
-  return value.replace(/\/$/, "");
+  return url ? value.replace(/\/$/, "") : value;
+}
+
+const requestTimeoutMs = Number.parseInt(
+  process.env.SN_API_REQUEST_TIMEOUT_MS || "10000",
+  10
+);
+
+function requestSignal() {
+  return AbortSignal.timeout(
+    Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+      ? requestTimeoutMs
+      : 10000
+  );
 }
 
 function unixTimestampToIso(value) {
@@ -61,7 +72,7 @@ async function provisionSnApiCustomer({
   product,
   rotateApiKey = false,
 }) {
-  const snApiBaseUrl = requireConfig("SN_API_BASE_URL");
+  const snApiBaseUrl = requireConfig("SN_API_BASE_URL", { url: true });
   const provisioningToken = requireConfig("SN_API_PROVISIONING_TOKEN");
   if (!authUser?.sub || !authUser?.email) {
     throw new Error("Authenticated Auth0 user id and email are required");
@@ -80,6 +91,7 @@ async function provisionSnApiCustomer({
     `${snApiBaseUrl}/api/v3/developer-portal/provision`,
     {
       method: "POST",
+      signal: requestSignal(),
       headers: {
         "Content-Type": "application/json",
         "X-Developer-Portal-Token": provisioningToken,
@@ -105,9 +117,7 @@ async function provisionSnApiCustomer({
   );
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(
-      `SN API provisioning failed (${response.status}): ${JSON.stringify(body)}`
-    );
+    const error = new Error(`SN API provisioning failed (${response.status})`);
     error.status = response.status;
     error.detail = body?.detail;
     throw error;
@@ -115,8 +125,13 @@ async function provisionSnApiCustomer({
   return body;
 }
 
-async function provisionSnApiPrepaidCustomer({ authUser, customer, product }) {
-  const snApiBaseUrl = requireConfig("SN_API_BASE_URL");
+async function provisionSnApiPrepaidCustomer({
+  authUser,
+  customer,
+  product,
+  subscriptionStatus = "active",
+}) {
+  const snApiBaseUrl = requireConfig("SN_API_BASE_URL", { url: true });
   const provisioningToken = requireConfig("SN_API_PROVISIONING_TOKEN");
   if (!authUser?.sub || !authUser?.email) {
     throw new Error("Authenticated Auth0 user id and email are required");
@@ -135,6 +150,7 @@ async function provisionSnApiPrepaidCustomer({ authUser, customer, product }) {
     `${snApiBaseUrl}/api/v3/developer-portal/provision`,
     {
       method: "POST",
+      signal: requestSignal(),
       headers: {
         "Content-Type": "application/json",
         "X-Developer-Portal-Token": provisioningToken,
@@ -149,7 +165,7 @@ async function provisionSnApiPrepaidCustomer({ authUser, customer, product }) {
         stripe_product_id: product.id,
         stripe_price_id: null,
         plan_key: "basic",
-        subscription_status: "active",
+        subscription_status: subscriptionStatus,
         cancel_at_period_end: false,
         metadata: {
           source: "moesif_developer_portal",
@@ -161,9 +177,7 @@ async function provisionSnApiPrepaidCustomer({ authUser, customer, product }) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(
-      `SN API prepaid provisioning failed (${response.status}): ${JSON.stringify(
-        body
-      )}`
+      `SN API prepaid provisioning failed (${response.status})`
     );
     error.status = response.status;
     error.detail = body?.detail;
@@ -184,10 +198,11 @@ async function checkSnApiEmailAvailability(authUser) {
 }
 
 async function snApiKeyRequest(path, { method = "GET", body } = {}) {
-  const snApiBaseUrl = requireConfig("SN_API_BASE_URL");
+  const snApiBaseUrl = requireConfig("SN_API_BASE_URL", { url: true });
   const provisioningToken = requireConfig("SN_API_PROVISIONING_TOKEN");
   const response = await fetch(`${snApiBaseUrl}${path}`, {
     method,
+    signal: requestSignal(),
     headers: {
       "Content-Type": "application/json",
       "X-Developer-Portal-Token": provisioningToken,

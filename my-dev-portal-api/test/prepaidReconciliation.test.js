@@ -66,6 +66,7 @@ function dependencies(overrides = {}) {
 test("paid Basic Checkout provisions access and credits Moesif idempotently", async () => {
   let subscriptionInput;
   let creditInput;
+  const provisioningStatuses = [];
   const result = await reconcileBasicTopUp(
     "cs_top_up",
     { sub: "auth0|123", email: "buyer@example.com" },
@@ -76,6 +77,10 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
       },
       createMoesifBalanceTransaction: async (input) => {
         creditInput = input;
+      },
+      provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
+        provisioningStatuses.push(subscriptionStatus);
+        return { user_id: 7, organization_id: 9, moesif_company_id: "9" };
       },
     })
   );
@@ -95,6 +100,49 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
   assert.equal(creditInput.amountGbp, 500);
   assert.equal(creditInput.transactionId, "pi_123");
   assert.equal(creditInput.companyId, "9");
+  assert.deepEqual(provisioningStatuses, ["provisioning", "active"]);
+});
+
+test("a new Basic account stays blocked when Moesif credit creation fails", async () => {
+  const provisioningStatuses = [];
+  await assert.rejects(
+    reconcileBasicTopUp(
+      checkoutSession(),
+      { sub: "auth0|123", email: "buyer@example.com" },
+      dependencies({
+        provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
+          provisioningStatuses.push(subscriptionStatus);
+          return { user_id: 7, organization_id: 9, moesif_company_id: "9" };
+        },
+        createMoesifBalanceTransaction: async () => {
+          const error = new Error("Missing Moesif scope");
+          error.code = "moesif_management_scope_missing";
+          throw error;
+        },
+      })
+    ),
+    (error) => error.code === "moesif_management_scope_missing"
+  );
+  assert.deepEqual(provisioningStatuses, ["provisioning"]);
+});
+
+test("adding credit does not suspend an existing active Basic account", async () => {
+  const provisioningStatuses = [];
+  await reconcileBasicTopUp(
+    checkoutSession(),
+    { sub: "auth0|123", email: "buyer@example.com" },
+    dependencies({
+      getSnApiPortalContext: async () => ({
+        current_plan_key: "basic",
+        billing_status: "active",
+      }),
+      provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
+        provisioningStatuses.push(subscriptionStatus);
+        return { user_id: 7, organization_id: 9, moesif_company_id: "9" };
+      },
+    })
+  );
+  assert.deepEqual(provisioningStatuses, ["active", "active"]);
 });
 
 test("the prepaid period end stays inside Moesif's 50-year limit", () => {

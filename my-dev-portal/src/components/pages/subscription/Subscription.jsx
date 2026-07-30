@@ -13,13 +13,10 @@ import { isSessionExpiredError } from "../../../lib/session-expiry";
 
 function Subscription(props) {
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading, user, idToken, accessToken } =
-    useAuthCombined();
+  const { isAuthenticated, isLoading, user, idToken } = useAuthCombined();
   const { subscriptions, finishedLoading, subscriptionsError } =
     useSubscriptions({
-      user,
       idToken,
-      accessToken,
     });
   const { plansLoading, plans } = usePlans();
 
@@ -64,8 +61,10 @@ function Subscription(props) {
       </div>
       {subscriptionsError && (
         <div className="alert-error" role="alert">
-          We could not load your subscriptions. Please refresh the page or try
-          again shortly.
+          {subscriptionsError.code === "moesif_prepaid_subscription_not_found"
+            ? "Your Basic payment is still synchronizing. Do not pay again; retry this page shortly."
+            : subscriptionsError.message ||
+              "We could not load your subscriptions. Please try again shortly."}
         </div>
       )}
       {!subscriptionsError && (!subscriptions || subscriptions.length <= 0) && (

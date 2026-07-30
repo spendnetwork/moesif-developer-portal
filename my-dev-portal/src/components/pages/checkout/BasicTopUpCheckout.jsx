@@ -2,7 +2,7 @@ import React, { useState } from "react";
 
 import StripeCheckoutForm from "./StripeCheckoutForm";
 
-function BasicTopUpCheckout({ planId, user, idToken }) {
+function BasicTopUpCheckout({ planId, idToken }) {
   const [amount, setAmount] = useState("");
   const [confirmedAmount, setConfirmedAmount] = useState(null);
   const [error, setError] = useState("");
@@ -42,7 +42,6 @@ function BasicTopUpCheckout({ planId, user, idToken }) {
           key={`${planId}-${confirmedAmount}`}
           planId={planId}
           topUpAmount={confirmedAmount}
-          user={user}
           idToken={idToken}
         />
       </div>

@@ -19,7 +19,6 @@ on:
       - main
     paths:
       - "my-dev-portal-api/**"
-      - "plugins/**"
       - "distribution/docker/Dockerfile-dev-portal-api"
       - ".github/workflows/deploy-api.yml"
 
@@ -73,10 +72,23 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: my-dev-portal-api/package-lock.json
+
+      - name: Test portal API
+        working-directory: my-dev-portal-api
+        run: |
+          npm ci
+          npm test
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}

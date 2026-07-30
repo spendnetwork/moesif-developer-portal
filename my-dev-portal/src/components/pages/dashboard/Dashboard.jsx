@@ -15,12 +15,9 @@ import UsageSummary from "./UsageSummary";
 const isNotProvisionedError = (error) =>
   error?.status === 400 || error?.status === 404;
 
-const Dashboard = (props) => {
-  const { user, isLoading, idToken, userEmail } = useAuthCombined();
+const Dashboard = () => {
+  const { user, isLoading, idToken } = useAuthCombined();
   const navigate = useNavigate();
-
-  const email = user?.email || userEmail;
-  const authUserId = user?.user_id || user?.id || user?.sub;
 
   useEffect(() => {
     window?.moesif?.track("viewed-dashboard");
@@ -28,13 +25,13 @@ const Dashboard = (props) => {
 
   // Embedded chart URLs are short-lived signed tokens, so cache them for the
   // session and avoid refetching on window focus.
-  const embedKey = idToken && email ? ["embed-charts", authUserId, email, idToken] : null;
+  const embedKey = idToken ? ["embed-charts", idToken] : null;
   const {
     data: embedTemplateUrls,
     error,
   } = useSWR(
     embedKey,
-    () => fetchEmbedChartUrls({ authUserId, idToken, email }),
+    () => fetchEmbedChartUrls({ idToken }),
     { revalidateOnFocus: false, dedupingInterval: 60000 }
   );
 
@@ -60,7 +57,7 @@ const Dashboard = (props) => {
           usage for your Open Opportunities API access.
         </p>
       </div>
-      {!error && <UsageSummary idToken={idToken} />}
+      <UsageSummary idToken={idToken} />
       {!error && (
         <MoesifEmbeddedTemplate embedTemplateUrls={embedTemplateUrls || []} />
       )}
