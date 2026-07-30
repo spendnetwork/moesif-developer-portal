@@ -131,13 +131,14 @@ async function sendPrepaidSubscriptionToMoesif({
   planId,
   priceIds,
   currentPeriodStart,
+  currentPeriodEnd,
 }) {
   const subscriptionId = basicPrepaidSubscriptionId(stripeCustomerId);
   const payload = {
     subscription_id: subscriptionId,
     company_id: String(companyId),
     current_period_start: currentPeriodStart,
-    current_period_end: "2099-12-31T23:59:59.999Z",
+    current_period_end: currentPeriodEnd,
     status: "active",
     items: priceIds.map((priceId) => ({
       plan_id: planId,

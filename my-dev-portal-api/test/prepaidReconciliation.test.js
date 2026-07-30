@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  prepaidSubscriptionPeriodEnd,
   reconcileBasicTopUp,
 } = require("../services/prepaidReconciliation");
 
@@ -87,9 +88,21 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
     "price_aggregate",
     "price_attachment",
   ]);
+  const periodEnd = new Date(subscriptionInput.currentPeriodEnd);
+  const latestAllowedEnd = new Date();
+  latestAllowedEnd.setUTCFullYear(latestAllowedEnd.getUTCFullYear() + 50);
+  assert.ok(periodEnd < latestAllowedEnd);
   assert.equal(creditInput.amountGbp, 500);
   assert.equal(creditInput.transactionId, "pi_123");
   assert.equal(creditInput.companyId, "9");
+});
+
+test("the prepaid period end stays inside Moesif's 50-year limit", () => {
+  const now = new Date("2026-07-30T12:00:00.000Z");
+  assert.equal(
+    prepaidSubscriptionPeriodEnd(now),
+    "2075-07-30T12:00:00.000Z"
+  );
 });
 
 test("a forged top-up amount never provisions or credits access", async () => {

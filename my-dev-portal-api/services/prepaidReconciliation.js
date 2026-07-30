@@ -13,6 +13,12 @@ function isBasicTopUpSession(session) {
   return session?.metadata?.purchase_type === "basic_credit_top_up";
 }
 
+function prepaidSubscriptionPeriodEnd(now = new Date()) {
+  const periodEnd = new Date(now);
+  periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 49);
+  return periodEnd.toISOString();
+}
+
 function validateBasicMeteredPrices(prices) {
   const meteredPrices = prices?.meteredPrices || [];
   const priceIds = new Set(meteredPrices.map((price) => price.id).filter(Boolean));
@@ -163,6 +169,7 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
       (customer.created || session.created || Math.floor(Date.now() / 1000)) *
         1000
     ).toISOString(),
+    currentPeriodEnd: prepaidSubscriptionPeriodEnd(),
   });
   const transactionId = stripeId(session.payment_intent) || session.id;
   await deps.createMoesifBalanceTransaction({
@@ -187,6 +194,7 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
 module.exports = {
   isBasicTopUpSession,
   prepaidError,
+  prepaidSubscriptionPeriodEnd,
   reconcileBasicTopUp,
   validateBasicMeteredPrices,
 };
