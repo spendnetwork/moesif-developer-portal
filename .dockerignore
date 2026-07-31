@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.vscode
+**/.env
+**/.env.*
+!**/.env.template
+**/node_modules
+**/dist
+**/coverage
+**/*.log
+test-attachment

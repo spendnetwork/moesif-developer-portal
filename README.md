@@ -144,15 +144,9 @@ To start, navigate to your developer portal in the browser, and at the Home Scre
 
 ## Running as a Docker Container
 
-While not required, you can also run the portal as a Docker container.
-There are two docker images available to run:
-
-- `moesif/dev-portal` runs the frontend
-- `moesif/dev-portal-api` runs the backend
-
-To run the docker examples, modify the envvars in `distribution/docker/docker-compose.yml` and then run it as:
-
-`docker-compose up -d`
+Use the root `compose.yaml` for local development. It builds both applications
+from the checked-out source and enables hot reload. See
+[`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) for setup and commands.
 
 ### Building Docker Image
 
@@ -162,9 +156,7 @@ To build the Docker images:
 1. cd into `./distribution/docker`
 2. Run `./build.sh`
 
-You'll see two images built. You can then run both via the compose file:
-
-`docker-compose up -d`
+The release images are separate from the local Compose workflow.
 
 ## Next Steps
 

@@ -1,0 +1,69 @@
+name: open-opportunities-developer-portal
+
+services:
+  portal-api:
+    build:
+      context: .
+      dockerfile: distribution/docker/Dockerfile-dev-portal-api.local
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - my-dev-portal-api/.env
+    environment:
+      NODE_ENV: development
+      FRONT_END_DOMAIN: http://127.0.0.1:4000
+    ports:
+      - "3030:3030"
+    volumes:
+      - ./my-dev-portal-api:/workspace/my-dev-portal-api
+      - portal_api_node_modules:/workspace/my-dev-portal-api/node_modules
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3030/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 10s
+
+  portal:
+    build:
+      context: .
+      dockerfile: distribution/docker/Dockerfile-dev-portal.local
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - my-dev-portal/.env
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      HOST: 0.0.0.0
+      PORT: "4000"
+      REACT_APP_DEV_PORTAL_API_SERVER: http://127.0.0.1:3030
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./my-dev-portal:/workspace/my-dev-portal
+      - portal_node_modules:/workspace/my-dev-portal/node_modules
+    depends_on:
+      portal-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 10s
+
+volumes:
+  portal_api_node_modules:
+  portal_node_modules:
