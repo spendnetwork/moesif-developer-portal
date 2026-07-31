@@ -63,11 +63,18 @@ rebuilt from scratch.
 ## Stripe Webhooks
 
 Stripe cannot directly call a service bound only to your computer. To exercise
-webhook-driven subscription flows locally, use the Stripe CLI in test mode:
+webhook-driven subscription flows locally, run the official Stripe CLI image
+in test mode. It reads `STRIPE_API_KEY` from the backend environment file:
 
-```shell
-stripe listen --forward-to http://127.0.0.1:3030/stripe/webhook
+```powershell
+docker run --rm -it `
+  --env-file .\my-dev-portal-api\.env `
+  stripe/stripe-cli:latest listen `
+  --forward-to http://host.docker.internal:3030/stripe/webhook
 ```
+
+`host.docker.internal` lets the Stripe CLI container reach the portal API
+published on the Windows host. Keep this listener running while testing.
 
 Put the generated `whsec_...` signing secret in
 `my-dev-portal-api/.env` as `PORTAL_STRIPE_WEBHOOK_SECRET`, then recreate the
