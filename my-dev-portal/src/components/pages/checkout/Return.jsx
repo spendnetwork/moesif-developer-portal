@@ -44,6 +44,7 @@ function Return() {
   const sessionId = urlParams.get("session_id");
   const purchaseType = urlParams.get("purchase_type");
   const isBasicTopUp = purchaseType === "basic_credit_top_up";
+  const isBasicActivation = purchaseType === "basic_activation";
 
   useEffect(() => {
     if (!sessionId || !idToken) return;
@@ -77,13 +78,27 @@ function Return() {
   if (result?.status === "complete") {
     return (
       <PageLayout>
-        <h1>{isBasicTopUp ? "Payment complete" : "Subscription active"}</h1>
+        <h1>
+          {isBasicTopUp
+            ? "Payment complete"
+            : isBasicActivation
+              ? "Basic plan active"
+              : "Subscription active"}
+        </h1>
         <NoticeBox
           iconSrc={noPriceIcon}
-          title={isBasicTopUp ? "Credit added" : "Access ready"}
+          title={
+            isBasicTopUp
+              ? "Credit added"
+              : isBasicActivation
+                ? "Basic activated"
+                : "Access ready"
+          }
           description={
             isBasicTopUp
               ? `Your Basic API credit is ready to use. A receipt will be sent to ${result.customer_email}.`
+              : isBasicActivation
+                ? `Basic is active and your initial API credit is ready. A receipt will be sent to ${result.customer_email}.`
               : `Your subscription and API access are ready. A confirmation will be sent to ${result.customer_email}.`
           }
           actions={

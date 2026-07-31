@@ -2,7 +2,7 @@ import React, { useState } from "react";
 
 import StripeCheckoutForm from "./StripeCheckoutForm";
 
-function BasicTopUpCheckout({ planId, idToken }) {
+function BasicTopUpCheckout({ planId, idToken, purchaseType }) {
   const [amount, setAmount] = useState("");
   const [confirmedAmount, setConfirmedAmount] = useState(null);
   const [error, setError] = useState("");
@@ -27,7 +27,11 @@ function BasicTopUpCheckout({ planId, idToken }) {
       <div className="basic-top-up">
         <div className="basic-top-up__summary">
           <div>
-            <span>Credit purchase</span>
+            <span>
+              {purchaseType === "basic_activation"
+                ? "Initial API credit"
+                : "Credit purchase"}
+            </span>
             <strong>GBP {confirmedAmount}</strong>
           </div>
           <button
@@ -43,6 +47,7 @@ function BasicTopUpCheckout({ planId, idToken }) {
           planId={planId}
           topUpAmount={confirmedAmount}
           idToken={idToken}
+          purchaseType={purchaseType}
         />
       </div>
     );
@@ -69,8 +74,11 @@ function BasicTopUpCheckout({ planId, idToken }) {
           />
         </div>
         <p>
-          Your full payment becomes API credit. Credit does not expire and API
-          usage pauses automatically when the balance reaches zero.
+          {purchaseType === "basic_activation"
+            ? "This payment confirms Basic and becomes your initial API credit. "
+            : "Your full payment becomes API credit. "}
+          Credit does not expire and API usage pauses automatically when the
+          balance reaches zero.
         </p>
       </div>
       {error && (

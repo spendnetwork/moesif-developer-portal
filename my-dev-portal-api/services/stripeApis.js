@@ -7,6 +7,11 @@ const {
   metricOrder,
   priceUnitAmountPence,
 } = require("./usageMetrics");
+const {
+  BASIC_ACTIVATION,
+  BASIC_CREDIT_TOP_UP,
+  isBasicPurchaseType,
+} = require("./basicPurchasePolicy");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
 const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
@@ -459,10 +464,11 @@ async function createStripePlanCheckoutSession(email, planId, authUser, requestI
   return session;
 }
 
-async function createBasicTopUpCheckoutSession(
+async function createBasicCreditCheckoutSession(
   email,
   planId,
   amountGbp,
+  purchaseType,
   authUser,
   requestId
 ) {
@@ -471,6 +477,12 @@ async function createBasicTopUpCheckoutSession(
     throw stripeLookupError(
       "invalid_top_up_plan",
       "Flexible credit purchases are only available for the Basic plan"
+    );
+  }
+  if (!isBasicPurchaseType(purchaseType)) {
+    throw stripeLookupError(
+      "invalid_basic_purchase_type",
+      "Choose Basic before purchasing API credit"
     );
   }
 
@@ -487,7 +499,7 @@ async function createBasicTopUpCheckoutSession(
   await assertBasicTopUpAllowed(liveSubscriptions);
 
   const metadata = {
-    purchase_type: "basic_credit_top_up",
+    purchase_type: purchaseType,
     plan_id: planId,
     plan_key: "basic",
     amount_gbp_pence: String(amountPence),
@@ -514,10 +526,12 @@ async function createBasicTopUpCheckoutSession(
       return_url: getFrontendUrl(
         `/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${encodeURIComponent(
           planId
-        )}&purchase_type=basic_credit_top_up`
+        )}&purchase_type=${encodeURIComponent(purchaseType)}`
       ),
     },
-    requestId ? { idempotencyKey: `basic-top-up-${requestId}` } : undefined
+    requestId
+      ? { idempotencyKey: `${purchaseType}-${requestId}` }
+      : undefined
   );
   return session;
 }
@@ -532,7 +546,9 @@ async function getBasicTopUpTotalPence(customerId) {
   for await (const paymentIntent of paymentIntents) {
     if (
       paymentIntent.status !== "succeeded" ||
-      paymentIntent.metadata?.purchase_type !== "basic_credit_top_up" ||
+      ![BASIC_ACTIVATION, BASIC_CREDIT_TOP_UP].includes(
+        paymentIntent.metadata?.purchase_type
+      ) ||
       paymentIntent.metadata?.moesif_credit_status !== "applied"
     ) {
       continue;
@@ -1037,7 +1053,7 @@ module.exports = {
   cancelStripeSubscription,
   hasActiveStripeSubscription,
   createStripePlanCheckoutSession,
-  createBasicTopUpCheckoutSession,
+  createBasicCreditCheckoutSession,
   getBasicTopUpTotalPence,
   markBasicTopUpReconciled,
   prepareStripePlanChange,

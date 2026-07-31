@@ -15,7 +15,7 @@ const {
   getStripeCustomerById,
   listStripeSubscriptions,
   createStripePlanCheckoutSession,
-  createBasicTopUpCheckoutSession,
+  createBasicCreditCheckoutSession,
   getBasicTopUpTotalPence,
   markBasicTopUpReconciled,
   prepareStripePlanChange,
@@ -70,9 +70,12 @@ const {
   getMoesifPrepaidBalance,
 } = require("./services/moesifApis");
 const {
-  isBasicTopUpSession,
-  reconcileBasicTopUp,
+  reconcileBasicCreditPurchase,
 } = require("./services/prepaidReconciliation");
+const {
+  assertBasicPurchaseAllowed,
+  isBasicCreditSession,
+} = require("./services/basicPurchasePolicy");
 const {
   getBasicPrepaidUsageSummary,
   invalidateBasicUsageSummary,
@@ -326,6 +329,7 @@ app.post(
       ? suppliedRequestId
       : crypto.randomUUID();
     const topUpAmountGbp = req.query?.amount_gbp;
+    const purchaseType = req.query?.purchase_type;
 
     console.log(
       `Checkout requested by ${req.user?.sub || "unknown"} for plan ${planId || "missing"}`
@@ -361,6 +365,11 @@ app.post(
     try {
       const selectedPlanKey = await getPlanKeyForProduct(planId);
 
+      if (selectedPlanKey === "basic") {
+        const entitlement = await ensureRequestEntitlement(req);
+        assertBasicPurchaseAllowed(purchaseType, entitlement);
+      }
+
       if (selectedPlanKey !== "basic") {
         try {
           const prepared = await prepareStripePlanChange(
@@ -390,10 +399,11 @@ app.post(
       }
 
       const session = selectedPlanKey === "basic"
-        ? await createBasicTopUpCheckoutSession(
+        ? await createBasicCreditCheckoutSession(
             email,
             planId,
             topUpAmountGbp,
+            purchaseType,
             req.user,
             requestId
           )
@@ -410,7 +420,10 @@ app.post(
       console.error("Failed to create stripe checkout session", err);
       const status =
         err.code === "multiple_active_subscriptions" ||
-        err.code === "active_subscription_exists"
+        err.code === "active_subscription_exists" ||
+        err.code === "basic_already_active" ||
+        err.code === "basic_plan_conflict" ||
+        err.code === "basic_plan_required"
           ? 409
           : 400;
       res.status(status).json({
@@ -480,8 +493,8 @@ app.post(
       event.type === "checkout.session.async_payment_succeeded"
     ) {
       try {
-        if (isBasicTopUpSession(event.data.object)) {
-          await reconcileBasicTopUp(
+        if (isBasicCreditSession(event.data.object)) {
+          await reconcileBasicCreditPurchase(
             event.data.object,
             null,
             prepaidReconciliationDeps
@@ -697,8 +710,8 @@ app.post(
     let orphanSubscriptionId = null;
     try {
       const session = await verifyStripeSession(checkoutSessionId);
-      if (isBasicTopUpSession(session)) {
-        const reconciled = await reconcileBasicTopUp(
+      if (isBasicCreditSession(session)) {
+        const reconciled = await reconcileBasicCreditPurchase(
           session,
           req.user,
           prepaidReconciliationDeps

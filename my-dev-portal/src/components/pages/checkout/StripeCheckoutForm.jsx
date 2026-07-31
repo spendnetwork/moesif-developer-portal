@@ -19,6 +19,7 @@ function StripeCheckoutForm({
   planId,
   idToken,
   topUpAmount,
+  purchaseType,
 }) {
   const navigate = useNavigate();
   const checkoutRequestId = useRef(crypto.randomUUID());
@@ -35,6 +36,7 @@ function StripeCheckoutForm({
     params.set("request_id", checkoutRequestId.current);
     params.set("plan_id", planId);
     if (topUpAmount) params.set("amount_gbp", topUpAmount);
+    if (purchaseType) params.set("purchase_type", purchaseType);
 
     apiRequest(
       `/create-stripe-checkout-session?${params.toString()}`,
@@ -60,7 +62,7 @@ function StripeCheckoutForm({
         console.error("Failed to create checkout session", err);
         setCheckoutError(err.message || "Unable to start checkout");
       });
-  }, [planId, idToken, topUpAmount, navigate]);
+  }, [planId, idToken, topUpAmount, purchaseType, navigate]);
 
   return (
     <div id="checkout">

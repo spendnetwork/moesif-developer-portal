@@ -106,11 +106,11 @@ function MoesifPlans() {
       return (
         <Link
           to={`/checkout?plan_id_to_purchase=${encodeURIComponent(plan.id)}${
-            planKey === "basic" ? "&purchase_type=basic_credit_top_up" : ""
+            planKey === "basic" ? "&purchase_type=basic_activation" : ""
           }`}
         >
           <button className="button__price-action">
-            {planKey === "basic" ? "Start with credit" : "Select plan"}
+            {planKey === "basic" ? "Start Basic" : "Select plan"}
           </button>
         </Link>
       );

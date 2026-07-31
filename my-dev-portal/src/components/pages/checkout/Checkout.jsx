@@ -15,6 +15,8 @@ function Checkout() {
   const urlPlanIdToPurchase = urlParams.get("plan_id_to_purchase");
   const purchaseType = urlParams.get("purchase_type");
   const isBasicTopUp = purchaseType === "basic_credit_top_up";
+  const isBasicActivation = purchaseType === "basic_activation";
+  const isBasicPurchase = isBasicActivation || isBasicTopUp;
 
   useEffect(() => {
     window.moesif?.track("about-to-checkout", {
@@ -38,18 +40,27 @@ function Checkout() {
     <PageLayout>
       <div className="page-heading">
         <p className="page-eyebrow">Billing</p>
-        <h1>{isBasicTopUp ? "Add API credit" : "Subscribe"}</h1>
+        <h1>
+          {isBasicActivation
+            ? "Start Basic"
+            : isBasicTopUp
+              ? "Add API credit"
+              : "Subscribe"}
+        </h1>
         <p>
-          {isBasicTopUp
-            ? "Choose how much prepaid credit to add to your Basic account."
-            : "Complete your purchase to activate API access."}
+          {isBasicActivation
+            ? "Choose your initial prepaid credit amount to confirm and activate Basic."
+            : isBasicTopUp
+              ? "Choose how much prepaid credit to add to your Basic account."
+              : "Complete your purchase to activate API access."}
         </p>
       </div>
       <div className="page-layout__focus">
-        {isBasicTopUp ? (
+        {isBasicPurchase ? (
           <BasicTopUpCheckout
             planId={urlPlanIdToPurchase}
             idToken={idToken}
+            purchaseType={purchaseType}
           />
         ) : (
           <StripeCheckoutForm
