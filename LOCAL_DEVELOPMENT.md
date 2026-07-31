@@ -50,6 +50,13 @@ docker compose down
 ```
 
 After changing either `package-lock.json`, run `docker compose up --build`.
+After changing an `.env` file, recreate the affected service so Compose loads
+the new values:
+
+```shell
+docker compose up -d --force-recreate portal-api
+```
+
 Use `docker compose down --volumes` only when the dependency volumes need to be
 rebuilt from scratch.
 
@@ -63,8 +70,9 @@ stripe listen --forward-to http://127.0.0.1:3030/stripe/webhook
 ```
 
 Put the generated `whsec_...` signing secret in
-`my-dev-portal-api/.env` as `PORTAL_STRIPE_WEBHOOK_SECRET`, then run:
+`my-dev-portal-api/.env` as `PORTAL_STRIPE_WEBHOOK_SECRET`, then recreate the
+service so Compose loads the changed environment:
 
 ```shell
-docker compose restart portal-api
+docker compose up -d --force-recreate portal-api
 ```
