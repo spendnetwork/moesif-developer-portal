@@ -1,5 +1,12 @@
 const StripeSDK = require("stripe");
 const crypto = require("crypto");
+const {
+  METRIC_LABELS,
+  finiteNumber,
+  metricKey,
+  metricOrder,
+  priceUnitAmountPence,
+} = require("./usageMetrics");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
 const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
@@ -76,6 +83,46 @@ function verifyStripeSession(checkoutSessionId) {
       "line_items.data.price.product",
     ],
   });
+}
+
+function buildStripeUsageLines(subscription, preview) {
+  const definitions = new Map();
+  for (const item of subscription?.items?.data || []) {
+    const price = item.price;
+    if (
+      !price?.id ||
+      isCommitmentPrice(price) ||
+      price.recurring?.usage_type !== "metered"
+    ) {
+      continue;
+    }
+    const key = metricKey(price);
+    definitions.set(price.id, {
+      key,
+      label: METRIC_LABELS[key] || price.nickname || "Usage",
+      rate: priceUnitAmountPence(price),
+    });
+  }
+
+  const usage = new Map();
+  for (const line of preview?.lines?.data || []) {
+    const priceId = line.price?.id || line.pricing?.price_details?.price || null;
+    if (!definitions.has(priceId)) continue;
+    const current = usage.get(priceId) || { quantity: 0, amount: 0 };
+    current.quantity += finiteNumber(line.quantity) || 0;
+    current.amount += finiteNumber(line.amount) || 0;
+    usage.set(priceId, current);
+  }
+
+  return [...definitions.entries()]
+    .map(([priceId, definition]) => ({
+      key: definition.key,
+      label: definition.label,
+      rate: definition.rate,
+      quantity: usage.get(priceId)?.quantity || 0,
+      amount: usage.get(priceId)?.amount || 0,
+    }))
+    .sort(metricOrder);
 }
 
 function stripeLookupError(code, message, details = {}) {
@@ -418,7 +465,8 @@ async function getBasicTopUpTotalPence(customerId) {
   for await (const paymentIntent of paymentIntents) {
     if (
       paymentIntent.status !== "succeeded" ||
-      paymentIntent.metadata?.purchase_type !== "basic_credit_top_up"
+      paymentIntent.metadata?.purchase_type !== "basic_credit_top_up" ||
+      paymentIntent.metadata?.moesif_credit_status !== "applied"
     ) {
       continue;
     }
@@ -431,6 +479,29 @@ async function getBasicTopUpTotalPence(customerId) {
     total += Math.max(0, received - refunded);
   }
   return total;
+}
+
+async function markBasicTopUpReconciled(
+  paymentIntentId,
+  { companyId, subscriptionId }
+) {
+  if (!paymentIntentId) {
+    throw stripeLookupError(
+      "top_up_payment_intent_missing",
+      "Basic credit purchase is missing its PaymentIntent"
+    );
+  }
+  return stripe.paymentIntents.update(
+    paymentIntentId,
+    {
+      metadata: {
+        moesif_credit_status: "applied",
+        moesif_company_id: String(companyId),
+        moesif_subscription_id: String(subscriptionId),
+      },
+    },
+    { idempotencyKey: `basic-top-up-reconciled-${paymentIntentId}` }
+  );
 }
 
 async function prepareStripePlanChange(email, planId, authUser) {
@@ -760,17 +831,6 @@ async function getUsageSummary(email, authUser) {
     authUser?.stripe_customer_id
   );
 
-  // Map each subscription price to its human nickname (e.g. "Growth - API
-  // Call") so the breakdown is readable rather than Stripe's raw description.
-  const priceNames = {};
-  const commitmentPriceIds = new Set();
-  for (const item of subscription.items?.data || []) {
-    if (item.price?.id) priceNames[item.price.id] = item.price.nickname || null;
-    if (item.price?.id && isCommitmentPrice(item.price)) {
-      commitmentPriceIds.add(item.price.id);
-    }
-  }
-
   // Run the three independent Stripe reads in parallel for speed.
   const [preview, grants, balance] = await Promise.all([
     stripe.invoices
@@ -799,24 +859,7 @@ async function getUsageSummary(email, authUser) {
     "gbp"
   ).toUpperCase();
 
-  const lines = (preview?.lines?.data || [])
-    .filter((line) => {
-      const priceId =
-        line.price?.id || line.pricing?.price_details?.price || null;
-      // Commitment charges are not usage metrics; keep them out of the breakdown.
-      if (priceId && commitmentPriceIds.has(priceId)) return false;
-      return line.amount !== 0 || line.quantity;
-    })
-    .map((line) => {
-      const priceId =
-        line.price?.id || line.pricing?.price_details?.price || null;
-      const nickname = priceId ? priceNames[priceId] : null;
-      return {
-        label: nickname || line.description || "Usage",
-        quantity: line.quantity ?? null,
-        amount: line.amount ?? 0,
-      };
-    });
+  const lines = buildStripeUsageLines(subscription, preview);
 
   // Gross usage accrued so far this period (same total as the breakdown).
   const grossUsage = lines.reduce(
@@ -929,6 +972,7 @@ module.exports = {
   createStripePlanCheckoutSession,
   createBasicTopUpCheckoutSession,
   getBasicTopUpTotalPence,
+  markBasicTopUpReconciled,
   prepareStripePlanChange,
   activateStripePlanChange,
   getStripeSubscription,
@@ -942,6 +986,7 @@ module.exports = {
   getStripeProduct,
   getPlanPrices,
   ensureSubscriptionMeteredPrices,
+  buildStripeUsageLines,
   resolveStripeCustomer,
   LIVE_SUBSCRIPTION_STATUSES,
 };

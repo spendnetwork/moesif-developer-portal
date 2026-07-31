@@ -17,6 +17,7 @@ const {
   createStripePlanCheckoutSession,
   createBasicTopUpCheckoutSession,
   getBasicTopUpTotalPence,
+  markBasicTopUpReconciled,
   prepareStripePlanChange,
   activateStripePlanChange,
   getStripeSubscription,
@@ -64,6 +65,7 @@ const {
   getPlansFromMoesif,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
+  getMoesifEventCount,
   getMoesifBillingReports,
   getMoesifPrepaidBalance,
 } = require("./services/moesifApis");
@@ -170,6 +172,7 @@ const prepaidReconciliationDeps = {
   syncToMoesif,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
+  markBasicTopUpReconciled,
 };
 
 const moesifMiddleware = moesif({
@@ -434,8 +437,9 @@ const PLANS_CACHE_TTL_MS = 5 * 60 * 1000;
 //   - invoice.paid       -> grant/re-grant prepaid commitment credit
 //   - subscription ended -> revoke that customer's API keys
 //
-// Required Stripe events: checkout.session.completed/async_payment_succeeded, invoice.paid,
-// invoice.payment_failed, customer.subscription.created/updated/deleted/paused.
+// Required Stripe events: checkout.session.completed/async_payment_succeeded,
+// invoice.paid/payment_succeeded/payment_failed, and
+// customer.subscription.created/updated/deleted/paused/resumed.
 // Checkout and lifecycle events are both handled because Stripe does not
 // guarantee event delivery order and the browser return is not reliable.
 const SUBSCRIPTION_LIFECYCLE_EVENTS = [
@@ -443,6 +447,7 @@ const SUBSCRIPTION_LIFECYCLE_EVENTS = [
   "customer.subscription.deleted",
   "customer.subscription.updated",
   "customer.subscription.paused",
+  "customer.subscription.resumed",
 ];
 
 app.post(
@@ -658,6 +663,7 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
         {
           getMoesifPrepaidBalance,
           getMoesifBillingReports,
+          getMoesifEventCount,
           getPlansFromMoesif,
           getBasicTopUpTotalPence,
         }

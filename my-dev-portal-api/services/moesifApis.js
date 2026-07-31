@@ -32,10 +32,62 @@ async function readMoesifResponse(response, operation) {
         normalized.includes("read:billing_reports"))
     ) {
       error.code = "moesif_management_scope_missing";
+    } else if (
+      [401, 403].includes(response.status) &&
+      normalized.includes("read:events")
+    ) {
+      error.code = "moesif_event_scope_missing";
     }
     throw error;
   }
   return body;
+}
+
+function normalizeMoesifCollection(body, keys) {
+  if (Array.isArray(body)) return body;
+  for (const key of keys) {
+    if (Array.isArray(body?.[key])) return body[key];
+  }
+  return [];
+}
+
+function reportTimestamp(report) {
+  const value =
+    report?.updated_at ||
+    report?.usage_end_time ||
+    report?.created_at ||
+    report?.last_success_time;
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function latestEndingBalance(reportBody) {
+  const reports = normalizeMoesifCollection(reportBody, ["data", "reports"])
+    .filter((report) => report?.success !== false && report?.ending_balance)
+    .sort((left, right) => {
+      const leftSequence = Number(left.ending_balance?.sequence_id);
+      const rightSequence = Number(right.ending_balance?.sequence_id);
+      if (Number.isFinite(leftSequence) && Number.isFinite(rightSequence)) {
+        return leftSequence - rightSequence;
+      }
+      return reportTimestamp(left) - reportTimestamp(right);
+    });
+  return reports.length ? reports[reports.length - 1] : null;
+}
+
+function normalizedBalance(value) {
+  if (
+    value?.current_balance == null ||
+    value?.pending_activity == null ||
+    value?.available_balance == null
+  ) {
+    return null;
+  }
+  const current = Number(value?.current_balance);
+  const pending = Number(value?.pending_activity);
+  const available = Number(value?.available_balance);
+  if (![current, pending, available].every(Number.isFinite)) return null;
+  return { current, pending, available };
 }
 
 let profileMiddleware;
@@ -165,13 +217,25 @@ async function getMoesifPrepaidBalance({ companyId, stripeCustomerId }) {
     error.status = 404;
     throw error;
   }
+  const reports = await getMoesifBillingReports({
+    companyId,
+    subscriptionId: expectedId,
+    type: null,
+  });
+  const balanceReport = latestEndingBalance(reports);
+  const balance =
+    normalizedBalance(subscription.balance) ||
+    normalizedBalance(balanceReport?.ending_balance);
   return {
     subscriptionId: expectedId,
     subscription,
-    currency: String(subscription.currency || "GBP").toUpperCase(),
-    current: Number(subscription.balance?.current_balance || 0),
-    pending: Number(subscription.balance?.pending_activity || 0),
-    available: Number(subscription.balance?.available_balance || 0),
+    currency: String(
+      balanceReport?.currency || subscription.currency || "GBP"
+    ).toUpperCase(),
+    balanceAvailable: Boolean(balance),
+    current: balance?.current ?? null,
+    pending: balance?.pending ?? null,
+    available: balance?.available ?? null,
   };
 }
 
@@ -191,13 +255,14 @@ async function getMoesifBillingReports({
   subscriptionId,
   from,
   to,
+  type = "usage",
 }) {
   const params = new URLSearchParams({
     company_id: String(companyId),
     subscription_id: subscriptionId,
-    type: "usage",
     success: "true",
   });
+  if (type) params.set("type", type);
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   const response = await fetch(
@@ -205,6 +270,48 @@ async function getMoesifBillingReports({
     { headers: { Authorization: `Bearer ${moesifManagementToken}` } }
   );
   return readMoesifResponse(response, "Moesif billing report lookup");
+}
+
+function eventCountValue(body) {
+  const candidates = [
+    body,
+    body?.count,
+    body?.total,
+    body?.value,
+    body?.hits?.total,
+    body?.hits?.total?.value,
+  ];
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value >= 0) return value;
+  }
+  const error = new Error("Moesif event count response did not contain a count");
+  error.code = "moesif_event_count_invalid";
+  throw error;
+}
+
+async function getMoesifEventCount({ companyId, from, to }) {
+  const params = new URLSearchParams({
+    from: from || "-30d",
+    to: to || "now",
+    track_total_hits: "true",
+  });
+  const response = await fetch(
+    `${moesifApiEndpoint}/v1/search/~/count/events?${params.toString()}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${moesifManagementToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: { term: { "company_id.raw": String(companyId) } },
+      }),
+    }
+  );
+  return eventCountValue(
+    await readMoesifResponse(response, "Moesif event count lookup")
+  );
 }
 
 async function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
@@ -247,8 +354,12 @@ module.exports = {
   getInfoForEmbeddedWorkspaces,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
+  getMoesifEventCount,
   getMoesifBillingReports,
   getMoesifPrepaidBalance,
   basicPrepaidSubscriptionId,
+  eventCountValue,
+  latestEndingBalance,
+  normalizedBalance,
   readMoesifResponse,
 };

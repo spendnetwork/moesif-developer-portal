@@ -1,11 +1,13 @@
 const BASIC_USAGE_CACHE_TTL_MS = 45 * 1000;
 const BASIC_USAGE_CACHE_MAX_ENTRIES = 1000;
 const basicUsageCache = new Map();
-
-function finiteNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
+const {
+  METRIC_LABELS,
+  finiteNumber,
+  metricKey,
+  metricOrder,
+  priceUnitAmountPence,
+} = require("./usageMetrics");
 
 function unixSeconds(value) {
   if (!value) return null;
@@ -27,43 +29,6 @@ function planKey(plan) {
   return String(
     metadata.plan_key || metadata.tier || metadata.plan || plan?.name || ""
   ).toLowerCase();
-}
-
-function metricKey(price) {
-  const metadata = price?.metadata || {};
-  const explicit =
-    metadata.usage_metric ||
-    metadata.billable_metric ||
-    metadata.unit_name ||
-    metadata.price_key;
-  const source = String(explicit || price?.nickname || price?.name || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_");
-  if (source.includes("aggregate")) return "aggregate_call";
-  if (source.includes("attachment")) return "attachment";
-  if (source.includes("record") || source.includes("document")) {
-    return "records_returned";
-  }
-  if (source.includes("api_call") || source.includes("api_calls")) {
-    return "api_call";
-  }
-  return source;
-}
-
-const METRIC_LABELS = {
-  api_call: "API calls",
-  records_returned: "Records returned",
-  aggregate_call: "Aggregate calls",
-  attachment: "Attachments",
-};
-
-function priceUnitAmountPence(price) {
-  const minorUnits = finiteNumber(
-    price?.unit_amount_decimal ?? price?.unit_amount
-  );
-  if (minorUnits != null) return minorUnits;
-  const majorUnits = finiteNumber(price?.price_in_decimal);
-  return majorUnits == null ? null : majorUnits * 100;
 }
 
 function basicPriceDefinitions(planCatalogue) {
@@ -116,13 +81,12 @@ function summarizeMeterReports(reportBody, priceDefinitions) {
   }
 
   const lines = [];
-  for (const entries of grouped.values()) {
+  for (const [priceId, definition] of priceDefinitions) {
+    const entries = grouped.get(priceId) || [];
     entries.sort((left, right) => reportTimestamp(left) - reportTimestamp(right));
-    const latest = entries[entries.length - 1];
-    const definition = priceDefinitions.get(latest.price_id);
-    if (!definition) continue;
+    const latest = entries[entries.length - 1] || null;
 
-    const cumulative = finiteNumber(latest.report_total_usage);
+    const cumulative = finiteNumber(latest?.report_total_usage);
     const quantity =
       cumulative != null
         ? cumulative
@@ -130,7 +94,7 @@ function summarizeMeterReports(reportBody, priceDefinitions) {
             (total, report) => total + (finiteNumber(report.meter_usage) || 0),
             0
           );
-    const reportedAmount = finiteNumber(latest.amount);
+    const reportedAmount = finiteNumber(latest?.amount);
     const amount =
       definition.unitAmountPence != null
         ? Math.round(quantity * definition.unitAmountPence)
@@ -138,15 +102,13 @@ function summarizeMeterReports(reportBody, priceDefinitions) {
     lines.push({
       key: definition.key,
       label: definition.label,
+      rate: definition.unitAmountPence,
       quantity,
       amount,
     });
   }
 
-  const order = ["api_call", "records_returned", "aggregate_call", "attachment"];
-  return lines.sort(
-    (left, right) => order.indexOf(left.key) - order.indexOf(right.key)
-  );
+  return lines.sort(metricOrder);
 }
 
 function buildBasicUsageSummary({
@@ -154,17 +116,27 @@ function buildBasicUsageSummary({
   totalPurchasedPence,
   reports,
   planCatalogue,
+  eventCount,
   analyticsAvailable = true,
   now = Date.now(),
 }) {
-  const remainingPence = Math.max(0, Math.round((balance.available || 0) * 100));
-  const currentPence = Math.max(0, Math.round((balance.current || 0) * 100));
-  const purchasedPence = Math.max(
-    remainingPence,
-    currentPence,
-    Number.isFinite(totalPurchasedPence) ? totalPurchasedPence : 0
-  );
-  const usedPence = Math.max(0, purchasedPence - remainingPence);
+  const hasBalance =
+    balance.balanceAvailable !== false &&
+    Number.isFinite(balance.available) &&
+    Number.isFinite(balance.current);
+  const remainingPence = hasBalance
+    ? Math.max(0, Math.round(balance.available * 100))
+    : null;
+  const currentPence = hasBalance
+    ? Math.max(0, Math.round(balance.current * 100))
+    : null;
+  const purchasedPence = Number.isFinite(totalPurchasedPence)
+    ? Math.max(totalPurchasedPence, remainingPence || 0, currentPence || 0)
+    : null;
+  const usedPence =
+    purchasedPence != null && remainingPence != null
+      ? Math.max(0, purchasedPence - remainingPence)
+      : null;
   const lines = analyticsAvailable
     ? summarizeMeterReports(reports, basicPriceDefinitions(planCatalogue))
     : [];
@@ -184,14 +156,20 @@ function buildBasicUsageSummary({
       end: Math.floor(now / 1000),
     },
     accrued: lines.reduce((total, line) => total + line.amount, 0),
-    requestCount: analyticsAvailable ? apiCalls?.quantity || 0 : null,
+    requestCount: Number.isFinite(eventCount)
+      ? eventCount
+      : apiCalls?.quantity ?? null,
     lines,
     credit: {
+      available: hasBalance,
       granted: purchasedPence,
       used: usedPence,
       remaining: remainingPence,
       current: currentPence,
-      pending: Math.round((balance.pending || 0) * 100),
+      pending:
+        hasBalance && Number.isFinite(balance.pending)
+          ? Math.round(balance.pending * 100)
+          : null,
       projectedRemaining: remainingPence,
     },
   };
@@ -245,6 +223,11 @@ async function getBasicPrepaidUsageSummary(context, deps) {
       to: new Date().toISOString(),
     }),
     deps.getPlansFromMoesif(),
+    deps.getMoesifEventCount({
+      companyId: context.companyId,
+      from,
+      to: "now",
+    }),
   ]);
   const failures = analytics.filter((result) => result.status === "rejected");
   if (failures.length) {
@@ -260,6 +243,8 @@ async function getBasicPrepaidUsageSummary(context, deps) {
     reports: analytics[1].status === "fulfilled" ? analytics[1].value : [],
     planCatalogue:
       analytics[2].status === "fulfilled" ? analytics[2].value : [],
+    eventCount:
+      analytics[3].status === "fulfilled" ? analytics[3].value : null,
     analyticsAvailable:
       analytics[1].status === "fulfilled" && analytics[2].status === "fulfilled",
   });

@@ -87,16 +87,21 @@ test("Basic summary restores request count, credit used, and metric totals", () 
     totalPurchasedPence: 50000,
     reports,
     planCatalogue: catalogue,
+    eventCount: 37,
     now: Date.parse("2026-07-30T12:00:00.000Z"),
   });
 
   assert.equal(summary.billingModel, "prepaid_credit");
-  assert.equal(summary.requestCount, 12);
+  assert.equal(summary.requestCount, 37);
   assert.equal(summary.credit.granted, 50000);
   assert.equal(summary.credit.remaining, 37000);
   assert.equal(summary.credit.used, 13000);
+  assert.equal(summary.lines.length, 4);
+  assert.equal(summary.lines[0].rate, 26);
   assert.equal(summary.lines[0].amount, 312);
   assert.equal(summary.lines[1].amount, 1300);
+  assert.equal(summary.lines[2].quantity, 0);
+  assert.equal(summary.lines[2].rate, 46);
   assert.equal(summary.accrued, 1612);
   assert.equal(summary.period.start, 1782864000);
 });
@@ -107,9 +112,10 @@ test("adding another Basic top-up increases purchased credit without resetting u
     totalPurchasedPence: 80000,
     reports,
     planCatalogue: catalogue,
+    eventCount: 44,
   });
 
-  assert.equal(summary.requestCount, 12);
+  assert.equal(summary.requestCount, 44);
   assert.equal(summary.credit.granted, 80000);
   assert.equal(summary.credit.remaining, 67000);
   assert.equal(summary.credit.used, 13000);
@@ -127,6 +133,27 @@ test("a temporary analytics failure still returns the authoritative balance", ()
   assert.equal(summary.requestCount, null);
   assert.deepEqual(summary.lines, []);
   assert.equal(summary.credit.remaining, 37000);
-  assert.equal(summary.credit.granted, 40000);
-  assert.equal(summary.credit.used, 3000);
+  assert.equal(summary.credit.granted, null);
+  assert.equal(summary.credit.used, null);
+});
+
+test("missing Moesif balance data is never presented as zero credit", () => {
+  const summary = buildBasicUsageSummary({
+    balance: balance({
+      balanceAvailable: false,
+      current: null,
+      pending: null,
+      available: null,
+    }),
+    totalPurchasedPence: 50000,
+    reports: [],
+    planCatalogue: catalogue,
+    eventCount: 8,
+  });
+
+  assert.equal(summary.requestCount, 8);
+  assert.equal(summary.credit.available, false);
+  assert.equal(summary.credit.remaining, null);
+  assert.equal(summary.credit.used, null);
+  assert.equal(summary.credit.granted, 50000);
 });

@@ -201,6 +201,10 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
     product,
     subscriptionStatus: "active",
   });
+  await deps.markBasicTopUpReconciled(transactionId, {
+    companyId,
+    subscriptionId,
+  });
 
   return {
     active: true,

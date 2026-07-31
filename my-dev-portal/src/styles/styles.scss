@@ -219,9 +219,9 @@ $nav-bar-color: #ffffff;
   grid-template-columns: 1fr;
 }
 
-@media (min-width: 700px) {
+@media (min-width: 980px) {
   .usage-summary__cards {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: minmax(0, 1.8fr) minmax(24rem, 0.8fr);
   }
 }
 
@@ -259,6 +259,85 @@ $nav-bar-color: #ffffff;
   margin-top: 0.8rem;
 }
 
+.usage-summary__metric--usage {
+  min-width: 0;
+  gap: 1.4rem;
+}
+
+.usage-summary__metric-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.6rem;
+}
+
+.usage-summary__metric-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.usage-summary__total {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.usage-summary__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.usage-summary__table {
+  width: 100%;
+  min-width: 52rem;
+  border-collapse: collapse;
+  font-size: 1.35rem;
+}
+
+.usage-summary__table th,
+.usage-summary__table td {
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.usage-summary__table th:first-child,
+.usage-summary__table td:first-child {
+  padding-left: 0;
+  text-align: left;
+}
+
+.usage-summary__table th:last-child,
+.usage-summary__table td:last-child {
+  padding-right: 0;
+}
+
+.usage-summary__table thead th {
+  color: var(--muted-text-color);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.usage-summary__table tbody th {
+  color: var(--body-text-color);
+  font-weight: 600;
+}
+
+.usage-summary__table tbody td {
+  color: var(--muted-text-color);
+}
+
+.usage-summary__table tbody td:last-child {
+  color: var(--heading-color);
+  font-weight: 700;
+}
+
+.usage-summary__table tbody tr:last-child th,
+.usage-summary__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 .usage-summary__bar {
   position: relative;
   margin-top: 0.8rem;
@@ -290,58 +369,6 @@ $nav-bar-color: #ffffff;
 .usage-summary__projection {
   margin-top: 0.4rem;
   font-style: italic;
-}
-
-.usage-summary__breakdown {
-  padding: 2rem 2.4rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-}
-
-.usage-summary__breakdown-title {
-  margin: 0 0 1.2rem;
-  color: var(--muted-text-color);
-  font-size: 1.3rem;
-  font-weight: 600;
-}
-
-.usage-summary__breakdown ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 0.8rem;
-}
-
-.usage-summary__breakdown li {
-  display: flex;
-  justify-content: space-between;
-  gap: 1.2rem;
-  padding-bottom: 0.8rem;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 1.4rem;
-}
-
-.usage-summary__breakdown li:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.usage-summary__metric-name {
-  color: var(--body-text-color);
-  font-weight: 500;
-}
-
-.usage-summary__metric-usage {
-  display: flex;
-  gap: 1.2rem;
-  color: var(--muted-text-color);
-}
-
-.usage-summary__qty {
-  color: var(--muted-text-color);
 }
 
 .usage-summary__skeleton {

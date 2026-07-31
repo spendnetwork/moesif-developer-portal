@@ -59,6 +59,7 @@ function dependencies(overrides = {}) {
     sendPrepaidSubscriptionToMoesif: async () =>
       "openopps_basic_prepaid_cus_123",
     createMoesifBalanceTransaction: async () => {},
+    markBasicTopUpReconciled: async () => {},
     ...overrides,
   };
 }
@@ -66,6 +67,7 @@ function dependencies(overrides = {}) {
 test("paid Basic Checkout provisions access and credits Moesif idempotently", async () => {
   let subscriptionInput;
   let creditInput;
+  let reconciliationMarker;
   const provisioningStatuses = [];
   const result = await reconcileBasicTopUp(
     "cs_top_up",
@@ -77,6 +79,9 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
       },
       createMoesifBalanceTransaction: async (input) => {
         creditInput = input;
+      },
+      markBasicTopUpReconciled: async (paymentIntentId, input) => {
+        reconciliationMarker = { paymentIntentId, ...input };
       },
       provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
         provisioningStatuses.push(subscriptionStatus);
@@ -100,6 +105,11 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
   assert.equal(creditInput.amountGbp, 500);
   assert.equal(creditInput.transactionId, "pi_123");
   assert.equal(creditInput.companyId, "9");
+  assert.deepEqual(reconciliationMarker, {
+    paymentIntentId: "pi_123",
+    companyId: "9",
+    subscriptionId: "openopps_basic_prepaid_cus_123",
+  });
   assert.deepEqual(provisioningStatuses, ["provisioning", "active"]);
 });
 

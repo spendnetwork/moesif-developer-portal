@@ -5,9 +5,8 @@ import useUsageSummary from "../../../hooks/useUsageSummary";
 import usePlanChange from "../../../hooks/usePlanChange";
 import { apiRequest } from "../../../lib/portal-api";
 
-// Stripe amounts are in minor units (pence); format to the major currency unit.
 function formatMoney(minorUnits, currency) {
-  const value = (Number(minorUnits) || 0) / 100;
+  const value = Number(minorUnits) / 100;
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: (currency || "GBP").toUpperCase(),
@@ -62,15 +61,7 @@ function UsageSummary({ idToken }) {
     return null;
   }
 
-  const {
-    currency,
-    period,
-    accrued,
-    lines,
-    credit,
-    billingModel,
-    requestCount,
-  } = usage;
+  const { currency, period, accrued, lines, credit, billingModel } = usage;
   const isPurePrepaid = billingModel === "prepaid_credit";
   const displayedAccrued = Array.isArray(lines)
     ? lines.reduce(
@@ -79,12 +70,13 @@ function UsageSummary({ idToken }) {
       )
     : accrued;
   const usedPct =
-    credit && credit.granted > 0
+    credit && Number.isFinite(credit.used) && credit.granted > 0
       ? Math.min(100, Math.round((credit.used / credit.granted) * 100))
       : 0;
-  // Includes the finalised used portion plus this period's projected drawdown.
   const projectedPct =
-    credit && credit.granted > 0
+    credit &&
+    Number.isFinite(credit.projectedRemaining) &&
+    credit.granted > 0
       ? Math.min(
           100,
           Math.round(
@@ -94,12 +86,22 @@ function UsageSummary({ idToken }) {
         )
       : 0;
   const showProjection =
-    credit && credit.projectedRemaining < credit.remaining;
+    credit &&
+    Number.isFinite(credit.projectedRemaining) &&
+    Number.isFinite(credit.remaining) &&
+    credit.projectedRemaining < credit.remaining;
+  const hasCreditBalance = credit && Number.isFinite(credit.remaining);
+  const hasCreditHistory =
+    credit &&
+    Number.isFinite(credit.used) &&
+    Number.isFinite(credit.granted);
 
   return (
     <section className="usage-summary">
       {planChange && (
-        <div className={`plan-change-notice plan-change-notice--${planChange.status}`}>
+        <div
+          className={`plan-change-notice plan-change-notice--${planChange.status}`}
+        >
           <div>
             <strong>
               {planChange.status === "payment_failed"
@@ -140,46 +142,73 @@ function UsageSummary({ idToken }) {
         </div>
       )}
       {planChangeError && <div className="keys-error">{planChangeError}</div>}
+
       <div className="usage-summary__cards">
-        {isPurePrepaid ? (
-          <div className="usage-summary__metric">
-            <span className="usage-summary__label">API requests</span>
-            <span className="usage-summary__value">
-              {requestCount == null ? "Updating" : formatCount(requestCount)}
-            </span>
-            <span className="usage-summary__sub">
-              {period?.start
-                ? `Since ${formatDate(period.start)}`
-                : "Across all API keys in your company"}
-            </span>
+        <div className="usage-summary__metric usage-summary__metric--usage">
+          <div className="usage-summary__metric-header">
+            <div>
+              <span className="usage-summary__label">Billable usage</span>
+              <span className="usage-summary__sub">
+                {period?.start && period?.end
+                  ? `${formatDate(period.start)} - ${formatDate(period.end)}`
+                  : "Across all API keys in your company"}
+              </span>
+            </div>
+            <div className="usage-summary__total">
+              <span className="usage-summary__label">Accrued</span>
+              <span className="usage-summary__value">
+                {formatMoney(displayedAccrued, currency)}
+              </span>
+            </div>
           </div>
-        ) : (
-          <div className="usage-summary__metric">
-          <span className="usage-summary__label">Usage this period</span>
-          <span className="usage-summary__value">
-            {formatMoney(displayedAccrued, currency)}
-          </span>
-          {period?.start && period?.end && (
-            <span className="usage-summary__sub">
-              {formatDate(period.start)} – {formatDate(period.end)}
-            </span>
-          )}
+
+          <div className="usage-summary__table-wrap">
+            <table className="usage-summary__table">
+              <thead>
+                <tr>
+                  <th scope="col">Metric</th>
+                  <th scope="col">Rate</th>
+                  <th scope="col">Usage</th>
+                  <th scope="col">Accrued</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(lines || []).map((line, index) => (
+                  <tr key={`${line.key || line.label}-${index}`}>
+                    <th scope="row">{line.label}</th>
+                    <td>
+                      {Number.isFinite(line.rate)
+                        ? `${formatMoney(line.rate, currency)} / unit`
+                        : "Variable"}
+                    </td>
+                    <td>{formatCount(line.quantity)}</td>
+                    <td>{formatMoney(line.amount, currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
+        </div>
 
         {credit && (
           <div className="usage-summary__metric">
             <span className="usage-summary__label">Credit remaining</span>
             <span className="usage-summary__value">
-              {formatMoney(credit.remaining, currency)}
+              {hasCreditBalance
+                ? formatMoney(credit.remaining, currency)
+                : "Updating"}
             </span>
             {isPurePrepaid ? (
               <>
                 <span className="usage-summary__sub">
-                  {formatMoney(credit.used, currency)} of{" "}
-                  {formatMoney(credit.granted, currency)} used
+                  {hasCreditHistory
+                    ? `${formatMoney(credit.used, currency)} of ${formatMoney(
+                        credit.granted,
+                        currency
+                      )} used`
+                    : "Confirming your credit ledger with Moesif"}
                 </span>
-                {credit.granted > 0 && (
+                {hasCreditHistory && credit.granted > 0 && (
                   <div
                     className="usage-summary__bar"
                     role="progressbar"
@@ -231,29 +260,6 @@ function UsageSummary({ idToken }) {
           </div>
         )}
       </div>
-
-      {lines && lines.length > 0 && (
-        <div className="usage-summary__breakdown">
-          <p className="usage-summary__breakdown-title">
-            {isPurePrepaid ? "Usage by metric" : "This period by metric"}
-          </p>
-          <ul>
-            {lines.map((line, index) => (
-              <li key={`${line.label}-${index}`}>
-                <span className="usage-summary__metric-name">{line.label}</span>
-                <span className="usage-summary__metric-usage">
-                  {line.quantity != null && (
-                    <span className="usage-summary__qty">
-                      {line.quantity.toLocaleString()} units
-                    </span>
-                  )}
-                  <span>{formatMoney(line.amount, currency)}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </section>
   );
 }
