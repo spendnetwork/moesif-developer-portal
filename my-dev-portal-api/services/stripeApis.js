@@ -289,6 +289,80 @@ async function getPlanKeyForProduct(productId) {
   throw new Error(`Product ${productId} is missing plan_key metadata`);
 }
 
+function subscriptionProductIds(subscription) {
+  const productIds = new Set();
+  if (subscription?.metadata?.plan_id) {
+    productIds.add(String(subscription.metadata.plan_id));
+  }
+  for (const item of subscription?.items?.data || []) {
+    const product = item?.price?.product;
+    const productId = typeof product === "string" ? product : product?.id;
+    if (productId) productIds.add(String(productId));
+  }
+  return [...productIds];
+}
+
+async function getSubscriptionPlanKey(
+  subscription,
+  resolveProductPlanKey = getPlanKeyForProduct
+) {
+  const configured = String(subscription?.metadata?.plan_key || "")
+    .trim()
+    .toLowerCase();
+  const productIds = subscriptionProductIds(subscription);
+  if (!productIds.length) {
+    if (["basic", "growth", "enterprise"].includes(configured)) {
+      return configured;
+    }
+    throw stripeLookupError(
+      "subscription_plan_unknown",
+      `Subscription ${subscription?.id || "unknown"} has no plan product`
+    );
+  }
+  const planKeys = new Set(
+    await Promise.all(productIds.map((productId) => resolveProductPlanKey(productId)))
+  );
+  if (planKeys.size !== 1) {
+    throw stripeLookupError(
+      "mixed_subscription_products",
+      `Subscription ${subscription?.id || "unknown"} contains multiple plans`
+    );
+  }
+  const resolved = [...planKeys][0];
+  if (configured && configured !== resolved) {
+    throw stripeLookupError(
+      "subscription_plan_mismatch",
+      `Subscription ${subscription?.id || "unknown"} metadata does not match its prices`
+    );
+  }
+  return resolved;
+}
+
+async function assertBasicTopUpAllowed(
+  liveSubscriptions,
+  resolveSubscriptionPlanKey = getSubscriptionPlanKey
+) {
+  const classified = await Promise.all(
+    (liveSubscriptions || []).map(async (subscription) => ({
+      subscription,
+      planKey: await resolveSubscriptionPlanKey(subscription),
+    }))
+  );
+  const conflicts = classified.filter(({ planKey }) => planKey !== "basic");
+  if (!conflicts.length) return classified;
+
+  throw stripeLookupError(
+    conflicts.length > 1
+      ? "multiple_active_subscriptions"
+      : "active_subscription_exists",
+    "Basic credit cannot be purchased while Growth or Enterprise is active. Switch to Basic at renewal before adding credit.",
+    {
+      subscriptionIds: conflicts.map(({ subscription }) => subscription.id),
+      planKeys: [...new Set(conflicts.map(({ planKey }) => planKey))],
+    }
+  );
+}
+
 // Webhooks identify the customer by id, not email, so subscription enforcement
 // needs a direct lookup (the metadata carries the Auth0 subject).
 function getStripeCustomerById(customerId) {
@@ -410,14 +484,7 @@ async function createBasicTopUpCheckoutSession(
   const liveSubscriptions = subscriptions.data.filter((candidate) =>
     LIVE_SUBSCRIPTION_STATUSES.includes(candidate.status)
   );
-  if (liveSubscriptions.length) {
-    throw stripeLookupError(
-      liveSubscriptions.length > 1
-        ? "multiple_active_subscriptions"
-        : "active_subscription_exists",
-      "Basic credit cannot be purchased while Growth or Enterprise is active. Switch to Basic at renewal before adding credit."
-    );
-  }
+  await assertBasicTopUpAllowed(liveSubscriptions);
 
   const metadata = {
     purchase_type: "basic_credit_top_up",
@@ -987,6 +1054,9 @@ module.exports = {
   getPlanPrices,
   ensureSubscriptionMeteredPrices,
   buildStripeUsageLines,
+  subscriptionProductIds,
+  getSubscriptionPlanKey,
+  assertBasicTopUpAllowed,
   resolveStripeCustomer,
   LIVE_SUBSCRIPTION_STATUSES,
 };
