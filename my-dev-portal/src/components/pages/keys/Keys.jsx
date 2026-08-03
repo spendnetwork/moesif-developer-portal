@@ -1,18 +1,26 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
-import SVG from "react-inlinesvg";
 import copy from "copy-to-clipboard";
 import useSWR from "swr";
 
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
-import apiKeyIcon from "../../../images/icons/api-key.svg";
-import lockIcon from "../../../images/icons/lock.svg";
-import copyIcon from "../../../images/icons/copy.svg";
-import successIcon from "../../../images/icons/success.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { apiRequest, authedFetcher } from "../../../lib/portal-api";
+
+const C = {
+  green: "#034737",
+  mint: "#A9FF9B",
+  head: "#23383A",
+  body: "#23302C",
+  muted: "#647873",
+  line: "#DDE5E0",
+  lineSoft: "#EEF2EF",
+  page: "#F5F7F4",
+  danger: "#8B2C21",
+  dangerBorder: "#E2ABA3",
+};
 
 const modalStyles = {
   content: {
@@ -20,16 +28,20 @@ const modalStyles = {
     left: "50%",
     right: "auto",
     bottom: "auto",
-    width: "min(56rem, calc(100vw - 3.2rem))",
+    width: "min(30rem, calc(100vw - 3.2rem))",
     maxHeight: "calc(100vh - 4rem)",
     padding: 0,
-    overflow: "auto",
+    border: "none",
+    borderRadius: 14,
+    overflow: "hidden",
     transform: "translate(-50%, -50%)",
+    boxShadow: "0 20px 60px rgba(15,30,25,0.28)",
   },
   overlay: { backgroundColor: "rgba(15, 30, 25, 0.5)", zIndex: 20 },
 };
 
 function formatDate(value) {
+  if (!value) return "—";
   return new Intl.DateTimeFormat(undefined, {
     day: "numeric",
     month: "short",
@@ -39,23 +51,124 @@ function formatDate(value) {
 
 function formatRelativeDate(value) {
   if (!value) return "Not used yet";
-  const days = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 86400000));
+  const days = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(value).getTime()) / 86400000)
+  );
   if (days === 0) return "Today";
   if (days === 1) return "1 day ago";
   return `${days} days ago`;
 }
 
-function RotationNotice({ apiKey }) {
-  if (apiKey.rotation_status === "current") return null;
-  const recommended = apiKey.rotation_status === "recommended";
+function statusPill(rotationStatus) {
+  if (rotationStatus === "recommended") {
+    return { label: "90+ days", color: "#725300", background: "#FFF1B8", border: "#EFDE96" };
+  }
+  if (rotationStatus === "warning") {
+    return { label: "60+ days", color: "#725300", background: "#FFF1B8", border: "#EFDE96" };
+  }
+  return { label: "Active", color: "#17633C", background: "#E3F5E9", border: "#C4E7D2" };
+}
+
+function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
+  const pill = statusPill(apiKey.rotation_status);
+  const showWarning = apiKey.rotation_status !== "current";
+  const prefix = apiKey.key_prefix
+    ? `${apiKey.key_prefix.slice(0, 18)}…`
+    : `Key ID ${apiKey.id}`;
+
   return (
-    <div className={`key-age-notice key-age-notice--${apiKey.rotation_status}`}>
-      <strong>{recommended ? "Rotation recommended" : "Rotation reminder"}</strong>
-      <span>
-        {recommended
-          ? `This key is ${apiKey.age_days} days old. Rotate it now to maintain good security hygiene.`
-          : `This key is ${apiKey.age_days} days old. Plan to rotate it before it reaches 90 days.`}
-      </span>
+    <div style={styles.card}>
+      <div style={{ display: "flex", gap: 18 }}>
+        <div style={styles.keyIcon}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.green} strokeWidth="1.5">
+            <circle cx="8.5" cy="15.5" r="3.5" />
+            <path d="M11 13L19 5M16.5 7.5l2 2M14.5 9.5l2 2" />
+          </svg>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 16, fontWeight: 500, color: C.head }}>
+              {apiKey.name}
+            </span>
+            <span
+              style={{
+                fontSize: 11.5,
+                color: pill.color,
+                background: pill.background,
+                border: `1px solid ${pill.border}`,
+                padding: "3px 9px",
+                borderRadius: 999,
+              }}
+            >
+              {pill.label}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
+            <span style={styles.prefixChip}>{prefix}</span>
+            <button
+              type="button"
+              onClick={() => onCopyPrefix(apiKey)}
+              style={styles.copyBtn}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <rect x="9" y="9" width="11" height="11" rx="2.5" />
+                <path d="M15 6.5A2.5 2.5 0 0 0 12.5 4H6.5A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15" />
+              </svg>
+              {copiedId === apiKey.id ? "Copied" : "Copy prefix"}
+            </button>
+          </div>
+
+          {showWarning && (
+            <div style={styles.warnBanner}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#725300" strokeWidth="1.6" style={{ flex: "none" }}>
+                <path d="M12 4.5l8 14H4l8-14Z" />
+                <path d="M12 10v3.5" />
+                <circle cx="12" cy="16.2" r="0.7" fill="#725300" stroke="none" />
+              </svg>
+              <span style={{ fontSize: 13, color: "#725300" }}>
+                This key is {apiKey.age_days} days old. Rotating regularly keeps
+                your integration safe.
+              </span>
+            </div>
+          )}
+
+          <div style={styles.metaGrid}>
+            <div style={styles.metaItem}>
+              <span style={styles.metaLabel}>Description</span>
+              <span style={styles.metaValue}>{apiKey.description || "—"}</span>
+            </div>
+            <div style={styles.metaItem}>
+              <span style={styles.metaLabel}>Last used</span>
+              <span style={styles.metaValue}>{formatRelativeDate(apiKey.last_used_at)}</span>
+            </div>
+            <div style={styles.metaItem}>
+              <span style={styles.metaLabel}>Status</span>
+              <span style={styles.metaValue}>Active</span>
+            </div>
+            <div style={styles.metaItem}>
+              <span style={styles.metaLabel}>Created</span>
+              <span style={styles.metaValue}>{formatDate(apiKey.created_at)}</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "none" }}>
+          <button
+            type="button"
+            onClick={() => onRotate(apiKey)}
+            style={showWarning ? styles.rotateStrong : styles.rotateOutline}
+          >
+            Rotate
+          </button>
+          <button
+            type="button"
+            onClick={() => onRevoke(apiKey)}
+            style={styles.revokeBtn}
+          >
+            Revoke
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -69,6 +182,7 @@ function Keys() {
   const [selectedKey, setSelectedKey] = useState(null);
   const [revealedKey, setRevealedKey] = useState("");
   const [isCopied, setIsCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
@@ -78,7 +192,6 @@ function Keys() {
   const {
     data: keysData,
     error: keysError,
-    isLoading: keysLoading,
     mutate: mutateKeys,
   } = useSWR(keysKey, authedFetcher);
 
@@ -172,6 +285,14 @@ function Keys() {
     setModal(action);
   }
 
+  function copyPrefix(apiKey) {
+    const value = apiKey.key_prefix || `Key ID ${apiKey.id}`;
+    if (copy(value)) {
+      setCopiedId(apiKey.id);
+      setTimeout(() => setCopiedId(null), 2500);
+    }
+  }
+
   function copyRevealedKey() {
     if (copy(revealedKey)) {
       setIsCopied(true);
@@ -183,199 +304,498 @@ function Keys() {
   if (authLoading || !keysReady) {
     return (
       <PageLayout>
-        <div className="access-activation" role="status" aria-live="polite">
-          <PageLoader />
-          <div className="access-activation__copy">
-            <h1>Preparing your API access</h1>
-            <p>Confirming your subscription and loading your keys.</p>
-          </div>
-        </div>
+        <PageLoader />
       </PageLayout>
     );
   }
 
   const hasActiveSubscription = keysData?.has_active_subscription === true;
-
-  if (keysError && !notProvisioned) {
-    return (
-      <PageLayout>
-        <section className="keys-page">
-          <header className="keys-header">
-            <div>
-              <p className="page-eyebrow">Access</p>
-              <h1>API keys</h1>
-              <p>Use API keys to make programmatic calls to Open Opportunities.</p>
-            </div>
-          </header>
-          <div className="keys-error-state" role="alert">
-            <h2>We could not confirm your API access</h2>
-            <p>{listError || "Please try again shortly."}</p>
-            <button className="button button--primary" onClick={() => mutateKeys()}>
-              Try again
-            </button>
-          </div>
-        </section>
-      </PageLayout>
-    );
-  }
-
-  if (notProvisioned || !hasActiveSubscription) {
-    return (
-      <PageLayout>
-        <section className="keys-page">
-          <header className="keys-header">
-            <div>
-              <p className="page-eyebrow">Access</p>
-              <h1>API keys</h1>
-              <p>Use API keys to make programmatic calls to Open Opportunities.</p>
-            </div>
-          </header>
-          <div className="empty-state">
-            <SVG src={lockIcon} aria-hidden="true" />
-            <h2>Subscribe to unlock API keys</h2>
-            <p>
-              API keys become available once you have an active plan. Choose
-              one to activate your access, then come back here to create your
-              first key.
-            </p>
-            <button
-              className="button button--primary"
-              onClick={() => navigate("/plans")}
-            >
-              View plans
-            </button>
-          </div>
-        </section>
-      </PageLayout>
-    );
-  }
-
+  const locked = notProvisioned || !hasActiveSubscription;
+  const hardError = keysError && !notProvisioned;
   const atLimit = keys.length >= maxKeys;
 
   return (
     <PageLayout>
-      <section className="keys-page">
-        <header className="keys-header">
-          <div>
-            <p className="page-eyebrow">Access</p>
-            <h1>API keys <span>({keys.length})</span></h1>
-            <p>Use API keys to make programmatic calls to Open Opportunities. You can have a maximum of two active keys at a time.</p>
-          </div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.eyebrow}>Access</div>
+          <h1 style={styles.h1}>
+            API keys{!locked && !hardError ? ` (${keys.length})` : ""}
+          </h1>
+          <p style={{ margin: 0, fontSize: 15, color: C.muted }}>
+            Keys authenticate every request. Maximum two active keys.
+          </p>
+        </div>
+        {!locked && !hardError && (
           <button
-            className="button button--primary keys-create-button"
+            type="button"
             onClick={openCreateModal}
             disabled={atLimit}
+            style={{
+              ...styles.primaryBtn,
+              opacity: atLimit ? 0.5 : 1,
+              cursor: atLimit ? "default" : "pointer",
+            }}
           >
             Create API key
           </button>
-        </header>
+        )}
+      </div>
 
-        <div className="keys-summary">
-          <span>{keys.length} of {maxKeys} active keys</span>
-          {atLimit && <span>Revoke a key before creating another.</span>}
+      {hardError && (
+        <div style={styles.errorCard} role="alert">
+          <div style={{ fontSize: 16, fontWeight: 500, color: C.head, marginBottom: 8 }}>
+            We could not confirm your API access
+          </div>
+          <p style={{ margin: "0 0 16px", fontSize: 14, color: C.muted }}>
+            {listError || "Please try again shortly."}
+          </p>
+          <button type="button" onClick={() => mutateKeys()} style={styles.primaryBtn}>
+            Try again
+          </button>
         </div>
+      )}
 
-        {(error || listError) && (
-          <div className="keys-error" role="alert">{error || listError}</div>
-        )}
-
-        {keys.length === 0 ? (
-          <div className="keys-empty">
-            <SVG src={apiKeyIcon} />
-            <h2>No API keys</h2>
-            <p>Create a key to authenticate requests to the API.</p>
-            <button className="button button--primary" onClick={openCreateModal}>
-              Create API key
-            </button>
+      {!hardError && locked && (
+        <div style={styles.lockedCard}>
+          <div style={styles.lockedIcon}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.5">
+              <rect x="5" y="11" width="14" height="9" rx="2.5" />
+              <path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11" />
+            </svg>
           </div>
-        ) : (
-          <div className="keys-list">
-            {keys.map((apiKey) => (
-              <article className="key-card" key={apiKey.id}>
-                <div className="key-card-main">
-                  <div className="key-card-icon"><SVG src={apiKeyIcon} /></div>
-                  <div className="key-card-content">
-                    <div className="key-card-title-row">
-                      <h2>{apiKey.name}</h2>
-                      <span className={`key-status key-status--${apiKey.rotation_status}`}>
-                        {apiKey.rotation_status === "recommended"
-                          ? "90+ days"
-                          : apiKey.rotation_status === "warning"
-                            ? "60+ days"
-                            : "Active"}
-                      </span>
-                    </div>
-                    {apiKey.description && <p>{apiKey.description}</p>}
-                    <span className="key-identifier" title="Use this prefix to match the key in your configuration">
-                      {apiKey.key_prefix
-                        ? `${apiKey.key_prefix.slice(0, 18)}...`
-                        : `Key ID ${apiKey.id}`}
-                    </span>
-                    <dl className="key-metadata">
-                      <div><dt>Created</dt><dd>{formatDate(apiKey.created_at)}</dd></div>
-                      <div><dt>Last used</dt><dd>{formatRelativeDate(apiKey.last_used_at)}</dd></div>
-                    </dl>
-                  </div>
-                </div>
-                <RotationNotice apiKey={apiKey} />
-                <div className="key-card-actions">
-                  <button className="button button--outline-secondary" onClick={() => openAction("rotate", apiKey)}>
-                    Rotate
-                  </button>
-                  <button className="button key-revoke-button" onClick={() => openAction("revoke", apiKey)}>
-                    Revoke
-                  </button>
-                </div>
-              </article>
-            ))}
+          <div style={{ fontSize: 19, fontWeight: 500, color: C.head, marginBottom: 8 }}>
+            Subscribe to unlock API keys
           </div>
-        )}
-      </section>
+          <p style={styles.lockedBody}>
+            Choose a plan to start issuing keys. Basic has no commitment and
+            includes a £500 development credit.
+          </p>
+          <button type="button" onClick={() => navigate("/plans")} style={styles.primaryBtn}>
+            View plans
+          </button>
+        </div>
+      )}
 
-      <Modal isOpen={Boolean(modal)} onRequestClose={closeModal} style={modalStyles} contentLabel="API key management">
-        {modal === "create" && (
-          <form onSubmit={createKey} className="key-modal">
-            <div className="key-modal-header"><h2>Create API key</h2><p>The secret is shown once after creation.</p></div>
-            <div className="key-modal-body">
-              {error && <div className="keys-error" role="alert">{error}</div>}
-              <label htmlFor="key-name">Name</label>
-              <input id="key-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={100} required placeholder="Production integration" />
-              <label htmlFor="key-description">Description <span>(optional)</span></label>
-              <textarea id="key-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} rows={4} placeholder="Used by the production data pipeline" />
+      {!hardError && !locked && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {error && (
+            <div style={styles.inlineError} role="alert">{error}</div>
+          )}
+          {keys.length === 0 ? (
+            <div style={styles.lockedCard}>
+              <div style={styles.lockedIcon}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.green} strokeWidth="1.5">
+                  <circle cx="8.5" cy="15.5" r="3.5" />
+                  <path d="M11 13L19 5M16.5 7.5l2 2M14.5 9.5l2 2" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 19, fontWeight: 500, color: C.head, marginBottom: 8 }}>
+                No API keys
+              </div>
+              <p style={styles.lockedBody}>
+                Create a key to authenticate requests to the API.
+              </p>
+              <button type="button" onClick={openCreateModal} style={styles.primaryBtn}>
+                Create API key
+              </button>
             </div>
-            <div className="key-modal-actions"><button type="button" className="button button--outline-secondary" onClick={closeModal}>Cancel</button><button className="button button--primary" disabled={busy || !name.trim()}>{busy ? "Creating..." : "Create key"}</button></div>
+          ) : (
+            <>
+              {keys.map((apiKey) => (
+                <KeyCard
+                  key={apiKey.id}
+                  apiKey={apiKey}
+                  onRotate={(k) => openAction("rotate", k)}
+                  onRevoke={(k) => openAction("revoke", k)}
+                  onCopyPrefix={copyPrefix}
+                  copiedId={copiedId}
+                />
+              ))}
+              {atLimit && (
+                <p style={{ margin: "4px 0 0", fontSize: 12.5, color: C.muted }}>
+                  You have reached the maximum of two active keys. Revoke one to
+                  create another.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <Modal
+        isOpen={Boolean(modal)}
+        onRequestClose={closeModal}
+        style={modalStyles}
+        contentLabel="API key management"
+      >
+        {modal === "create" && (
+          <form onSubmit={createKey}>
+            <div style={styles.modalHead}>
+              <div style={styles.modalTitle}>Create API key</div>
+              <p style={styles.modalSub}>The secret is shown once after creation.</p>
+            </div>
+            <div style={styles.modalBody}>
+              {error && <div style={styles.inlineError} role="alert">{error}</div>}
+              <div style={styles.field}>
+                <label htmlFor="key-name" style={styles.label}>Name</label>
+                <input
+                  id="key-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={100}
+                  required
+                  placeholder="Production integration"
+                  style={styles.input}
+                />
+              </div>
+              <div style={styles.field}>
+                <label htmlFor="key-description" style={styles.label}>
+                  Description <span style={{ color: C.muted }}>(optional)</span>
+                </label>
+                <textarea
+                  id="key-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  placeholder="Used by the production data pipeline"
+                  style={{ ...styles.input, resize: "vertical", fontFamily: "inherit" }}
+                />
+              </div>
+            </div>
+            <div style={styles.modalActions}>
+              <button type="button" onClick={closeModal} style={styles.outlineBtn}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={busy || !name.trim()}
+                style={{ ...styles.primaryBtn, opacity: busy || !name.trim() ? 0.55 : 1 }}
+              >
+                {busy ? "Creating…" : "Create key"}
+              </button>
+            </div>
           </form>
         )}
 
         {modal === "reveal" && (
-          <div className="key-modal">
-            <div className="key-modal-header"><h2>API key created</h2><p>Store this key securely. You will not be able to view it again.</p></div>
-            <div className="key-modal-body">
-              <label>Your API key</label>
-              <div className="api-key-container"><span className="api-key-presentation"><SVG src={apiKeyIcon} /><code className="api-key">{revealedKey}</code></span><button className="copy-button" onClick={copyRevealedKey} title="Copy API key" aria-label="Copy API key"><SVG className="icon" src={isCopied ? successIcon : copyIcon} /></button></div>
+          <div>
+            <div style={styles.modalHead}>
+              <div style={styles.modalTitle}>API key created</div>
+              <p style={styles.modalSub}>
+                Store this key securely. You will not be able to view it again.
+              </p>
             </div>
-            <div className="key-modal-actions"><button className="button button--primary" onClick={closeModal}>Done</button></div>
+            <div style={styles.modalBody}>
+              <label style={styles.label}>Your API key</label>
+              <div style={styles.revealRow}>
+                <code style={styles.revealCode}>{revealedKey}</code>
+                <button type="button" onClick={copyRevealedKey} style={styles.copyBtn}>
+                  {isCopied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+            <div style={styles.modalActions}>
+              <button type="button" onClick={closeModal} style={styles.primaryBtn}>
+                Done
+              </button>
+            </div>
           </div>
         )}
 
         {modal === "rotate" && (
-          <div className="key-modal">
-            <div className="key-modal-header"><h2>Rotate {selectedKey?.name}?</h2><p>The current key will stop working immediately.</p></div>
-            <div className="key-modal-body">{error && <div className="keys-error" role="alert">{error}</div>}<p>Update every service using this credential as soon as the replacement is created.</p></div>
-            <div className="key-modal-actions"><button className="button button--outline-secondary" onClick={closeModal}>Cancel</button><button className="button button--primary" onClick={rotateKey} disabled={busy}>{busy ? "Rotating..." : "Rotate key"}</button></div>
+          <div>
+            <div style={styles.modalHead}>
+              <div style={styles.modalTitle}>Rotate {selectedKey?.name}?</div>
+              <p style={styles.modalSub}>The current key will stop working immediately.</p>
+            </div>
+            <div style={styles.modalBody}>
+              {error && <div style={styles.inlineError} role="alert">{error}</div>}
+              <p style={{ margin: 0, fontSize: 14, color: C.body, lineHeight: 1.55 }}>
+                Update every service using this credential as soon as the
+                replacement is created.
+              </p>
+            </div>
+            <div style={styles.modalActions}>
+              <button type="button" onClick={closeModal} style={styles.outlineBtn}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={rotateKey}
+                disabled={busy}
+                style={{ ...styles.primaryBtn, opacity: busy ? 0.55 : 1 }}
+              >
+                {busy ? "Rotating…" : "Rotate key"}
+              </button>
+            </div>
           </div>
         )}
 
         {modal === "revoke" && (
-          <div className="key-modal">
-            <div className="key-modal-header"><h2>Revoke {selectedKey?.name}?</h2><p>Requests using this key will fail immediately.</p></div>
-            <div className="key-modal-body">{error && <div className="keys-error" role="alert">{error}</div>}<p>This action cannot be undone.</p></div>
-            <div className="key-modal-actions"><button className="button button--outline-secondary" onClick={closeModal}>Cancel</button><button className="button key-revoke-button" onClick={revokeKey} disabled={busy}>{busy ? "Revoking..." : "Revoke key"}</button></div>
+          <div>
+            <div style={styles.modalHead}>
+              <div style={styles.modalTitle}>Revoke {selectedKey?.name}?</div>
+              <p style={styles.modalSub}>Requests using this key will fail immediately.</p>
+            </div>
+            <div style={styles.modalBody}>
+              {error && <div style={styles.inlineError} role="alert">{error}</div>}
+              <p style={{ margin: 0, fontSize: 14, color: C.body, lineHeight: 1.55 }}>
+                This action cannot be undone.
+              </p>
+            </div>
+            <div style={styles.modalActions}>
+              <button type="button" onClick={closeModal} style={styles.outlineBtn}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={revokeKey}
+                disabled={busy}
+                style={{ ...styles.dangerBtn, opacity: busy ? 0.55 : 1 }}
+              >
+                {busy ? "Revoking…" : "Revoke key"}
+              </button>
+            </div>
           </div>
         )}
       </Modal>
     </PageLayout>
   );
 }
+
+const styles = {
+  header: {
+    display: "flex",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 24,
+    marginBottom: 28,
+  },
+  eyebrow: {
+    fontSize: 12,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    color: C.muted,
+    marginBottom: 10,
+  },
+  h1: {
+    margin: "0 0 8px",
+    fontSize: 32,
+    lineHeight: 1.15,
+    fontWeight: 500,
+    letterSpacing: "-0.02em",
+    color: C.head,
+  },
+  card: {
+    background: "#FFFFFF",
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    padding: "22px 24px",
+    boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
+  },
+  keyIcon: {
+    width: 44,
+    height: 44,
+    flex: "none",
+    borderRadius: 10,
+    background: C.mint,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  prefixChip: {
+    fontFamily: "'Fira Code', monospace",
+    fontSize: 13,
+    color: C.body,
+    background: C.page,
+    border: `1px solid ${C.line}`,
+    padding: "6px 10px",
+    borderRadius: 8,
+  },
+  copyBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    flex: "none",
+    whiteSpace: "nowrap",
+    background: "transparent",
+    border: `1px solid ${C.line}`,
+    color: C.muted,
+    fontSize: 12.5,
+    padding: "6px 10px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  warnBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "#FFF9E0",
+    border: "1px solid #EFDE96",
+    borderRadius: 8,
+    padding: "11px 14px",
+    marginBottom: 18,
+  },
+  metaGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+    gap: 20,
+    paddingTop: 18,
+    borderTop: `1px solid ${C.lineSoft}`,
+  },
+  metaItem: { display: "flex", flexDirection: "column", gap: 5 },
+  metaLabel: {
+    fontSize: 11,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: C.muted,
+  },
+  metaValue: { fontSize: 13.5, color: C.body },
+  rotateOutline: {
+    background: "transparent",
+    border: "1px solid #C9D6CF",
+    color: C.head,
+    fontSize: 13,
+    fontWeight: 500,
+    padding: "9px 14px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  rotateStrong: {
+    background: C.green,
+    border: `1px solid ${C.green}`,
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: 500,
+    padding: "9px 14px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  revokeBtn: {
+    background: "transparent",
+    border: `1px solid ${C.dangerBorder}`,
+    color: C.danger,
+    fontSize: 13,
+    fontWeight: 500,
+    padding: "9px 14px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  primaryBtn: {
+    background: C.green,
+    border: `1px solid ${C.green}`,
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: 500,
+    padding: "11px 18px",
+    borderRadius: 8,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+  },
+  outlineBtn: {
+    background: "transparent",
+    border: "1px solid #C9D6CF",
+    color: C.head,
+    fontSize: 14,
+    fontWeight: 500,
+    padding: "11px 18px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  dangerBtn: {
+    background: C.danger,
+    border: `1px solid ${C.danger}`,
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: 500,
+    padding: "11px 18px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  lockedCard: {
+    background: "#FFFFFF",
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    padding: "72px 24px",
+    textAlign: "center",
+  },
+  lockedIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 999,
+    background: "#F1F4F1",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    margin: "0 auto 20px",
+  },
+  lockedBody: {
+    margin: "0 auto 22px",
+    fontSize: 14,
+    lineHeight: 1.6,
+    color: C.muted,
+    maxWidth: 380,
+  },
+  errorCard: {
+    background: "#FFFFFF",
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    padding: 24,
+  },
+  inlineError: {
+    background: "#FDE8E5",
+    border: "1px solid #F5CFC9",
+    borderRadius: 8,
+    padding: "10px 12px",
+    fontSize: 13.5,
+    color: C.danger,
+  },
+  modalHead: {
+    padding: "22px 24px 0",
+  },
+  modalTitle: { fontSize: 18, fontWeight: 500, color: C.head },
+  modalSub: { margin: "6px 0 0", fontSize: 13.5, color: C.muted, lineHeight: 1.5 },
+  modalBody: {
+    padding: 24,
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+  },
+  modalActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+    padding: "0 24px 24px",
+  },
+  field: { display: "flex", flexDirection: "column", gap: 7 },
+  label: { fontSize: 13, color: C.head },
+  input: {
+    border: `1px solid ${C.line}`,
+    borderRadius: 8,
+    padding: "10px 12px",
+    fontSize: 14,
+    color: C.body,
+    background: "#FFFFFF",
+  },
+  revealRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: C.page,
+    border: `1px solid ${C.line}`,
+    borderRadius: 8,
+    padding: "10px 12px",
+  },
+  revealCode: {
+    flex: 1,
+    minWidth: 0,
+    overflowWrap: "anywhere",
+    fontFamily: "'Fira Code', monospace",
+    fontSize: 13,
+    color: C.body,
+  },
+};
 
 export default Keys;

@@ -8,6 +8,40 @@ import { welcomeStorageKey } from "../../../common/constants";
 const API_DOCS_URL =
   "https://docs.openopps.com/s/1e0ae5a0-98cd-4814-9a10-08fef3ce3c4b/doc/api-v30-documentation-v2-summary-records-P5dS1Xsr1g";
 
+const C = {
+  green: "#034737",
+  mint: "#A9FF9B",
+  head: "#23383A",
+  body: "#23302C",
+  muted: "#647873",
+  line: "#DDE5E0",
+  page: "#F5F7F4",
+};
+
+const STEPS = [
+  {
+    n: 1,
+    title: "Choose a plan",
+    body: "Pay as you go on Basic, or prepay for lower unit rates.",
+    linkLabel: "View plans",
+    to: "/plans",
+  },
+  {
+    n: 2,
+    title: "Create an API key",
+    body: "Up to two active keys, rotate them whenever you need.",
+    linkLabel: "Go to API keys",
+    to: "/keys",
+  },
+  {
+    n: 3,
+    title: "Make your first call",
+    body: "One GET against /notices returns clean JSON.",
+    linkLabel: "Read the docs",
+    href: API_DOCS_URL,
+  },
+];
+
 function Welcome() {
   const { user } = useAuthCombined();
   const navigate = useNavigate();
@@ -23,82 +57,155 @@ function Welcome() {
 
   return (
     <PageLayout>
-      <section className="welcome-page">
-        <div className="page-heading">
-          <p className="page-eyebrow">Welcome</p>
-          <h1>Welcome to the Open Opportunities API</h1>
-          <p>
-            Procurement data from 900+ sources across 180+ countries, served
-            as clean JSON. Three steps and you are up and running.
-          </p>
+      <div style={{ maxWidth: 760, paddingTop: 8 }}>
+        <div style={styles.eyebrow}>Welcome</div>
+        <h1 style={styles.h1}>Welcome to the Open Opportunities API</h1>
+        <p style={styles.lead}>
+          Procurement data from 900+ sources across 180+ countries, delivered as
+          clean JSON.
+        </p>
+
+        <div style={styles.grid}>
+          {STEPS.map((step) => (
+            <div key={step.n} style={styles.card}>
+              <div style={styles.badge}>{step.n}</div>
+              <div style={styles.cardTitle}>{step.title}</div>
+              <p style={styles.cardBody}>{step.body}</p>
+              {step.href ? (
+                <a
+                  href={step.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={styles.link}
+                >
+                  {step.linkLabel}
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate(step.to)}
+                  style={{ ...styles.link, background: "none", cursor: "pointer" }}
+                >
+                  {step.linkLabel}
+                </button>
+              )}
+            </div>
+          ))}
         </div>
 
-        <div className="welcome-steps">
-          <article className="welcome-step">
-            <span className="welcome-step__number" aria-hidden="true">1</span>
-            <h2>Choose a plan</h2>
-            <p>
-              Pick the usage tier that fits your needs. Basic starts with no
-              upfront commitment, so you can begin small and grow.
-            </p>
-            <button
-              className="button__link welcome-step__link"
-              onClick={() => navigate("/plans")}
-            >
-              View plans
-            </button>
-          </article>
-
-          <article className="welcome-step">
-            <span className="welcome-step__number" aria-hidden="true">2</span>
-            <h2>Create an API key</h2>
-            <p>
-              Generate a key from the API keys page and store it safely. The
-              secret is shown once, and you can rotate it any time.
-            </p>
-            <button
-              className="button__link welcome-step__link"
-              onClick={() => navigate("/keys")}
-            >
-              Manage API keys
-            </button>
-          </article>
-
-          <article className="welcome-step">
-            <span className="welcome-step__number" aria-hidden="true">3</span>
-            <h2>Make your first call</h2>
-            <p>
-              Send requests with your key in the X-API-Key header, then track
-              usage and spend from your dashboard.
-            </p>
-            <a
-              className="welcome-step__link"
-              href={API_DOCS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Read the API docs
-            </a>
-          </article>
-        </div>
-
-        <div className="welcome-actions">
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <button
-            className="button button--primary"
+            type="button"
             onClick={() => navigate("/plans")}
+            style={styles.primaryBtn}
           >
             Choose a plan
           </button>
           <button
-            className="button button--outline-secondary"
+            type="button"
             onClick={() => navigate("/dashboard")}
+            style={styles.outlineBtn}
           >
             Go to my dashboard
           </button>
         </div>
-      </section>
+      </div>
     </PageLayout>
   );
 }
+
+const styles = {
+  eyebrow: {
+    fontSize: 12,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    color: C.muted,
+    marginBottom: 12,
+  },
+  h1: {
+    margin: "0 0 14px",
+    fontSize: 38,
+    lineHeight: 1.15,
+    fontWeight: 500,
+    letterSpacing: "-0.02em",
+    color: C.head,
+  },
+  lead: {
+    margin: "0 0 40px",
+    fontSize: 17,
+    lineHeight: 1.6,
+    color: C.muted,
+    maxWidth: 560,
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 16,
+    marginBottom: 36,
+  },
+  card: {
+    background: "#FFFFFF",
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    padding: 22,
+    boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
+  },
+  badge: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    background: "#E9F5EE",
+    color: C.green,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 13,
+    fontWeight: 500,
+    marginBottom: 16,
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: 500,
+    color: C.head,
+    marginBottom: 6,
+  },
+  cardBody: {
+    margin: "0 0 14px",
+    fontSize: 13.5,
+    lineHeight: 1.55,
+    color: C.muted,
+  },
+  link: {
+    display: "inline-block",
+    fontSize: 13.5,
+    color: C.green,
+    borderBottom: `1px solid ${C.mint}`,
+    paddingBottom: 1,
+    border: "none",
+    borderRadius: 0,
+    padding: 0,
+    textDecoration: "none",
+  },
+  primaryBtn: {
+    background: C.green,
+    border: `1px solid ${C.green}`,
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: 500,
+    padding: "11px 20px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  outlineBtn: {
+    background: "transparent",
+    border: "1px solid #C9D6CF",
+    color: C.head,
+    fontSize: 14,
+    fontWeight: 500,
+    padding: "11px 20px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+};
 
 export default Welcome;
