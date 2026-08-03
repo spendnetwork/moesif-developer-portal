@@ -72,6 +72,36 @@ In order for new customers to purchase paid plans with a credit card, you must c
 - [Configure Stripe as the billing provider](https://www.moesif.com/docs/developer-portal/configuring-stripe-as-a-billing-provider/)
 - [Configure a custom billing provider](https://www.moesif.com/docs/developer-portal/set-up-custom-billing-provider/)
 
+#### Subscription enforcement (important)
+
+When a subscription ends, the customer's API keys must stop working. Two things
+have to be in place, and **neither is sufficient on its own**.
+
+**1. The portal revokes keys (this repo).** Set
+`PORTAL_STRIPE_WEBHOOK_SECRET` in `my-dev-portal-api/.env` and subscribe the
+Stripe endpoint to `customer.subscription.deleted`,
+`customer.subscription.updated` and `customer.subscription.paused` as well as
+`invoice.paid` / `invoice.payment_succeeded`. On any of the subscription
+events, `services/subscriptionEnforcement.js` treats a status outside
+`active` / `trialing` / `past_due` as ended and revokes every SN API key for
+that customer (unless they still hold another live subscription, so plan
+changes are safe).
+
+If the secret is unset, `/stripe/webhook` returns 503, nothing is revoked, and
+**a cancelled customer keeps a fully working API key**. The portal UI locking
+up is not enforcement: `requireActiveSubscription` only guards key *creation*
+and *rotation*, and a customer with the key already in their code never opens
+the portal.
+
+**2. SN API rejects the request (`sn-api`, not this repo).** A webhook is
+best-effort — Stripe can deliver late or retry, and the key keeps working for
+that whole window. Only SN API can refuse a request in flight, so the key
+authentication path in SN API must also check the subscription status it was
+given at provisioning time (`subscription_status`, `current_period_end`,
+`cancel_at_period_end` are all sent by
+`services/snApiProvisioning.js`) and reject keys whose subscription is no
+longer live. Treat the portal-side revocation as defence in depth.
+
 ### 3. Configuring API Management or Provisioning Plugin
 
 You'll need to configure a service to generate API keys. This enables new sign ups to access your APIs and meter their usage.
