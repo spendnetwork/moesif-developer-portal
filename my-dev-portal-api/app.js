@@ -392,7 +392,13 @@ app.post(
             planChange: scheduled,
           });
         } catch (planChangeError) {
-          if (planChangeError.code !== "no_active_subscription") {
+          // "No subscription to change" and "no Stripe customer yet" both mean
+          // this is a first-time purchase, not a plan change. Fall through to a
+          // fresh checkout, which creates the customer. Any other error is real.
+          const isFirstTimePurchase =
+            planChangeError.code === "no_active_subscription" ||
+            planChangeError.code === "stripe_customer_not_found";
+          if (!isFirstTimePurchase) {
             throw planChangeError;
           }
         }
