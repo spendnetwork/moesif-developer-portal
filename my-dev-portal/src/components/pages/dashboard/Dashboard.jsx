@@ -3,14 +3,13 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import useSWR from "swr";
 import { PageLoader } from "../../page-loader";
-import MoesifEmbeddedTemplate from "../../moesif/moesif-embedded-template";
 import NoticeBox from "../../notice-box";
 import SVG from "react-inlinesvg";
 import dashIcon from "../../../images/icons/bar-chart.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { welcomeStorageKey } from "../../../common/constants";
 import fetchEmbedChartUrls from "./fetchEmbedChartUrls";
-import UsageSummary from "./UsageSummary";
+import UsageView from "./UsageView";
 
 const isNotProvisionedError = (error) =>
   error?.status === 400 || error?.status === 404;
@@ -49,17 +48,8 @@ const Dashboard = () => {
 
   return (
     <PageLayout>
-      <div className="page-heading">
-        <p className="page-eyebrow">Usage</p>
-        <h1>API activity</h1>
-        <p>
-          Track requests, records returned, attachment activity, and billing
-          usage for your Open Opportunities API access.
-        </p>
-      </div>
-      <UsageSummary idToken={idToken} />
       {!error && (
-        <MoesifEmbeddedTemplate embedTemplateUrls={embedTemplateUrls || []} />
+        <UsageView idToken={idToken} embedTemplateUrls={embedTemplateUrls || []} />
       )}
       {error && isNotProvisionedError(error) && (
         <div className="empty-state">

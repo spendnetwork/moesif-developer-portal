@@ -13,3 +13,6 @@ npm-debug*
 .DS_Store
 *.zip
 *.env
+
+.tools/
+.run/

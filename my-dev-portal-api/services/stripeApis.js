@@ -7,6 +7,11 @@ const {
   metricOrder,
   priceUnitAmountPence,
 } = require("./usageMetrics");
+const {
+  BASIC_ACTIVATION,
+  BASIC_CREDIT_TOP_UP,
+  isBasicPurchaseType,
+} = require("./basicPurchasePolicy");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
 const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
@@ -289,6 +294,80 @@ async function getPlanKeyForProduct(productId) {
   throw new Error(`Product ${productId} is missing plan_key metadata`);
 }
 
+function subscriptionProductIds(subscription) {
+  const productIds = new Set();
+  if (subscription?.metadata?.plan_id) {
+    productIds.add(String(subscription.metadata.plan_id));
+  }
+  for (const item of subscription?.items?.data || []) {
+    const product = item?.price?.product;
+    const productId = typeof product === "string" ? product : product?.id;
+    if (productId) productIds.add(String(productId));
+  }
+  return [...productIds];
+}
+
+async function getSubscriptionPlanKey(
+  subscription,
+  resolveProductPlanKey = getPlanKeyForProduct
+) {
+  const configured = String(subscription?.metadata?.plan_key || "")
+    .trim()
+    .toLowerCase();
+  const productIds = subscriptionProductIds(subscription);
+  if (!productIds.length) {
+    if (["basic", "growth", "enterprise"].includes(configured)) {
+      return configured;
+    }
+    throw stripeLookupError(
+      "subscription_plan_unknown",
+      `Subscription ${subscription?.id || "unknown"} has no plan product`
+    );
+  }
+  const planKeys = new Set(
+    await Promise.all(productIds.map((productId) => resolveProductPlanKey(productId)))
+  );
+  if (planKeys.size !== 1) {
+    throw stripeLookupError(
+      "mixed_subscription_products",
+      `Subscription ${subscription?.id || "unknown"} contains multiple plans`
+    );
+  }
+  const resolved = [...planKeys][0];
+  if (configured && configured !== resolved) {
+    throw stripeLookupError(
+      "subscription_plan_mismatch",
+      `Subscription ${subscription?.id || "unknown"} metadata does not match its prices`
+    );
+  }
+  return resolved;
+}
+
+async function assertBasicTopUpAllowed(
+  liveSubscriptions,
+  resolveSubscriptionPlanKey = getSubscriptionPlanKey
+) {
+  const classified = await Promise.all(
+    (liveSubscriptions || []).map(async (subscription) => ({
+      subscription,
+      planKey: await resolveSubscriptionPlanKey(subscription),
+    }))
+  );
+  const conflicts = classified.filter(({ planKey }) => planKey !== "basic");
+  if (!conflicts.length) return classified;
+
+  throw stripeLookupError(
+    conflicts.length > 1
+      ? "multiple_active_subscriptions"
+      : "active_subscription_exists",
+    "Basic credit cannot be purchased while Growth or Enterprise is active. Switch to Basic at renewal before adding credit.",
+    {
+      subscriptionIds: conflicts.map(({ subscription }) => subscription.id),
+      planKeys: [...new Set(conflicts.map(({ planKey }) => planKey))],
+    }
+  );
+}
+
 // Webhooks identify the customer by id, not email, so subscription enforcement
 // needs a direct lookup (the metadata carries the Auth0 subject).
 function getStripeCustomerById(customerId) {
@@ -385,10 +464,11 @@ async function createStripePlanCheckoutSession(email, planId, authUser, requestI
   return session;
 }
 
-async function createBasicTopUpCheckoutSession(
+async function createBasicCreditCheckoutSession(
   email,
   planId,
   amountGbp,
+  purchaseType,
   authUser,
   requestId
 ) {
@@ -397,6 +477,12 @@ async function createBasicTopUpCheckoutSession(
     throw stripeLookupError(
       "invalid_top_up_plan",
       "Flexible credit purchases are only available for the Basic plan"
+    );
+  }
+  if (!isBasicPurchaseType(purchaseType)) {
+    throw stripeLookupError(
+      "invalid_basic_purchase_type",
+      "Choose Basic before purchasing API credit"
     );
   }
 
@@ -410,17 +496,10 @@ async function createBasicTopUpCheckoutSession(
   const liveSubscriptions = subscriptions.data.filter((candidate) =>
     LIVE_SUBSCRIPTION_STATUSES.includes(candidate.status)
   );
-  if (liveSubscriptions.length) {
-    throw stripeLookupError(
-      liveSubscriptions.length > 1
-        ? "multiple_active_subscriptions"
-        : "active_subscription_exists",
-      "Basic credit cannot be purchased while Growth or Enterprise is active. Switch to Basic at renewal before adding credit."
-    );
-  }
+  await assertBasicTopUpAllowed(liveSubscriptions);
 
   const metadata = {
-    purchase_type: "basic_credit_top_up",
+    purchase_type: purchaseType,
     plan_id: planId,
     plan_key: "basic",
     amount_gbp_pence: String(amountPence),
@@ -447,10 +526,12 @@ async function createBasicTopUpCheckoutSession(
       return_url: getFrontendUrl(
         `/return?session_id={CHECKOUT_SESSION_ID}&plan_id=${encodeURIComponent(
           planId
-        )}&purchase_type=basic_credit_top_up`
+        )}&purchase_type=${encodeURIComponent(purchaseType)}`
       ),
     },
-    requestId ? { idempotencyKey: `basic-top-up-${requestId}` } : undefined
+    requestId
+      ? { idempotencyKey: `${purchaseType}-${requestId}` }
+      : undefined
   );
   return session;
 }
@@ -465,7 +546,9 @@ async function getBasicTopUpTotalPence(customerId) {
   for await (const paymentIntent of paymentIntents) {
     if (
       paymentIntent.status !== "succeeded" ||
-      paymentIntent.metadata?.purchase_type !== "basic_credit_top_up" ||
+      ![BASIC_ACTIVATION, BASIC_CREDIT_TOP_UP].includes(
+        paymentIntent.metadata?.purchase_type
+      ) ||
       paymentIntent.metadata?.moesif_credit_status !== "applied"
     ) {
       continue;
@@ -970,7 +1053,7 @@ module.exports = {
   cancelStripeSubscription,
   hasActiveStripeSubscription,
   createStripePlanCheckoutSession,
-  createBasicTopUpCheckoutSession,
+  createBasicCreditCheckoutSession,
   getBasicTopUpTotalPence,
   markBasicTopUpReconciled,
   prepareStripePlanChange,
@@ -987,6 +1070,9 @@ module.exports = {
   getPlanPrices,
   ensureSubscriptionMeteredPrices,
   buildStripeUsageLines,
+  subscriptionProductIds,
+  getSubscriptionPlanKey,
+  assertBasicTopUpAllowed,
   resolveStripeCustomer,
   LIVE_SUBSCRIPTION_STATUSES,
 };

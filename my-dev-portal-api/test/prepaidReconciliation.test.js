@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   prepaidSubscriptionPeriodEnd,
-  reconcileBasicTopUp,
+  reconcileBasicCreditPurchase,
 } = require("../services/prepaidReconciliation");
 
 function checkoutSession(overrides = {}) {
@@ -21,7 +21,7 @@ function checkoutSession(overrides = {}) {
     payment_intent: { id: "pi_123" },
     client_reference_id: "auth0|123",
     metadata: {
-      purchase_type: "basic_credit_top_up",
+      purchase_type: "basic_activation",
       plan_id: "prod_basic",
       plan_key: "basic",
       amount_gbp_pence: "50000",
@@ -69,7 +69,7 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
   let creditInput;
   let reconciliationMarker;
   const provisioningStatuses = [];
-  const result = await reconcileBasicTopUp(
+  const result = await reconcileBasicCreditPurchase(
     "cs_top_up",
     { sub: "auth0|123", email: "buyer@example.com" },
     dependencies({
@@ -116,7 +116,7 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
 test("a new Basic account stays blocked when Moesif credit creation fails", async () => {
   const provisioningStatuses = [];
   await assert.rejects(
-    reconcileBasicTopUp(
+    reconcileBasicCreditPurchase(
       checkoutSession(),
       { sub: "auth0|123", email: "buyer@example.com" },
       dependencies({
@@ -138,10 +138,17 @@ test("a new Basic account stays blocked when Moesif credit creation fails", asyn
 
 test("adding credit does not suspend an existing active Basic account", async () => {
   const provisioningStatuses = [];
-  await reconcileBasicTopUp(
-    checkoutSession(),
+  const topUpSession = checkoutSession({
+    metadata: {
+      ...checkoutSession().metadata,
+      purchase_type: "basic_credit_top_up",
+    },
+  });
+  await reconcileBasicCreditPurchase(
+    topUpSession,
     { sub: "auth0|123", email: "buyer@example.com" },
     dependencies({
+      verifyStripeSession: async () => topUpSession,
       getSnApiPortalContext: async () => ({
         current_plan_key: "basic",
         billing_status: "active",
@@ -155,6 +162,53 @@ test("adding credit does not suspend an existing active Basic account", async ()
   assert.deepEqual(provisioningStatuses, ["active", "active"]);
 });
 
+test("top-up checkout cannot establish a new Basic plan", async () => {
+  let provisionCalls = 0;
+  const topUpSession = checkoutSession({
+    metadata: {
+      ...checkoutSession().metadata,
+      purchase_type: "basic_credit_top_up",
+    },
+  });
+
+  await assert.rejects(
+    reconcileBasicCreditPurchase(
+      topUpSession,
+      { sub: "auth0|123", email: "buyer@example.com" },
+      dependencies({
+        verifyStripeSession: async () => topUpSession,
+        getSnApiPortalContext: async () => null,
+        provisionSnApiPrepaidCustomer: async () => {
+          provisionCalls += 1;
+        },
+      })
+    ),
+    (error) => error.code === "basic_plan_required"
+  );
+  assert.equal(provisionCalls, 0);
+});
+
+test("Basic activation cannot replace an active Growth plan", async () => {
+  let provisionCalls = 0;
+  await assert.rejects(
+    reconcileBasicCreditPurchase(
+      checkoutSession(),
+      { sub: "auth0|123", email: "buyer@example.com" },
+      dependencies({
+        getSnApiPortalContext: async () => ({
+          current_plan_key: "growth",
+          billing_status: "active",
+        }),
+        provisionSnApiPrepaidCustomer: async () => {
+          provisionCalls += 1;
+        },
+      })
+    ),
+    (error) => error.code === "basic_plan_conflict"
+  );
+  assert.equal(provisionCalls, 0);
+});
+
 test("the prepaid period end stays inside Moesif's 50-year limit", () => {
   const now = new Date("2026-07-30T12:00:00.000Z");
   assert.equal(
@@ -166,7 +220,7 @@ test("the prepaid period end stays inside Moesif's 50-year limit", () => {
 test("a forged top-up amount never provisions or credits access", async () => {
   let provisionCalls = 0;
   await assert.rejects(
-    reconcileBasicTopUp(
+    reconcileBasicCreditPurchase(
       checkoutSession({ amount_total: 100 }),
       { sub: "auth0|123", email: "buyer@example.com" },
       dependencies({
@@ -185,7 +239,7 @@ test("a forged top-up amount never provisions or credits access", async () => {
 test("a Basic top-up is rejected when its four meters are not configured", async () => {
   let creditCalls = 0;
   await assert.rejects(
-    reconcileBasicTopUp(
+    reconcileBasicCreditPurchase(
       checkoutSession(),
       { sub: "auth0|123", email: "buyer@example.com" },
       dependencies({

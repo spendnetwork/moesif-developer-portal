@@ -1,3 +1,8 @@
+const {
+  assertBasicPurchaseAllowed,
+  isBasicCreditSession,
+} = require("./basicPurchasePolicy");
+
 function stripeId(value) {
   return typeof value === "string" ? value : value?.id;
 }
@@ -7,10 +12,6 @@ function prepaidError(code, message, details = {}) {
   error.code = code;
   Object.assign(error, details);
   return error;
-}
-
-function isBasicTopUpSession(session) {
-  return session?.metadata?.purchase_type === "basic_credit_top_up";
 }
 
 function prepaidSubscriptionPeriodEnd(now = new Date()) {
@@ -39,17 +40,18 @@ function validateBasicMeteredPrices(prices) {
   return meteredPrices;
 }
 
-async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
+async function reconcileBasicCreditPurchase(sessionOrId, authUser, deps) {
   const sessionId = stripeId(sessionOrId);
   const session = sessionId
     ? await deps.verifyStripeSession(sessionId)
     : sessionOrId;
-  if (!isBasicTopUpSession(session)) {
+  if (!isBasicCreditSession(session)) {
     throw prepaidError(
-      "not_basic_top_up",
+      "not_basic_credit_purchase",
       "Checkout session is not a Basic credit purchase"
     );
   }
+  const purchaseType = session.metadata.purchase_type;
   if (session.status !== "complete") {
     throw prepaidError("checkout_incomplete", "Checkout is not complete");
   }
@@ -149,6 +151,15 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
   const hasActiveBasicAccess =
     existingContext?.current_plan_key === "basic" &&
     existingContext?.billing_status === "active";
+  assertBasicPurchaseAllowed(
+    purchaseType,
+    {
+      active: Boolean(existingContext?.current_plan_key) &&
+        existingContext?.billing_status === "active",
+      planKey: existingContext?.current_plan_key || null,
+    },
+    { allowIdempotentActivation: true }
+  );
 
   // Create the canonical SN API identity first, but keep API access blocked
   // until both the Moesif subscription and its paid credit exist. Existing
@@ -193,7 +204,10 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
     subscriptionId,
     amountGbp: amountPence / 100,
     transactionId,
-    description: `Open Opportunities Basic top-up from ${session.id}`,
+    description:
+      purchaseType === "basic_activation"
+        ? `Open Opportunities Basic activation from ${session.id}`
+        : `Open Opportunities Basic top-up from ${session.id}`,
   });
   const provisioned = await deps.provisionSnApiPrepaidCustomer({
     authUser: identity,
@@ -208,7 +222,7 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
 
   return {
     active: true,
-    purchaseType: "basic_credit_top_up",
+    purchaseType,
     customer,
     planKey,
     amountPence,
@@ -218,9 +232,8 @@ async function reconcileBasicTopUp(sessionOrId, authUser, deps) {
 }
 
 module.exports = {
-  isBasicTopUpSession,
   prepaidError,
   prepaidSubscriptionPeriodEnd,
-  reconcileBasicTopUp,
+  reconcileBasicCreditPurchase,
   validateBasicMeteredPrices,
 };
