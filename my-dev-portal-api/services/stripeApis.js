@@ -14,9 +14,14 @@ const {
 } = require("./basicPurchasePolicy");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
-const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
+// Stale-while-revalidate cache. Within FRESH the cached value is served as-is;
+// between FRESH and STALE_MAX it is served immediately and refreshed in the
+// background; beyond STALE_MAX (or on a cold miss) we block on a fresh fetch.
+const USAGE_SUMMARY_FRESH_TTL_MS = 3 * 60 * 1000;
+const USAGE_SUMMARY_STALE_TTL_MS = 30 * 60 * 1000;
 const USAGE_SUMMARY_CACHE_MAX_ENTRIES = 1000;
 const usageSummaryCache = new Map();
+const usageSummaryInflight = new Map();
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
 const BASIC_TOP_UP_MIN_AMOUNT_GBP = 1;
 
@@ -56,7 +61,7 @@ function cacheUsageSummary(cacheKey, summary) {
   const now = Date.now();
   if (usageSummaryCache.size >= USAGE_SUMMARY_CACHE_MAX_ENTRIES) {
     for (const [key, value] of usageSummaryCache) {
-      if (now - value.fetchedAt >= USAGE_SUMMARY_CACHE_TTL_MS) {
+      if (now - value.fetchedAt >= USAGE_SUMMARY_STALE_TTL_MS) {
         usageSummaryCache.delete(key);
       }
     }
@@ -917,13 +922,7 @@ async function ensureCreditGrant(customerId, planKey, { currency = "gbp", marker
 }
 
 // Aggregate current-period spend + credit balance for the usage dashboard.
-async function getUsageSummary(email, authUser) {
-  const cacheKey = authUser?.sub || email?.toLowerCase();
-  const cached = cacheKey ? usageSummaryCache.get(cacheKey) : null;
-  if (cached && Date.now() - cached.fetchedAt < USAGE_SUMMARY_CACHE_TTL_MS) {
-    return cached.summary;
-  }
-
+async function computeUsageSummary(email, authUser) {
   const { customer, subscription } = await getActiveStripeSubscription(
     email,
     authUser?.sub,
@@ -1006,8 +1005,45 @@ async function getUsageSummary(email, authUser) {
     lines,
     credit,
   };
-  cacheUsageSummary(cacheKey, summary);
   return summary;
+}
+
+// Coalesced background refresh: only one fetch per cache key is ever in flight.
+function refreshUsageSummary(cacheKey, email, authUser) {
+  if (cacheKey && usageSummaryInflight.has(cacheKey)) {
+    return usageSummaryInflight.get(cacheKey);
+  }
+  const promise = computeUsageSummary(email, authUser)
+    .then((summary) => {
+      cacheUsageSummary(cacheKey, summary);
+      return summary;
+    })
+    .finally(() => {
+      if (cacheKey) usageSummaryInflight.delete(cacheKey);
+    });
+  if (cacheKey) usageSummaryInflight.set(cacheKey, promise);
+  return promise;
+}
+
+// Stale-while-revalidate: never block the caller when we have a usable cached
+// value. A cold miss (or a value older than STALE_MAX) blocks on a fresh fetch.
+async function getUsageSummary(email, authUser) {
+  const cacheKey = authUser?.sub || email?.toLowerCase();
+  const cached = cacheKey ? usageSummaryCache.get(cacheKey) : null;
+  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
+
+  if (cached && age < USAGE_SUMMARY_FRESH_TTL_MS) {
+    return cached.summary;
+  }
+  if (cached && age < USAGE_SUMMARY_STALE_TTL_MS) {
+    // Serve the stale value immediately; refresh in the background. Errors are
+    // swallowed so a transient upstream failure keeps serving the last good copy.
+    refreshUsageSummary(cacheKey, email, authUser).catch((error) =>
+      console.error("Usage summary background refresh failed:", error.message)
+    );
+    return cached.summary;
+  }
+  return refreshUsageSummary(cacheKey, email, authUser);
 }
 
 function constructStripeEvent(rawBody, signature, secret) {
