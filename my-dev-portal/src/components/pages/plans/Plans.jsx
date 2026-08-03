@@ -1,17 +1,12 @@
 import React, { useEffect } from "react";
 
-import { PageLayout } from "../../page-layout";
-import MoesifPlans from "./MoesifPlans";
+import PlansView from "./PlansView";
 
-function Plans(props) {
+function Plans() {
   useEffect(() => {
     window?.moesif?.track("viewed-plans-page");
   }, []);
-  return (
-    <PageLayout>
-      <MoesifPlans skipExample />
-    </PageLayout>
-  );
+  return <PlansView />;
 }
 
 export default Plans;
