@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 
 import { PageLayout } from "../../page-layout";
@@ -75,17 +76,26 @@ function catalogPlanKey(plan) {
 }
 
 export default function PlansView() {
-  const { idToken, user } = useAuthCombined();
+  const { idToken } = useAuthCombined();
   const { plans, plansLoading } = usePlans();
   const { subscriptions, finishedLoading } = useSubscriptions({ idToken });
 
   const navigate = useNavigate();
   const [pending, setPending] = useState(null); // tier key awaiting confirm
-  const [scheduled, setScheduled] = useState(null); // tier name scheduled
+  const [scheduled, setScheduled] = useState(null); // tier key scheduled
   const [busy, setBusy] = useState(false);
-  const [compare, setCompare] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
+
+  // Lock background scroll while the confirm dialog is open.
+  useEffect(() => {
+    if (!pending) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [pending]);
 
   const productByKey = useMemo(() => {
     const map = {};
@@ -119,22 +129,22 @@ export default function PlansView() {
   };
 
   async function requestChange(tierKey) {
-    setBusy(true);
     setError("");
     const productId = productByKey[tierKey];
     if (!productId) {
-      setBusy(false);
       setError("That plan is not available right now. Please try again shortly.");
       return;
     }
 
     // No active subscription yet -> take them through checkout to subscribe.
     if (!hasActive) {
+      setPending(null);
       navigate(`/checkout?plan_id_to_purchase=${encodeURIComponent(productId)}`);
       return;
     }
 
     // Active subscription -> schedule a plan change for period end.
+    setBusy(true);
     try {
       const result = await apiRequest(
         `/create-stripe-checkout-session?plan_id=${encodeURIComponent(productId)}`,
@@ -146,6 +156,7 @@ export default function PlansView() {
         setPending(null);
         flash("Plan switch scheduled");
       } else if (result?.clientSecret) {
+        setPending(null);
         navigate(`/checkout?plan_id_to_purchase=${encodeURIComponent(productId)}`);
       } else {
         setPending(null);
@@ -156,6 +167,7 @@ export default function PlansView() {
         e.message ||
           "We could not schedule the plan change. Please try again shortly."
       );
+      setPending(null);
     } finally {
       setBusy(false);
     }
@@ -167,29 +179,13 @@ export default function PlansView() {
   return (
     <PageLayout>
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            gap: 24,
-            marginBottom: 28,
-          }}
-        >
-          <div>
-            <div style={styles.eyebrow}>Pricing</div>
-            <h1 style={styles.h1}>Open Opportunities API plans</h1>
-            <p style={styles.lead}>
-              Prepay to lower every unit rate. Changes take effect at the end of
-              your billing period.
-            </p>
-          </div>
-          <button
-            onClick={() => setCompare((v) => !v)}
-            style={styles.btnOutlineSm}
-          >
-            {compare ? "Hide differences" : "Highlight differences"}
-          </button>
+        <div style={{ marginBottom: 28 }}>
+          <div style={styles.eyebrow}>Pricing</div>
+          <h1 style={styles.h1}>Open Opportunities API plans</h1>
+          <p style={styles.lead}>
+            Prepay to lower every unit rate. Changes take effect at the end of
+            your billing period.
+          </p>
         </div>
 
         {error && (
@@ -227,7 +223,6 @@ export default function PlansView() {
         >
           {TIERS.map((tier) => {
             const isCurrent = currentPlan === tier.key;
-            const better = compare && tier.key !== "basic";
             return (
               <div
                 key={tier.key}
@@ -247,13 +242,7 @@ export default function PlansView() {
                   {tier.rates.map(([label, value]) => (
                     <div key={label} style={styles.rateRow}>
                       <span style={{ color: C.muted }}>{label}</span>
-                      <span
-                        style={
-                          better
-                            ? styles.rateValueDiff
-                            : { color: C.head, fontVariantNumeric: "tabular-nums" }
-                        }
-                      >
+                      <span style={{ color: C.head, fontVariantNumeric: "tabular-nums" }}>
                         {value}
                       </span>
                     </div>
@@ -285,78 +274,84 @@ export default function PlansView() {
                     disabled={busy}
                     onClick={() => setPending(tier.key)}
                   >
-                    Switch to {tier.name}
+                    {hasActive ? `Switch to ${tier.name}` : `Choose ${tier.name}`}
                   </button>
                 )}
               </div>
             );
           })}
         </div>
-
-        <div style={styles.compareHint}>
-          <span
-            style={{
-              width: 22,
-              height: 0,
-              borderTop: `1px dashed #C9D6CF`,
-              display: "inline-block",
-            }}
-          />
-          Toggle “Highlight differences” to mark every rate that improves on
-          Basic.
-        </div>
       </div>
 
-      {pendingTier && (
-        <div style={styles.backdrop} onClick={() => !busy && setPending(null)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalTitle}>Switch to {pendingTier.name}?</div>
-            <p style={styles.modalLead}>
-              The change is scheduled for the end of your current billing period.
-              Nothing changes today and your existing credit carries over.
-            </p>
-            <div style={styles.modalSummary}>
-              <div style={styles.summaryRow}>
-                <span style={{ color: C.muted }}>New commitment</span>
-                <span style={{ color: C.head }}>{pendingTier.commitment}</span>
+      {pendingTier &&
+        createPortal(
+          <div style={styles.backdrop} onClick={() => !busy && setPending(null)}>
+            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalTitle}>
+                {hasActive
+                  ? `Switch to ${pendingTier.name}?`
+                  : `Subscribe to ${pendingTier.name}`}
               </div>
-              {pendingTier.rates.slice(0, 2).map(([label, value]) => (
-                <div key={label} style={styles.summaryRow}>
-                  <span style={{ color: C.muted }}>{label}</span>
-                  <span style={{ color: C.head }}>{value}</span>
+              <p style={styles.modalLead}>
+                {hasActive
+                  ? "The change is scheduled for the end of your current billing period. Nothing changes today and your existing credit carries over."
+                  : `You'll continue to secure checkout to start your ${pendingTier.name} subscription.`}
+              </p>
+              <div style={styles.modalSummary}>
+                <div style={styles.summaryRow}>
+                  <span style={{ color: C.muted }}>Commitment</span>
+                  <span style={{ color: C.head }}>{pendingTier.commitment}</span>
                 </div>
-              ))}
+                {pendingTier.rates.slice(0, 2).map(([label, value]) => (
+                  <div key={label} style={styles.summaryRow}>
+                    <span style={{ color: C.muted }}>{label}</span>
+                    <span style={{ color: C.head }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+              {hasActive && (
+                <p style={styles.modalFine}>
+                  Usage before the change is billed at your current rates. Any
+                  prepaid balance is prorated onto the new plan.
+                </p>
+              )}
+              <div style={styles.modalActions}>
+                <button
+                  style={styles.btnOutlineAuto}
+                  onClick={() => setPending(null)}
+                  disabled={busy}
+                >
+                  {hasActive ? "Keep current plan" : "Cancel"}
+                </button>
+                <button
+                  style={styles.btnPrimaryAuto}
+                  onClick={() => requestChange(pendingTier.key)}
+                  disabled={busy}
+                >
+                  {busy
+                    ? "Working…"
+                    : hasActive
+                      ? "Schedule change"
+                      : "Continue to checkout"}
+                </button>
+              </div>
             </div>
-            <p style={styles.modalFine}>
-              Usage before the change is billed at your current rates. Any
-              prepaid balance is prorated onto the new plan.
-            </p>
-            <div style={styles.modalActions}>
-              <button style={styles.btnOutline} onClick={() => setPending(null)} disabled={busy}>
-                Keep current plan
-              </button>
-              <button
-                style={styles.btnPrimary}
-                onClick={() => requestChange(pendingTier.key)}
-                disabled={busy}
-              >
-                {busy ? "Scheduling…" : hasActive ? "Schedule change" : "Continue"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
 
-      {toast && (
-        <div style={styles.toast}>
-          <span style={styles.toastDot}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.successText} strokeWidth="2">
-              <path d="M6 12.5l4 4 8-9" />
-            </svg>
-          </span>
-          <span style={{ fontSize: 13.5, color: C.body }}>{toast}</span>
-        </div>
-      )}
+      {toast &&
+        createPortal(
+          <div style={styles.toast}>
+            <span style={styles.toastDot}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.successText} strokeWidth="2">
+                <path d="M6 12.5l4 4 8-9" />
+              </svg>
+            </span>
+            <span style={{ fontSize: 13.5, color: C.body }}>{toast}</span>
+          </div>,
+          document.body
+        )}
     </PageLayout>
   );
 }
@@ -408,13 +403,6 @@ const styles = {
     borderBottom: `1px solid ${C.lineSoft}`,
   },
   rateRow: { display: "flex", justifyContent: "space-between", fontSize: 13.5 },
-  rateValueDiff: {
-    color: C.green,
-    background: "#F0FBEE",
-    borderRadius: 6,
-    padding: "1px 6px",
-    fontVariantNumeric: "tabular-nums",
-  },
   note: { margin: "18px 0 22px", fontSize: 13, lineHeight: 1.55, color: C.muted },
   btnPrimary: {
     width: "100%",
@@ -460,14 +448,24 @@ const styles = {
     borderRadius: 8,
     cursor: "default",
   },
-  btnOutlineSm: {
+  btnPrimaryAuto: {
+    background: C.green,
+    border: `1px solid ${C.green}`,
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: 500,
+    padding: "11px 18px",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  btnOutlineAuto: {
     background: "transparent",
     border: `1px solid #C9D6CF`,
     color: C.head,
-    fontSize: 13,
-    padding: "9px 14px",
+    fontSize: 14,
+    fontWeight: 500,
+    padding: "11px 18px",
     borderRadius: 8,
-    whiteSpace: "nowrap",
     cursor: "pointer",
   },
   scheduledBanner: {
@@ -498,18 +496,10 @@ const styles = {
     marginBottom: 20,
     fontSize: 14,
   },
-  compareHint: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    marginTop: 20,
-    fontSize: 12.5,
-    color: C.muted,
-  },
   backdrop: {
     position: "fixed",
     inset: 0,
-    zIndex: 70,
+    zIndex: 1000,
     background: "rgba(35,56,58,0.42)",
     display: "flex",
     alignItems: "center",
@@ -544,7 +534,7 @@ const styles = {
     position: "fixed",
     right: 24,
     bottom: 24,
-    zIndex: 60,
+    zIndex: 1001,
     display: "flex",
     alignItems: "center",
     gap: 10,
