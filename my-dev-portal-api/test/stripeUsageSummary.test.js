@@ -3,7 +3,17 @@ const assert = require("node:assert/strict");
 
 process.env.STRIPE_API_KEY ||= "sk_test_placeholder";
 
-const { buildStripeUsageLines } = require("../services/stripeApis");
+const {
+  buildStripeUsageLines,
+  isMissingStripeCustomer,
+} = require("../services/stripeApis");
+
+test("recognizes Stripe's missing-customer responses as stale references", () => {
+  assert.equal(isMissingStripeCustomer({ code: "resource_missing" }), true);
+  assert.equal(isMissingStripeCustomer({ statusCode: 404 }), true);
+  assert.equal(isMissingStripeCustomer({ status: 404 }), true);
+  assert.equal(isMissingStripeCustomer({ code: "rate_limit" }), false);
+});
 
 function meteredPrice(id, nickname, metric, unitAmount) {
   return {

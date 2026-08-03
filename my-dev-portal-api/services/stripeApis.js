@@ -137,6 +137,14 @@ function stripeLookupError(code, message, details = {}) {
   return error;
 }
 
+function isMissingStripeCustomer(error) {
+  return (
+    error?.code === "resource_missing" ||
+    error?.statusCode === 404 ||
+    error?.status === 404
+  );
+}
+
 function assertCustomerIdentity(customer, { email, authUserId }) {
   const customerEmail = String(customer?.email || "").trim().toLowerCase();
   const expectedEmail = String(email || "").trim().toLowerCase();
@@ -157,17 +165,25 @@ function assertCustomerIdentity(customer, { email, authUserId }) {
 
 async function resolveStripeCustomer(email, authUserId, preferredCustomerId) {
   if (preferredCustomerId) {
-    const preferred = await stripe.customers.retrieve(preferredCustomerId);
-    if (preferred.deleted) {
-      throw stripeLookupError("stripe_customer_not_found", "Stripe customer was deleted");
+    let preferred;
+    try {
+      preferred = await stripe.customers.retrieve(preferredCustomerId);
+    } catch (error) {
+      if (!isMissingStripeCustomer(error)) throw error;
     }
-    assertCustomerIdentity(preferred, { email, authUserId });
-    if (authUserId && preferred.metadata?.authUserId !== authUserId) {
-      return stripe.customers.update(preferred.id, {
-        metadata: { authUserId },
-      });
+
+    // A cached SN API context can briefly retain a deleted Stripe customer
+    // ID. Treat that reference as stale and continue with the canonical email
+    // lookup so a brand-new account resolves to "not subscribed" normally.
+    if (preferred && !preferred.deleted) {
+      assertCustomerIdentity(preferred, { email, authUserId });
+      if (authUserId && preferred.metadata?.authUserId !== authUserId) {
+        return stripe.customers.update(preferred.id, {
+          metadata: { authUserId },
+        });
+      }
+      return preferred;
     }
-    return preferred;
   }
 
   const customers = await stripe.customers.search({
@@ -1063,6 +1079,7 @@ module.exports = {
   attachPlanMeteredPrices,
   updateStripeCustomerIdentity,
   getStripeCustomerById,
+  isMissingStripeCustomer,
   listStripeSubscriptions,
   getActiveStripeSubscription,
   getPlanKeyForProduct,

@@ -182,6 +182,25 @@ test("no live Stripe subscription keeps API keys locked", async () => {
   });
 });
 
+test("a new Auth0 user without a Stripe customer is not an error", async () => {
+  const noCustomer = new Error("Stripe customer not found");
+  noCustomer.code = "stripe_customer_not_found";
+  const result = await resolveAuthenticatedEntitlement(
+    { sub: "auth0|new", email: "new@example.com" },
+    null,
+    dependencies({
+      getActiveStripeSubscription: async () => {
+        throw noCustomer;
+      },
+    })
+  );
+
+  assert.deepEqual(result, {
+    active: false,
+    reason: "stripe_customer_not_found",
+  });
+});
+
 test("prepaid Basic context unlocks keys without a recurring Stripe subscription", async () => {
   let stripeLookups = 0;
   const result = await resolveAuthenticatedEntitlement(
