@@ -6,6 +6,7 @@ process.env.STRIPE_API_KEY ||= "sk_test_placeholder";
 const {
   buildStripeUsageLines,
   isMissingStripeCustomer,
+  mergeMoesifAndStripeUsageLines,
 } = require("../services/stripeApis");
 
 test("recognizes Stripe's missing-customer responses as stale references", () => {
@@ -92,6 +93,63 @@ test("Stripe usage lines use the selected subscription's four prices", () => {
       { key: "records_returned", rate: 10, quantity: 100, amount: 1000 },
       { key: "aggregate_call", rate: 35, quantity: 0, amount: 0 },
       { key: "attachment", rate: 50, quantity: 0, amount: 0 },
+    ]
+  );
+});
+
+test("partial Moesif reports are completed with Stripe usage", () => {
+  const moesifLines = [
+    {
+      key: "api_call",
+      label: "API calls",
+      rate: 20,
+      quantity: 14,
+      amount: 280,
+      reported: true,
+    },
+    {
+      key: "records_returned",
+      label: "Records returned",
+      rate: 10,
+      quantity: 0,
+      amount: 0,
+      reported: false,
+    },
+  ];
+  const stripeLines = [
+    {
+      key: "api_call",
+      label: "API calls",
+      rate: 20,
+      quantity: 12,
+      amount: 240,
+    },
+    {
+      key: "records_returned",
+      label: "Records returned",
+      rate: 10,
+      quantity: 100,
+      amount: 1000,
+    },
+  ];
+
+  assert.deepEqual(
+    mergeMoesifAndStripeUsageLines(moesifLines, stripeLines),
+    [
+      {
+        key: "api_call",
+        label: "API calls",
+        rate: 20,
+        quantity: 14,
+        amount: 280,
+      },
+      {
+        key: "records_returned",
+        label: "Records returned",
+        rate: 10,
+        quantity: 100,
+        amount: 1000,
+      },
     ]
   );
 });

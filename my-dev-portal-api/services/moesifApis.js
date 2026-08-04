@@ -2,6 +2,10 @@ const moesif = require("moesif-nodejs");
 
 const moesifManagementToken = process.env.MOESIF_MANAGEMENT_TOKEN;
 const moesifApiEndpoint = "https://api.moesif.com";
+const EMBED_WORKSPACE_CACHE_TTL_MS = 55 * 1000;
+const EMBED_WORKSPACE_CACHE_MAX_ENTRIES = 2000;
+const embedWorkspaceCache = new Map();
+const embedWorkspaceInflight = new Map();
 
 function basicPrepaidSubscriptionId(stripeCustomerId) {
   return `openopps_basic_prepaid_${stripeCustomerId}`;
@@ -314,7 +318,7 @@ async function getMoesifEventCount({ companyId, from, to }) {
   );
 }
 
-async function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
+async function createEmbeddedWorkspaceInfo({ companyId, workspaceId }) {
   if (!workspaceId) {
     const error = new Error("Moesif embedded workspace is not configured");
     error.code = "moesif_workspace_not_configured";
@@ -346,6 +350,27 @@ async function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
     }
   );
   return readMoesifResponse(response, "Moesif embedded workspace token");
+}
+
+async function getInfoForEmbeddedWorkspaces({ companyId, workspaceId }) {
+  const key = `${companyId}:${workspaceId}`;
+  const cached = embedWorkspaceCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < EMBED_WORKSPACE_CACHE_TTL_MS) {
+    return cached.info;
+  }
+  if (embedWorkspaceInflight.has(key)) return embedWorkspaceInflight.get(key);
+
+  const promise = createEmbeddedWorkspaceInfo({ companyId, workspaceId })
+    .then((info) => {
+      if (embedWorkspaceCache.size >= EMBED_WORKSPACE_CACHE_MAX_ENTRIES) {
+        embedWorkspaceCache.delete(embedWorkspaceCache.keys().next().value);
+      }
+      embedWorkspaceCache.set(key, { info, fetchedAt: Date.now() });
+      return info;
+    })
+    .finally(() => embedWorkspaceInflight.delete(key));
+  embedWorkspaceInflight.set(key, promise);
+  return promise;
 }
 
 module.exports = {

@@ -6,12 +6,11 @@ import { authedFetcher } from "../lib/portal-api";
 // via the portal backend. Cached with SWR.
 export default function useUsageSummary({ idToken }) {
   const key = idToken ? ["/usage-summary", idToken] : null;
-  // The backend serves a stale-while-revalidate cache, so the numbers only
-  // change roughly every few minutes. Poll on that cadence and refresh when the
-  // user returns to the tab, rather than hammering the endpoint every minute.
+  // Moesif usage is cached independently from the slower Stripe ledger reads,
+  // so this can poll frequently without multiplying Stripe API traffic.
   const { data, error, isLoading } = useSWR(key, authedFetcher, {
-    refreshInterval: 180000,
-    dedupingInterval: 30000,
+    refreshInterval: 15000,
+    dedupingInterval: 5000,
     revalidateOnFocus: true,
     keepPreviousData: true,
   });

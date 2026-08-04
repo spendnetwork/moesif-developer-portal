@@ -10,6 +10,7 @@ const {
   cancelStripeSubscription,
   ensureCreditGrant,
   getUsageSummary,
+  invalidateUsageSummary,
   constructStripeEvent,
   grantCommitmentFromInvoice,
   getStripeCustomerById,
@@ -506,12 +507,14 @@ app.post(
             prepaidReconciliationDeps
           );
           invalidateBasicUsageSummary();
+          invalidateUsageSummary();
         } else {
           await reconcileCheckoutSession(
             event.data.object,
             null,
             subscriptionReconciliationDeps
           );
+          invalidateUsageSummary();
         }
       } catch (reconciliationError) {
         if (reconciliationError.code === "checkout_payment_pending") {
@@ -526,6 +529,7 @@ app.post(
       try {
         await grantCommitmentFromInvoice(event.data.object);
         await processPaidInvoice(event.data.object, planChangeDeps);
+        invalidateUsageSummary();
       } catch (planChangeError) {
         console.error("Paid invoice plan-change processing failed", planChangeError);
         return res.status(500).json({ message: "Plan change processing failed" });
@@ -535,6 +539,7 @@ app.post(
     if (event.type === "invoice.payment_failed") {
       try {
         await processFailedInvoice(event.data.object, planChangeDeps);
+        invalidateUsageSummary();
       } catch (planChangeError) {
         console.error("Failed invoice plan-change processing failed", planChangeError);
         return res.status(500).json({ message: "Plan change processing failed" });
@@ -547,6 +552,7 @@ app.post(
           event.data.object,
           subscriptionReconciliationDeps
         );
+        invalidateUsageSummary();
         // Returning 500 asks Stripe to retry, which is what we want when keys
         // are still live: revocation is the whole point of this handler.
         if (result?.failed?.length) {
@@ -727,6 +733,7 @@ app.post(
         );
         invalidatePortalContext(req.user.sub);
         invalidateBasicUsageSummary();
+        invalidateUsageSummary();
         return res.status(201).json({
           status: "complete",
           purchase_type: reconciled.purchaseType,
@@ -750,6 +757,7 @@ app.post(
         subscriptionReconciliationDeps
       );
       invalidatePortalContext(req.user.sub);
+      invalidateUsageSummary();
       return res.status(201).json({
         status: "complete",
         customer_email: reconciled.customer.email,
