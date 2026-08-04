@@ -79,10 +79,20 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
   const loading = usageLoading && !usage;
   const currency = usage?.currency || "GBP";
   const credit = usage?.credit || null;
+  const isPrepaidBasic = usage?.billingModel === "prepaid_credit";
+  const hasCurrentEstimate =
+    !isPrepaidBasic && Number.isFinite(credit?.projectedRemaining);
+  const displayedRemaining = hasCurrentEstimate
+    ? credit.projectedRemaining
+    : credit?.remaining;
+  const displayedUsed =
+    hasCurrentEstimate && Number.isFinite(credit?.granted)
+      ? Math.max(0, credit.granted - credit.projectedRemaining)
+      : credit?.used;
 
   const usedPct =
     credit && credit.granted > 0
-      ? Math.min(100, Math.round((credit.used / credit.granted) * 100))
+      ? Math.min(100, Math.round(((credit.used || 0) / credit.granted) * 100))
       : 0;
   const projectedPct =
     credit && credit.granted > 0
@@ -146,13 +156,18 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
 
             {credit && (
               <div style={styles.metricCard}>
-                <div style={styles.metricLabel}>Credit remaining</div>
+                <div style={styles.metricLabel}>
+                  {hasCurrentEstimate
+                    ? "Estimated credit remaining"
+                    : "Credit remaining"}
+                </div>
                 <div style={styles.metricValue}>
-                  {formatMoney(credit.remaining, currency)}
+                  {formatMoney(displayedRemaining, currency)}
                 </div>
                 <div style={{ ...styles.metricSub, marginBottom: 14 }}>
-                  {formatMoney(credit.used, currency)} of{" "}
-                  {formatMoney(credit.granted, currency)} used
+                  {formatMoney(displayedUsed, currency)} of{" "}
+                  {formatMoney(credit.granted, currency)}{" "}
+                  {hasCurrentEstimate ? "estimated used" : "used"}
                 </div>
                 <div
                   role="progressbar"
@@ -164,16 +179,31 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
                   <div style={{ ...styles.barProjected, width: `${projectedPct}%` }} />
                   <div style={{ ...styles.barFill, width: `${usedPct}%` }} />
                 </div>
-                <div style={styles.projRow}>
-                  <span style={{ fontSize: 12.5, fontStyle: "italic", color: C.muted }}>
-                    Projected after this period:{" "}
-                    {formatMoney(credit.projectedRemaining, currency)}
-                  </span>
-                  <span style={styles.legend}>
-                    <span style={{ width: 8, height: 8, borderRadius: 999, background: C.mint }} />
-                    projected
-                  </span>
-                </div>
+                {hasCurrentEstimate && (
+                  <div style={styles.projRow}>
+                    <span
+                      style={{
+                        fontSize: 12.5,
+                        fontStyle: "italic",
+                        color: C.muted,
+                      }}
+                    >
+                      Stripe posted balance:{" "}
+                      {formatMoney(credit.remaining, currency)}
+                    </span>
+                    <span style={styles.legend}>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 999,
+                          background: C.mint,
+                        }}
+                      />
+                      estimated
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>

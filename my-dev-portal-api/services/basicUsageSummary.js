@@ -1,9 +1,13 @@
 // Stale-while-revalidate cache (see stripeApis.js for the same pattern).
-const BASIC_USAGE_FRESH_TTL_MS = 3 * 60 * 1000;
-const BASIC_USAGE_STALE_TTL_MS = 30 * 60 * 1000;
+const BASIC_USAGE_FRESH_TTL_MS = 10 * 1000;
+const BASIC_USAGE_STALE_TTL_MS = 5 * 60 * 1000;
 const BASIC_USAGE_CACHE_MAX_ENTRIES = 1000;
 const basicUsageCache = new Map();
 const basicUsageInflight = new Map();
+const BASIC_REFERENCE_FRESH_TTL_MS = 3 * 60 * 1000;
+const BASIC_REFERENCE_STALE_TTL_MS = 30 * 60 * 1000;
+const basicReferenceCache = new Map();
+const basicReferenceInflight = new Map();
 const {
   METRIC_LABELS,
   finiteNumber,
@@ -114,6 +118,7 @@ function summarizeMeterReports(reportBody, priceDefinitions) {
       rate: definition.unitAmountPence,
       quantity,
       amount,
+      reported: entries.length > 0,
     });
   }
 
@@ -147,7 +152,9 @@ function buildBasicUsageSummary({
       ? Math.max(0, purchasedPence - remainingPence)
       : null;
   const lines = analyticsAvailable
-    ? summarizeMeterReports(reports, basicPriceDefinitions(planCatalogue))
+    ? summarizeMeterReports(reports, basicPriceDefinitions(planCatalogue)).map(
+        ({ reported: _reported, ...line }) => line
+      )
     : [];
   const apiCalls = lines.find((line) => line.key === "api_call");
   const periodStart = unixSeconds(
@@ -211,53 +218,118 @@ function setCached(key, summary) {
   basicUsageCache.set(key, { summary, fetchedAt: now });
 }
 
+function setReferenceCached(key, reference) {
+  const now = Date.now();
+  if (basicReferenceCache.size >= BASIC_USAGE_CACHE_MAX_ENTRIES) {
+    for (const [candidate, value] of basicReferenceCache) {
+      if (now - value.fetchedAt >= BASIC_REFERENCE_STALE_TTL_MS) {
+        basicReferenceCache.delete(candidate);
+      }
+    }
+    if (basicReferenceCache.size >= BASIC_USAGE_CACHE_MAX_ENTRIES) {
+      basicReferenceCache.delete(basicReferenceCache.keys().next().value);
+    }
+  }
+  basicReferenceCache.set(key, { reference, fetchedAt: now });
+}
+
+async function computeBasicReferenceData(context, deps) {
+  const results = await Promise.allSettled([
+    deps.getBasicTopUpTotalPence(context.stripeCustomerId),
+    deps.getPlansFromMoesif(),
+  ]);
+  return {
+    totalPurchasedPence:
+      results[0].status === "fulfilled" ? results[0].value : null,
+    planCatalogue: results[1].status === "fulfilled" ? results[1].value : [],
+    plansAvailable: results[1].status === "fulfilled",
+    failures: results
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason),
+  };
+}
+
+function refreshBasicReferenceData(key, context, deps) {
+  if (basicReferenceInflight.has(key)) return basicReferenceInflight.get(key);
+  const promise = computeBasicReferenceData(context, deps)
+    .then((reference) => {
+      setReferenceCached(key, reference);
+      return reference;
+    })
+    .finally(() => basicReferenceInflight.delete(key));
+  basicReferenceInflight.set(key, promise);
+  return promise;
+}
+
+async function getBasicReferenceData(context, deps) {
+  const key = context.stripeCustomerId;
+  const cached = basicReferenceCache.get(key);
+  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
+  if (cached && age < BASIC_REFERENCE_FRESH_TTL_MS) {
+    return cached.reference;
+  }
+  if (cached && age < BASIC_REFERENCE_STALE_TTL_MS) {
+    refreshBasicReferenceData(key, context, deps).catch((error) =>
+      console.error("Basic reference refresh failed:", error.message)
+    );
+    return cached.reference;
+  }
+  return refreshBasicReferenceData(key, context, deps);
+}
+
 function invalidateBasicUsageSummary({ companyId, stripeCustomerId } = {}) {
   if (companyId && stripeCustomerId) {
     basicUsageCache.delete(cacheKey({ companyId, stripeCustomerId }));
+    basicReferenceCache.delete(stripeCustomerId);
     return;
   }
   basicUsageCache.clear();
+  basicReferenceCache.clear();
 }
 
 async function computeBasicPrepaidUsageSummary(context, deps) {
-  const balance = await deps.getMoesifPrepaidBalance(context);
+  const [balance, reference] = await Promise.all([
+    deps.getMoesifPrepaidBalance(context),
+    getBasicReferenceData(context, deps),
+  ]);
   const from =
     balance.subscription?.current_period_start ||
     balance.subscription?.subscription_period_start ||
     balance.subscription?.created_at;
   const analytics = await Promise.allSettled([
-    deps.getBasicTopUpTotalPence(context.stripeCustomerId),
     deps.getMoesifBillingReports({
       companyId: context.companyId,
       subscriptionId: balance.subscriptionId,
       from,
       to: new Date().toISOString(),
     }),
-    deps.getPlansFromMoesif(),
     deps.getMoesifEventCount({
       companyId: context.companyId,
       from,
       to: "now",
     }),
   ]);
-  const failures = analytics.filter((result) => result.status === "rejected");
+  const failures = [
+    ...reference.failures,
+    ...analytics
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason),
+  ];
   if (failures.length) {
     console.error(
       "Basic usage analytics partially unavailable",
-      failures.map((result) => result.reason?.code || result.reason?.message)
+      failures.map((error) => error?.code || error?.message)
     );
   }
   const summary = buildBasicUsageSummary({
     balance,
-    totalPurchasedPence:
-      analytics[0].status === "fulfilled" ? analytics[0].value : null,
-    reports: analytics[1].status === "fulfilled" ? analytics[1].value : [],
-    planCatalogue:
-      analytics[2].status === "fulfilled" ? analytics[2].value : [],
+    totalPurchasedPence: reference.totalPurchasedPence,
+    reports: analytics[0].status === "fulfilled" ? analytics[0].value : [],
+    planCatalogue: reference.planCatalogue,
     eventCount:
-      analytics[3].status === "fulfilled" ? analytics[3].value : null,
+      analytics[1].status === "fulfilled" ? analytics[1].value : null,
     analyticsAvailable:
-      analytics[1].status === "fulfilled" && analytics[2].status === "fulfilled",
+      analytics[0].status === "fulfilled" && reference.plansAvailable,
   });
   return summary;
 }

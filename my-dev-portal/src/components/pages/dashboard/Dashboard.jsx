@@ -22,8 +22,8 @@ const Dashboard = () => {
     window?.moesif?.track("viewed-dashboard");
   }, []);
 
-  // Embedded chart URLs are short-lived signed tokens, so cache them for the
-  // session and avoid refetching on window focus.
+  // The token carries an absolute rolling time window. Refresh it periodically
+  // so the embedded workspaces include requests made after the page loaded.
   const embedKey = idToken ? ["embed-charts", idToken] : null;
   const {
     data: embedTemplateUrls,
@@ -31,7 +31,12 @@ const Dashboard = () => {
   } = useSWR(
     embedKey,
     () => fetchEmbedChartUrls({ idToken }),
-    { revalidateOnFocus: false, dedupingInterval: 60000 }
+    {
+      refreshInterval: 60000,
+      revalidateOnFocus: true,
+      dedupingInterval: 30000,
+      keepPreviousData: true,
+    }
   );
 
   if (isLoading || !idToken || (!error && !embedTemplateUrls)) {

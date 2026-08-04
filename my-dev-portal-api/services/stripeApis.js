@@ -18,11 +18,18 @@ const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 // Stale-while-revalidate cache. Within FRESH the cached value is served as-is;
 // between FRESH and STALE_MAX it is served immediately and refreshed in the
 // background; beyond STALE_MAX (or on a cold miss) we block on a fresh fetch.
-const USAGE_SUMMARY_FRESH_TTL_MS = 3 * 60 * 1000;
-const USAGE_SUMMARY_STALE_TTL_MS = 30 * 60 * 1000;
+const USAGE_SUMMARY_FRESH_TTL_MS = 10 * 1000;
+const USAGE_SUMMARY_STALE_TTL_MS = 5 * 60 * 1000;
 const USAGE_SUMMARY_CACHE_MAX_ENTRIES = 1000;
 const usageSummaryCache = new Map();
 const usageSummaryInflight = new Map();
+const STRIPE_USAGE_CONTEXT_FRESH_TTL_MS = 3 * 60 * 1000;
+const STRIPE_USAGE_CONTEXT_STALE_TTL_MS = 30 * 60 * 1000;
+const stripeUsageContextCache = new Map();
+const stripeUsageContextInflight = new Map();
+const STRIPE_PREVIEW_CACHE_TTL_MS = 3 * 60 * 1000;
+const stripePreviewCache = new Map();
+const stripePreviewInflight = new Map();
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
 const BASIC_TOP_UP_MIN_AMOUNT_GBP = 1;
 
@@ -71,6 +78,60 @@ function cacheUsageSummary(cacheKey, summary) {
     }
   }
   usageSummaryCache.set(cacheKey, { summary, fetchedAt: now });
+}
+
+function cacheStripeUsageContext(cacheKey, context) {
+  if (!cacheKey) return;
+  const now = Date.now();
+  if (stripeUsageContextCache.size >= USAGE_SUMMARY_CACHE_MAX_ENTRIES) {
+    for (const [key, value] of stripeUsageContextCache) {
+      if (now - value.fetchedAt >= STRIPE_USAGE_CONTEXT_STALE_TTL_MS) {
+        stripeUsageContextCache.delete(key);
+      }
+    }
+    if (stripeUsageContextCache.size >= USAGE_SUMMARY_CACHE_MAX_ENTRIES) {
+      stripeUsageContextCache.delete(
+        stripeUsageContextCache.keys().next().value
+      );
+    }
+  }
+  stripeUsageContextCache.set(cacheKey, { context, fetchedAt: now });
+}
+
+function invalidateUsageSummary() {
+  usageSummaryCache.clear();
+  stripeUsageContextCache.clear();
+  stripePreviewCache.clear();
+}
+
+async function getStripeInvoicePreview(customerId, subscriptionId) {
+  const cached = stripePreviewCache.get(subscriptionId);
+  if (cached && Date.now() - cached.fetchedAt < STRIPE_PREVIEW_CACHE_TTL_MS) {
+    return cached.preview;
+  }
+  if (stripePreviewInflight.has(subscriptionId)) {
+    return stripePreviewInflight.get(subscriptionId);
+  }
+
+  const promise = stripe.invoices
+    .createPreview({ customer: customerId, subscription: subscriptionId })
+    .then((preview) => {
+      if (stripePreviewCache.size >= USAGE_SUMMARY_CACHE_MAX_ENTRIES) {
+        stripePreviewCache.delete(stripePreviewCache.keys().next().value);
+      }
+      stripePreviewCache.set(subscriptionId, {
+        preview,
+        fetchedAt: Date.now(),
+      });
+      return preview;
+    })
+    .catch((error) => {
+      console.error("Invoice preview failed:", error.message);
+      return null;
+    })
+    .finally(() => stripePreviewInflight.delete(subscriptionId));
+  stripePreviewInflight.set(subscriptionId, promise);
+  return promise;
 }
 
 // A price represents a prepaid commitment (draws down into credit) if it
@@ -945,9 +1006,15 @@ function commitmentMeterDefinitions(subscription) {
   return definitions;
 }
 
-// Aggregate current-period spend + credit balance for the usage dashboard.
-async function computeUsageSummary(email, authUser, options = {}) {
-  const { companyId, getMoesifBillingReports } = options;
+function mergeMoesifAndStripeUsageLines(moesifLines, stripeLines) {
+  const stripeByKey = new Map(stripeLines.map((line) => [line.key, line]));
+  return moesifLines.map(({ reported, ...moesifLine }) => {
+    if (reported) return moesifLine;
+    return stripeByKey.get(moesifLine.key) || moesifLine;
+  });
+}
+
+async function computeStripeUsageContext(email, authUser) {
   const { customer, subscription } = await getActiveStripeSubscription(
     email,
     authUser?.sub,
@@ -965,13 +1032,7 @@ async function computeUsageSummary(email, authUser, options = {}) {
   const periodEndSec =
     periodItem?.current_period_end ?? subscription.current_period_end ?? null;
 
-  const canUseMoesif =
-    Boolean(companyId) && typeof getMoesifBillingReports === "function";
-
-  // Credit balance is always authoritative from Stripe's ledger. Usage lines
-  // come from Moesif (the metering source of truth) when available, which avoids
-  // the slow invoice preview entirely.
-  const [grants, balance, moesifReports] = await Promise.all([
+  const [grants, balance] = await Promise.all([
     stripe.billing.creditGrants
       .list({ customer: customer.id, limit: 100 })
       .catch(() => ({ data: [] })),
@@ -984,39 +1045,101 @@ async function computeUsageSummary(email, authUser, options = {}) {
         },
       })
       .catch(() => null),
-    canUseMoesif
-      ? getMoesifBillingReports({
-          companyId,
-          subscriptionId: subscription.id,
-          from: periodStartSec
-            ? new Date(periodStartSec * 1000).toISOString()
-            : undefined,
-          to: new Date().toISOString(),
-        }).catch((e) => {
-          console.error("Moesif usage reports unavailable:", e.message);
-          return null;
-        })
-      : Promise.resolve(null),
   ]);
+
+  return {
+    customer,
+    subscription,
+    periodStartSec,
+    periodEndSec,
+    grants,
+    balance,
+  };
+}
+
+function refreshStripeUsageContext(cacheKey, email, authUser) {
+  if (cacheKey && stripeUsageContextInflight.has(cacheKey)) {
+    return stripeUsageContextInflight.get(cacheKey);
+  }
+  const promise = computeStripeUsageContext(email, authUser)
+    .then((context) => {
+      cacheStripeUsageContext(cacheKey, context);
+      return context;
+    })
+    .finally(() => {
+      if (cacheKey) stripeUsageContextInflight.delete(cacheKey);
+    });
+  if (cacheKey) stripeUsageContextInflight.set(cacheKey, promise);
+  return promise;
+}
+
+async function getStripeUsageContext(cacheKey, email, authUser) {
+  const cached = cacheKey ? stripeUsageContextCache.get(cacheKey) : null;
+  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
+  if (cached && age < STRIPE_USAGE_CONTEXT_FRESH_TTL_MS) {
+    return cached.context;
+  }
+  if (cached && age < STRIPE_USAGE_CONTEXT_STALE_TTL_MS) {
+    refreshStripeUsageContext(cacheKey, email, authUser).catch((error) =>
+      console.error("Stripe usage context refresh failed:", error.message)
+    );
+    return cached.context;
+  }
+  return refreshStripeUsageContext(cacheKey, email, authUser);
+}
+
+// Aggregate current-period spend + credit balance for the usage dashboard.
+async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
+  const { companyId, getMoesifBillingReports } = options;
+  const {
+    customer,
+    subscription,
+    periodStartSec,
+    periodEndSec,
+    grants,
+    balance,
+  } = await getStripeUsageContext(cacheKey, email, authUser);
+
+  const canUseMoesif =
+    Boolean(companyId) && typeof getMoesifBillingReports === "function";
+  const moesifReports = canUseMoesif
+    ? await getMoesifBillingReports({
+        companyId,
+        subscriptionId: subscription.id,
+        from: periodStartSec
+          ? new Date(periodStartSec * 1000).toISOString()
+          : undefined,
+        to: new Date().toISOString(),
+      }).catch((error) => {
+        console.error("Moesif usage reports unavailable:", error.message);
+        return null;
+      })
+    : null;
 
   let currency = (
     subscription.items?.data?.[0]?.price?.currency || "gbp"
   ).toUpperCase();
 
-  // Prefer Moesif's metered usage. Fall back to Stripe's invoice preview only
-  // when Moesif reports no usage (not synced yet, or the mapping differs), so
-  // the breakdown is never silently wrong.
-  let lines = moesifReports
-    ? summarizeMeterReports(moesifReports, commitmentMeterDefinitions(subscription))
+  // Prefer each available Moesif meter, but fill missing meters from Stripe's
+  // invoice preview so asynchronously generated reports cannot undercount.
+  const moesifLines = moesifReports
+    ? summarizeMeterReports(
+        moesifReports,
+        commitmentMeterDefinitions(subscription)
+      )
     : [];
-  if (!lines.some((line) => line.quantity > 0 || line.amount > 0)) {
-    const preview = await stripe.invoices
-      .createPreview({ customer: customer.id, subscription: subscription.id })
-      .catch((e) => {
-        console.error("Invoice preview failed:", e.message);
-        return null;
-      });
-    lines = buildStripeUsageLines(subscription, preview);
+  const reportsAreComplete =
+    moesifLines.length > 0 && moesifLines.every((line) => line.reported);
+  let lines = moesifLines.map(({ reported: _reported, ...line }) => line);
+  if (!reportsAreComplete) {
+    const preview = await getStripeInvoicePreview(
+      customer.id,
+      subscription.id
+    );
+    const stripeLines = buildStripeUsageLines(subscription, preview);
+    lines = moesifLines.length
+      ? mergeMoesifAndStripeUsageLines(moesifLines, stripeLines)
+      : stripeLines;
     currency = (preview?.currency || currency).toUpperCase();
   }
 
@@ -1086,7 +1209,7 @@ function refreshUsageSummary(cacheKey, email, authUser, options) {
   if (cacheKey && usageSummaryInflight.has(cacheKey)) {
     return usageSummaryInflight.get(cacheKey);
   }
-  const promise = computeUsageSummary(email, authUser, options)
+  const promise = computeUsageSummary(cacheKey, email, authUser, options)
     .then((summary) => {
       cacheUsageSummary(cacheKey, summary);
       return summary;
@@ -1175,6 +1298,7 @@ module.exports = {
   grantCommitmentFromInvoice,
   ensureCreditGrant,
   getUsageSummary,
+  invalidateUsageSummary,
   cancelStripeSubscription,
   hasActiveStripeSubscription,
   createStripePlanCheckoutSession,
@@ -1196,6 +1320,7 @@ module.exports = {
   getPlanPrices,
   ensureSubscriptionMeteredPrices,
   buildStripeUsageLines,
+  mergeMoesifAndStripeUsageLines,
   subscriptionProductIds,
   getSubscriptionPlanKey,
   assertBasicTopUpAllowed,
