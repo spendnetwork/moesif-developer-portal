@@ -689,7 +689,10 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
       );
       return res.status(200).json(summary);
     }
-    const summary = await getUsageSummary(req.user?.email, req.user);
+    const summary = await getUsageSummary(req.user?.email, req.user, {
+      companyId: req.portalContext?.moesif_company_id,
+      getMoesifBillingReports,
+    });
     return res.status(200).json(summary);
   } catch (error) {
     if (error.code === "multiple_active_subscriptions") {
