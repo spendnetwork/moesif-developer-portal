@@ -24,11 +24,12 @@ function formatMoney(minorUnits, currency) {
   }).format(value);
 }
 
-function formatDate(unixSeconds) {
+function formatDate(unixSeconds, withYear = false) {
   if (!unixSeconds) return "";
   return new Intl.DateTimeFormat(undefined, {
     day: "numeric",
     month: "short",
+    ...(withYear ? { year: "numeric" } : {}),
   }).format(new Date(unixSeconds * 1000));
 }
 
@@ -136,7 +137,8 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
               <div style={styles.metricSub}>
                 {usage?.period?.start && usage?.period?.end
                   ? `${formatDate(usage.period.start)} – ${formatDate(
-                      usage.period.end
+                      usage.period.end,
+                      true
                     )}`
                   : "Current billing period"}
               </div>

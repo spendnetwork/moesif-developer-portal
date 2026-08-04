@@ -19,6 +19,12 @@ function unixSeconds(value) {
   return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : null;
 }
 
+function addOneMonth(unixSecondsValue) {
+  const date = new Date(unixSecondsValue * 1000);
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  return Math.floor(date.getTime() / 1000);
+}
+
 function normalizeCollection(body, keys) {
   if (Array.isArray(body)) return body;
   for (const key of keys) {
@@ -149,6 +155,14 @@ function buildBasicUsageSummary({
       balance.subscription?.subscription_period_start ||
       balance.subscription?.created_at
   );
+  // The billing window is the monthly cycle, not "start .. now" (which collapses
+  // to a single day on a fresh subscription). Prefer the cycle end from Moesif,
+  // otherwise one month after the start.
+  const periodEnd =
+    unixSeconds(
+      balance.subscription?.current_period_end ||
+        balance.subscription?.subscription_period_end
+    ) || (periodStart ? addOneMonth(periodStart) : Math.floor(now / 1000));
 
   return {
     hasSubscription: true,
@@ -156,7 +170,7 @@ function buildBasicUsageSummary({
     currency: balance.currency,
     period: {
       start: periodStart,
-      end: Math.floor(now / 1000),
+      end: periodEnd,
     },
     accrued: lines.reduce((total, line) => total + line.amount, 0),
     requestCount: Number.isFinite(eventCount)

@@ -983,21 +983,46 @@ async function computeUsageSummary(email, authUser) {
       used: Math.max(0, granted - ledgerAvailable),
       projectedRemaining: Math.max(0, ledgerAvailable - grossUsage),
     };
+  } else {
+    // Stripe has not finalised a ledger grant yet. Fall back to the commitment
+    // amount on the plan's commitment price so the card still shows how much of
+    // the subscription is left, drawn down by this period's accrued usage.
+    const commitmentItem = subscription.items?.data?.find((item) =>
+      isCommitmentPrice(item.price)
+    );
+    const commitmentMajor = Number(
+      commitmentItem?.price?.metadata?.commitment_amount
+    );
+    const commitmentPence = Number.isFinite(commitmentMajor)
+      ? Math.round(commitmentMajor * 100)
+      : 0;
+    if (commitmentPence > 0) {
+      credit = {
+        granted: commitmentPence,
+        remaining: Math.max(0, commitmentPence - grossUsage),
+        used: grossUsage,
+        projectedRemaining: Math.max(0, commitmentPence - grossUsage),
+      };
+    }
   }
 
-  // Billing period moved from the subscription to its items in recent Stripe
-  // API versions; read from the item with a fallback to the subscription.
-  const firstItem = subscription.items?.data?.[0];
+  // "Usage this period" tracks metered consumption, which bills monthly - so
+  // read the window from a metered item. The first subscription item can be the
+  // annual commitment price, whose year-long period is misleading here.
+  const periodItem =
+    subscription.items?.data?.find(
+      (item) => item.price?.recurring?.usage_type === "metered"
+    ) || subscription.items?.data?.[0];
   const summary = {
     hasSubscription: true,
     currency,
     period: {
       start:
-        firstItem?.current_period_start ??
+        periodItem?.current_period_start ??
         subscription.current_period_start ??
         null,
       end:
-        firstItem?.current_period_end ??
+        periodItem?.current_period_end ??
         subscription.current_period_end ??
         null,
     },
