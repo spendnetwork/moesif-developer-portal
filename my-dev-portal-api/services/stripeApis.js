@@ -12,11 +12,17 @@ const {
   BASIC_CREDIT_TOP_UP,
   isBasicPurchaseType,
 } = require("./basicPurchasePolicy");
+const { summarizeMeterReports } = require("./basicUsageSummary");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
-const USAGE_SUMMARY_CACHE_TTL_MS = 45 * 1000;
+// Stale-while-revalidate cache. Within FRESH the cached value is served as-is;
+// between FRESH and STALE_MAX it is served immediately and refreshed in the
+// background; beyond STALE_MAX (or on a cold miss) we block on a fresh fetch.
+const USAGE_SUMMARY_FRESH_TTL_MS = 3 * 60 * 1000;
+const USAGE_SUMMARY_STALE_TTL_MS = 30 * 60 * 1000;
 const USAGE_SUMMARY_CACHE_MAX_ENTRIES = 1000;
 const usageSummaryCache = new Map();
+const usageSummaryInflight = new Map();
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
 const BASIC_TOP_UP_MIN_AMOUNT_GBP = 1;
 
@@ -56,7 +62,7 @@ function cacheUsageSummary(cacheKey, summary) {
   const now = Date.now();
   if (usageSummaryCache.size >= USAGE_SUMMARY_CACHE_MAX_ENTRIES) {
     for (const [key, value] of usageSummaryCache) {
-      if (now - value.fetchedAt >= USAGE_SUMMARY_CACHE_TTL_MS) {
+      if (now - value.fetchedAt >= USAGE_SUMMARY_STALE_TTL_MS) {
         usageSummaryCache.delete(key);
       }
     }
@@ -916,28 +922,56 @@ async function ensureCreditGrant(customerId, planKey, { currency = "gbp", marker
   });
 }
 
-// Aggregate current-period spend + credit balance for the usage dashboard.
-async function getUsageSummary(email, authUser) {
-  const cacheKey = authUser?.sub || email?.toLowerCase();
-  const cached = cacheKey ? usageSummaryCache.get(cacheKey) : null;
-  if (cached && Date.now() - cached.fetchedAt < USAGE_SUMMARY_CACHE_TTL_MS) {
-    return cached.summary;
+// Per-metric definitions (price id -> key/label/unit rate) taken from the
+// subscription's own metered prices, in the shape summarizeMeterReports expects.
+function commitmentMeterDefinitions(subscription) {
+  const definitions = new Map();
+  for (const item of subscription?.items?.data || []) {
+    const price = item.price;
+    if (
+      !price?.id ||
+      isCommitmentPrice(price) ||
+      price.recurring?.usage_type !== "metered"
+    ) {
+      continue;
+    }
+    const key = metricKey(price);
+    definitions.set(price.id, {
+      key,
+      label: METRIC_LABELS[key] || price.nickname || "Usage",
+      unitAmountPence: priceUnitAmountPence(price),
+    });
   }
+  return definitions;
+}
 
+// Aggregate current-period spend + credit balance for the usage dashboard.
+async function computeUsageSummary(email, authUser, options = {}) {
+  const { companyId, getMoesifBillingReports } = options;
   const { customer, subscription } = await getActiveStripeSubscription(
     email,
     authUser?.sub,
     authUser?.stripe_customer_id
   );
 
-  // Run the three independent Stripe reads in parallel for speed.
-  const [preview, grants, balance] = await Promise.all([
-    stripe.invoices
-      .createPreview({ customer: customer.id, subscription: subscription.id })
-      .catch((e) => {
-        console.error("Invoice preview failed:", e.message);
-        return null;
-      }),
+  // The metered item drives the monthly billing window and the Moesif report
+  // range - the first subscription item can be the annual commitment price.
+  const periodItem =
+    subscription.items?.data?.find(
+      (item) => item.price?.recurring?.usage_type === "metered"
+    ) || subscription.items?.data?.[0];
+  const periodStartSec =
+    periodItem?.current_period_start ?? subscription.current_period_start ?? null;
+  const periodEndSec =
+    periodItem?.current_period_end ?? subscription.current_period_end ?? null;
+
+  const canUseMoesif =
+    Boolean(companyId) && typeof getMoesifBillingReports === "function";
+
+  // Credit balance is always authoritative from Stripe's ledger. Usage lines
+  // come from Moesif (the metering source of truth) when available, which avoids
+  // the slow invoice preview entirely.
+  const [grants, balance, moesifReports] = await Promise.all([
     stripe.billing.creditGrants
       .list({ customer: customer.id, limit: 100 })
       .catch(() => ({ data: [] })),
@@ -950,15 +984,41 @@ async function getUsageSummary(email, authUser) {
         },
       })
       .catch(() => null),
+    canUseMoesif
+      ? getMoesifBillingReports({
+          companyId,
+          subscriptionId: subscription.id,
+          from: periodStartSec
+            ? new Date(periodStartSec * 1000).toISOString()
+            : undefined,
+          to: new Date().toISOString(),
+        }).catch((e) => {
+          console.error("Moesif usage reports unavailable:", e.message);
+          return null;
+        })
+      : Promise.resolve(null),
   ]);
 
-  const currency = (
-    preview?.currency ||
-    subscription.items?.data?.[0]?.price?.currency ||
-    "gbp"
+  let currency = (
+    subscription.items?.data?.[0]?.price?.currency || "gbp"
   ).toUpperCase();
 
-  const lines = buildStripeUsageLines(subscription, preview);
+  // Prefer Moesif's metered usage. Fall back to Stripe's invoice preview only
+  // when Moesif reports no usage (not synced yet, or the mapping differs), so
+  // the breakdown is never silently wrong.
+  let lines = moesifReports
+    ? summarizeMeterReports(moesifReports, commitmentMeterDefinitions(subscription))
+    : [];
+  if (!lines.some((line) => line.quantity > 0 || line.amount > 0)) {
+    const preview = await stripe.invoices
+      .createPreview({ customer: customer.id, subscription: subscription.id })
+      .catch((e) => {
+        console.error("Invoice preview failed:", e.message);
+        return null;
+      });
+    lines = buildStripeUsageLines(subscription, preview);
+    currency = (preview?.currency || currency).toUpperCase();
+  }
 
   // Gross usage accrued so far this period (same total as the breakdown).
   const grossUsage = lines.reduce(
@@ -984,30 +1044,79 @@ async function getUsageSummary(email, authUser) {
       used: Math.max(0, granted - ledgerAvailable),
       projectedRemaining: Math.max(0, ledgerAvailable - grossUsage),
     };
+  } else {
+    // Stripe has not finalised a ledger grant yet. Fall back to the commitment
+    // amount on the plan's commitment price so the card still shows how much of
+    // the subscription is left, drawn down by this period's accrued usage.
+    const commitmentItem = subscription.items?.data?.find((item) =>
+      isCommitmentPrice(item.price)
+    );
+    const commitmentMajor = Number(
+      commitmentItem?.price?.metadata?.commitment_amount
+    );
+    const commitmentPence = Number.isFinite(commitmentMajor)
+      ? Math.round(commitmentMajor * 100)
+      : 0;
+    if (commitmentPence > 0) {
+      credit = {
+        granted: commitmentPence,
+        remaining: Math.max(0, commitmentPence - grossUsage),
+        used: grossUsage,
+        projectedRemaining: Math.max(0, commitmentPence - grossUsage),
+      };
+    }
   }
 
-  // Billing period moved from the subscription to its items in recent Stripe
-  // API versions; read from the item with a fallback to the subscription.
-  const firstItem = subscription.items?.data?.[0];
   const summary = {
     hasSubscription: true,
     currency,
     period: {
-      start:
-        firstItem?.current_period_start ??
-        subscription.current_period_start ??
-        null,
-      end:
-        firstItem?.current_period_end ??
-        subscription.current_period_end ??
-        null,
+      start: periodStartSec,
+      end: periodEndSec,
     },
     accrued: grossUsage,
     lines,
     credit,
   };
-  cacheUsageSummary(cacheKey, summary);
   return summary;
+}
+
+// Coalesced background refresh: only one fetch per cache key is ever in flight.
+function refreshUsageSummary(cacheKey, email, authUser, options) {
+  if (cacheKey && usageSummaryInflight.has(cacheKey)) {
+    return usageSummaryInflight.get(cacheKey);
+  }
+  const promise = computeUsageSummary(email, authUser, options)
+    .then((summary) => {
+      cacheUsageSummary(cacheKey, summary);
+      return summary;
+    })
+    .finally(() => {
+      if (cacheKey) usageSummaryInflight.delete(cacheKey);
+    });
+  if (cacheKey) usageSummaryInflight.set(cacheKey, promise);
+  return promise;
+}
+
+// Stale-while-revalidate: never block the caller when we have a usable cached
+// value. A cold miss (or a value older than STALE_MAX) blocks on a fresh fetch.
+async function getUsageSummary(email, authUser, options = {}) {
+  const cacheKey = authUser?.sub || email?.toLowerCase();
+  const cached = cacheKey ? usageSummaryCache.get(cacheKey) : null;
+  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
+
+  if (cached && age < USAGE_SUMMARY_FRESH_TTL_MS) {
+    return cached.summary;
+  }
+  if (cached && age < USAGE_SUMMARY_STALE_TTL_MS) {
+    // Serve the stale value immediately; refresh in the background. Errors are
+    // swallowed so a transient upstream failure keeps serving the last good copy.
+    refreshUsageSummary(cacheKey, email, authUser, options).catch((error) =>
+      console.error("Usage summary background refresh failed:", error.message)
+    );
+    return cached.summary;
+  }
+  return refreshUsageSummary(cacheKey, email, authUser, options);
 }
 
 function constructStripeEvent(rawBody, signature, secret) {

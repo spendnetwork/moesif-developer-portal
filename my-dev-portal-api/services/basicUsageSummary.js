@@ -1,6 +1,9 @@
-const BASIC_USAGE_CACHE_TTL_MS = 45 * 1000;
+// Stale-while-revalidate cache (see stripeApis.js for the same pattern).
+const BASIC_USAGE_FRESH_TTL_MS = 3 * 60 * 1000;
+const BASIC_USAGE_STALE_TTL_MS = 30 * 60 * 1000;
 const BASIC_USAGE_CACHE_MAX_ENTRIES = 1000;
 const basicUsageCache = new Map();
+const basicUsageInflight = new Map();
 const {
   METRIC_LABELS,
   finiteNumber,
@@ -14,6 +17,12 @@ function unixSeconds(value) {
   if (typeof value === "number") return value;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : null;
+}
+
+function addOneMonth(unixSecondsValue) {
+  const date = new Date(unixSecondsValue * 1000);
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  return Math.floor(date.getTime() / 1000);
 }
 
 function normalizeCollection(body, keys) {
@@ -146,6 +155,14 @@ function buildBasicUsageSummary({
       balance.subscription?.subscription_period_start ||
       balance.subscription?.created_at
   );
+  // The billing window is the monthly cycle, not "start .. now" (which collapses
+  // to a single day on a fresh subscription). Prefer the cycle end from Moesif,
+  // otherwise one month after the start.
+  const periodEnd =
+    unixSeconds(
+      balance.subscription?.current_period_end ||
+        balance.subscription?.subscription_period_end
+    ) || (periodStart ? addOneMonth(periodStart) : Math.floor(now / 1000));
 
   return {
     hasSubscription: true,
@@ -153,7 +170,7 @@ function buildBasicUsageSummary({
     currency: balance.currency,
     period: {
       start: periodStart,
-      end: Math.floor(now / 1000),
+      end: periodEnd,
     },
     accrued: lines.reduce((total, line) => total + line.amount, 0),
     requestCount: Number.isFinite(eventCount)
@@ -183,7 +200,7 @@ function setCached(key, summary) {
   const now = Date.now();
   if (basicUsageCache.size >= BASIC_USAGE_CACHE_MAX_ENTRIES) {
     for (const [candidate, value] of basicUsageCache) {
-      if (now - value.fetchedAt >= BASIC_USAGE_CACHE_TTL_MS) {
+      if (now - value.fetchedAt >= BASIC_USAGE_STALE_TTL_MS) {
         basicUsageCache.delete(candidate);
       }
     }
@@ -202,13 +219,7 @@ function invalidateBasicUsageSummary({ companyId, stripeCustomerId } = {}) {
   basicUsageCache.clear();
 }
 
-async function getBasicPrepaidUsageSummary(context, deps) {
-  const key = cacheKey(context);
-  const cached = basicUsageCache.get(key);
-  if (cached && Date.now() - cached.fetchedAt < BASIC_USAGE_CACHE_TTL_MS) {
-    return cached.summary;
-  }
-
+async function computeBasicPrepaidUsageSummary(context, deps) {
   const balance = await deps.getMoesifPrepaidBalance(context);
   const from =
     balance.subscription?.current_period_start ||
@@ -248,8 +259,37 @@ async function getBasicPrepaidUsageSummary(context, deps) {
     analyticsAvailable:
       analytics[1].status === "fulfilled" && analytics[2].status === "fulfilled",
   });
-  setCached(key, summary);
   return summary;
+}
+
+function refreshBasicPrepaidUsageSummary(key, context, deps) {
+  if (basicUsageInflight.has(key)) return basicUsageInflight.get(key);
+  const promise = computeBasicPrepaidUsageSummary(context, deps)
+    .then((summary) => {
+      setCached(key, summary);
+      return summary;
+    })
+    .finally(() => basicUsageInflight.delete(key));
+  basicUsageInflight.set(key, promise);
+  return promise;
+}
+
+// Stale-while-revalidate: serve cached instantly, refresh in the background.
+async function getBasicPrepaidUsageSummary(context, deps) {
+  const key = cacheKey(context);
+  const cached = basicUsageCache.get(key);
+  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
+
+  if (cached && age < BASIC_USAGE_FRESH_TTL_MS) {
+    return cached.summary;
+  }
+  if (cached && age < BASIC_USAGE_STALE_TTL_MS) {
+    refreshBasicPrepaidUsageSummary(key, context, deps).catch((error) =>
+      console.error("Basic usage background refresh failed:", error.message)
+    );
+    return cached.summary;
+  }
+  return refreshBasicPrepaidUsageSummary(key, context, deps);
 }
 
 module.exports = {
