@@ -52,6 +52,34 @@ test("Basic top-up requires a confirmed active Basic plan", () => {
   );
 });
 
+test("Basic top-up reactivates a confirmed Basic plan with no credit", () => {
+  assert.doesNotThrow(() =>
+    assertBasicPurchaseAllowed(BASIC_CREDIT_TOP_UP, {
+      active: false,
+      planKey: "basic",
+    })
+  );
+  assert.throws(
+    () =>
+      assertBasicPurchaseAllowed(BASIC_CREDIT_TOP_UP, {
+        active: false,
+        planKey: "growth",
+      }),
+    (error) => error.code === "basic_plan_required"
+  );
+});
+
+test("inactive Growth cannot be replaced through Basic activation", () => {
+  assert.throws(
+    () =>
+      assertBasicPurchaseAllowed(BASIC_ACTIVATION, {
+        active: false,
+        planKey: "growth",
+      }),
+    (error) => error.code === "basic_plan_conflict"
+  );
+});
+
 test("activation reconciliation is idempotent after Basic becomes active", () => {
   assert.doesNotThrow(() =>
     assertBasicPurchaseAllowed(

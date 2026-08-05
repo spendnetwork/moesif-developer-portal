@@ -32,7 +32,7 @@ function assertBasicPurchaseAllowed(
   const planKey = entitlement?.planKey || null;
 
   if (purchaseType === BASIC_ACTIVATION) {
-    if (!active) return;
+    if (!active && (!planKey || planKey === "basic")) return;
     if (planKey === "basic" && allowIdempotentActivation) return;
     if (planKey === "basic") {
       throw basicPurchaseError(
@@ -42,11 +42,14 @@ function assertBasicPurchaseAllowed(
     }
     throw basicPurchaseError(
       "basic_plan_conflict",
-      "Basic cannot be activated while Growth or Enterprise is active. Switch to Basic at renewal first."
+      "Basic cannot be activated while Growth or Enterprise is current. Switch to Basic at renewal first."
     );
   }
 
-  if (active && planKey === "basic") return;
+  // A scheduled downgrade lands on Basic with access paused until credit is
+  // purchased. Keep the confirmed plan identity so that this first top-up can
+  // reactivate access without requiring a second plan selection.
+  if (planKey === "basic") return;
   if (active) {
     throw basicPurchaseError(
       "basic_plan_conflict",

@@ -22,6 +22,10 @@ const {
   getBasicTopUpTotalPence,
   markBasicTopUpReconciled,
   prepareStripePlanChange,
+  scheduleStripeDowngrade,
+  cancelStripeScheduledDowngrade,
+  getScheduledDowngradeState,
+  markStripePlanChangeActivated,
   activateStripePlanChange,
   issueReviewedPlanChangeInvoice,
   activateReviewedPlanChange,
@@ -51,6 +55,7 @@ const {
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,
   listSnApiDuePlanChanges,
+  claimSnApiDuePlanChanges,
   updateSnApiPlanChange,
   updateSnApiSubscriptionStatus,
 } = require("./services/snApiProvisioning");
@@ -139,6 +144,23 @@ function validateConfiguration() {
 
 validateConfiguration();
 
+const planChangeWorkerId = `${process.env.HOSTNAME || "portal"}:${
+  process.pid
+}:${crypto.randomUUID()}`;
+const planChangeLeaseSeconds = Number.parseInt(
+  process.env.PLAN_CHANGE_RECONCILIATION_LEASE_SECONDS || "300",
+  10
+);
+if (
+  !Number.isFinite(planChangeLeaseSeconds) ||
+  planChangeLeaseSeconds < 30 ||
+  planChangeLeaseSeconds > 3600
+) {
+  throw new Error(
+    "PLAN_CHANGE_RECONCILIATION_LEASE_SECONDS must be between 30 and 3600"
+  );
+}
+
 const planChangeDeps = {
   activateStripePlanChange,
   issueReviewedPlanChangeInvoice,
@@ -148,6 +170,12 @@ const planChangeDeps = {
   getStripeSubscription,
   getSnApiPlanChangeByCustomer,
   listSnApiDuePlanChanges,
+  claimSnApiDuePlanChanges: (limit) =>
+    claimSnApiDuePlanChanges(
+      planChangeWorkerId,
+      limit,
+      planChangeLeaseSeconds
+    ),
   listStripeInvoices,
   updateSnApiPlanChange,
   grantCommitmentFromInvoice,
@@ -161,6 +189,8 @@ const planChangeDeps = {
   syncToMoesif,
   sendPrepaidSubscriptionToMoesif,
   prepaidSubscriptionPeriodEnd,
+  getScheduledDowngradeState,
+  markStripePlanChangeActivated,
 };
 
 const subscriptionReconciliationDeps = {
@@ -391,13 +421,15 @@ app.post(
 
     try {
       const selectedPlanKey = await getPlanKeyForProduct(planId);
+      const entitlement =
+        selectedPlanKey === "basic"
+          ? await ensureRequestEntitlement(req)
+          : null;
+      const shouldPreparePlanChange =
+        selectedPlanKey !== "basic" ||
+        (entitlement?.active && entitlement.planKey !== "basic");
 
-      if (selectedPlanKey === "basic") {
-        const entitlement = await ensureRequestEntitlement(req);
-        assertBasicPurchaseAllowed(purchaseType, entitlement);
-      }
-
-      if (selectedPlanKey !== "basic") {
+      if (shouldPreparePlanChange) {
         try {
           const prepared = await prepareStripePlanChange(
             email,
@@ -413,17 +445,64 @@ app.post(
             to_plan_key: prepared.toPlanKey,
             target_product_id: prepared.targetProductId,
             effective_at: new Date(prepared.effectiveAt * 1000).toISOString(),
+            commitment_ends_at: prepared.commitmentEndsAt
+              ? new Date(prepared.commitmentEndsAt * 1000).toISOString()
+              : null,
             quoted_amount_gbp_pence: prepared.quotedAmountGbpPence,
             currency: prepared.currency,
             metadata: {
               source: "developer_portal",
               change_type: prepared.changeType,
+              ...(prepared.creditExpiresAt
+                ? {
+                    credit_expires_at: new Date(
+                      prepared.creditExpiresAt * 1000
+                    ).toISOString(),
+                  }
+                : {}),
             },
           });
+          let persistedPlanChange = scheduled;
+          if (prepared.changeType === "downgrade") {
+            let stripeSchedule;
+            try {
+              stripeSchedule = await scheduleStripeDowngrade(scheduled);
+              persistedPlanChange = await updateSnApiPlanChange(
+                scheduled.request_id,
+                {
+                  status: "scheduled",
+                  stripe_schedule_id: stripeSchedule.id,
+                }
+              );
+            } catch (scheduleError) {
+              if (stripeSchedule?.id) {
+                await cancelStripeScheduledDowngrade(stripeSchedule.id).catch(
+                  (releaseError) =>
+                    console.error(
+                      "Failed to release incomplete Stripe schedule",
+                      releaseError
+                    )
+                );
+              }
+              await updateSnApiPlanChange(scheduled.request_id, {
+                status: "failed",
+                failure_code:
+                  scheduleError.code || "stripe_schedule_creation_failed",
+                failure_message: String(scheduleError.message || scheduleError)
+                  .slice(0, 2000),
+              }).catch((updateError) =>
+                console.error(
+                  "Failed to record Stripe schedule failure",
+                  updateError
+                )
+              );
+              throw scheduleError;
+            }
+          }
           return res.status(200).json({
             scheduled: true,
             requiresReview: prepared.changeType === "upgrade",
-            planChange: scheduled,
+            planChange: persistedPlanChange,
           });
         } catch (planChangeError) {
           // "No subscription to change" and "no Stripe customer yet" both mean
@@ -436,6 +515,10 @@ app.post(
             throw planChangeError;
           }
         }
+      }
+
+      if (selectedPlanKey === "basic") {
+        assertBasicPurchaseAllowed(purchaseType, entitlement);
       }
 
       const session = selectedPlanKey === "basic"
@@ -931,6 +1014,9 @@ app.delete("/plan-change", portalAuthMiddleware, async (req, res) => {
         message: "This plan change is already being activated and can no longer be cancelled.",
       });
     }
+    if (planChange.stripe_schedule_id) {
+      await cancelStripeScheduledDowngrade(planChange.stripe_schedule_id);
+    }
     await updateSnApiPlanChange(planChange.request_id, { status: "cancelled" });
     return res.status(204).send();
   } catch (error) {
@@ -1044,6 +1130,7 @@ if (
     planChangeReconciliationIntervalMs
   );
   reconciliationTimer.unref();
+  setImmediate(runPlanChangeReconciliation).unref();
 } else {
   console.warn(
     "Plan change reconciliation is disabled; " +

@@ -325,6 +325,31 @@ test("cancellation revokes access when no replacement subscription is live", asy
   assert.deepEqual(result.revoked, [1]);
 });
 
+test("scheduled Basic downgrade cancellation is left for the downgrade worker", async () => {
+  let endedCalls = 0;
+  const result = await processSubscriptionLifecycle(
+    subscription({ status: "canceled" }),
+    dependencies({
+      updateSnApiSubscriptionStatus: async () => ({ is_current: true }),
+      getSnApiPlanChangeByCustomer: async () => ({
+        request_id: "change-basic",
+        status: "scheduled",
+        change_type: "downgrade",
+        to_plan_key: "basic",
+        stripe_subscription_id: "sub_growth",
+        effective_at: new Date(Date.now() - 1000).toISOString(),
+      }),
+      handleSubscriptionEnded: async () => {
+        endedCalls += 1;
+        return { revoked: [1], failed: [] };
+      },
+    })
+  );
+
+  assert.equal(result.status, "scheduled_downgrade_transition");
+  assert.equal(endedCalls, 0);
+});
+
 test("cancellation also closes a pending upgrade from that subscription", async () => {
   const updates = [];
   await processSubscriptionLifecycle(

@@ -20,7 +20,12 @@ function invoiceMatchesPlanChange(invoice, planChange) {
   );
 }
 
-async function completePlanChange(planChange, subscription, deps) {
+async function provisionRecurringPlan(
+  planChange,
+  subscription,
+  deps,
+  subscriptionStatusOverride = null
+) {
   const customer = await deps.getStripeCustomerById(
     planChange.stripe_customer_id
   );
@@ -40,6 +45,7 @@ async function completePlanChange(planChange, subscription, deps) {
     subscription,
     price,
     product,
+    subscriptionStatusOverride,
   });
   await deps.updateStripeCustomerIdentity(customer.id, {
     moesifUserId: provisioned.user_id,
@@ -48,6 +54,21 @@ async function completePlanChange(planChange, subscription, deps) {
     auth0UserId,
     subscriptionId: subscription.id,
   });
+  return provisioned;
+}
+
+async function completePlanChange(planChange, subscription, deps) {
+  const activatedSubscription = deps.markStripePlanChangeActivated
+    ? await deps.markStripePlanChangeActivated(
+        subscription,
+        planChange.request_id
+      )
+    : subscription;
+  const provisioned = await provisionRecurringPlan(
+    planChange,
+    activatedSubscription,
+    deps
+  );
   await deps.updateSnApiPlanChange(planChange.request_id, { status: "active" });
   return { status: "active", planChange, provisioned };
 }
@@ -96,7 +117,7 @@ async function completeBasicDowngrade(planChange, deps) {
     authUser,
     customer,
     product,
-    subscriptionStatus: "active",
+    subscriptionStatus: "inactive",
   });
   await deps.updateStripeCustomerIdentity(customer.id, {
     moesifUserId: provisioned.user_id,
@@ -105,12 +126,62 @@ async function completeBasicDowngrade(planChange, deps) {
     auth0UserId,
     subscriptionId: null,
   });
+  await deps.updateSnApiPlanChange(planChange.request_id, {
+    status: "activating",
+  });
   await deps.updateSnApiPlanChange(planChange.request_id, { status: "active" });
   return {
     status: "active",
     planChange,
     provisioned,
     moesifSubscriptionId,
+  };
+}
+
+async function processScheduledDowngrade(planChange, deps) {
+  const state = await deps.getScheduledDowngradeState(planChange);
+  if (!state.transitioned) {
+    return { skipped: "stripe_schedule_not_transitioned", planChange };
+  }
+  if (planChange.to_plan_key === "basic") {
+    return completeBasicDowngrade(planChange, deps);
+  }
+  if (!state.invoice) {
+    return { skipped: "commitment_invoice_not_ready", planChange };
+  }
+  if (["void", "uncollectible"].includes(state.invoice.status)) {
+    await deps.updateSnApiPlanChange(planChange.request_id, {
+      status: "failed",
+      failure_code: `invoice_${state.invoice.status}`,
+      failure_message: `Stripe marked the commitment invoice as ${state.invoice.status}.`,
+    });
+    return { status: "failed", planChange, invoice: state.invoice };
+  }
+
+  if (planChange.status === "scheduled") {
+    await deps.updateSnApiPlanChange(planChange.request_id, {
+      status: "activating",
+    });
+  }
+  if (state.invoice.status === "paid") {
+    await deps.grantCommitmentFromInvoice(state.invoice);
+    return completePlanChange(planChange, state.subscription, deps);
+  }
+
+  await provisionRecurringPlan(
+    planChange,
+    state.subscription,
+    deps,
+    "unpaid"
+  );
+  await deps.updateSnApiPlanChange(planChange.request_id, {
+    status: "awaiting_commitment_payment",
+    commitment_invoice_id: state.invoice.id,
+  });
+  return {
+    status: "awaiting_commitment_payment",
+    planChange,
+    invoice: state.invoice,
   };
 }
 
@@ -166,6 +237,13 @@ async function processPaidInvoice(invoice, deps) {
     return { skipped: "before_effective_at" };
   }
 
+  if (
+    planChange.status === "scheduled" &&
+    planChange.change_type === "downgrade"
+  ) {
+    return processScheduledDowngrade(planChange, deps);
+  }
+
   if (planChange.status !== "activating") {
     await deps.updateSnApiPlanChange(planChange.request_id, {
       status: "activating",
@@ -203,6 +281,27 @@ async function processFailedInvoice(invoice, deps) {
   if (!planChange) return { skipped: "no_open_plan_change" };
   if (!invoiceMatchesPlanChange(invoice, planChange)) {
     return { skipped: "different_subscription" };
+  }
+
+  if (
+    planChange.status === "scheduled" &&
+    planChange.change_type === "downgrade" &&
+    planChange.to_plan_key !== "basic"
+  ) {
+    await deps.updateSnApiPlanChange(planChange.request_id, {
+      status: "activating",
+    });
+    await deps.updateSnApiPlanChange(planChange.request_id, {
+      status: "awaiting_commitment_payment",
+      commitment_invoice_id: invoice.id,
+    });
+    await deps.updateSnApiPlanChange(planChange.request_id, {
+      status: "payment_failed",
+      commitment_invoice_id: invoice.id,
+      failure_code: "invoice_payment_failed",
+      failure_message: "Stripe could not collect the required payment.",
+    });
+    return { status: "payment_failed", planChange, invoice };
   }
 
   const isCommitment = planChange.commitment_invoice_id === invoice.id;
@@ -246,7 +345,9 @@ async function issueApprovedPlanChange(planChange, deps) {
 }
 
 async function reconcileDuePlanChanges(deps) {
-  const dueChanges = await deps.listSnApiDuePlanChanges(100);
+  const dueChanges = deps.claimSnApiDuePlanChanges
+    ? await deps.claimSnApiDuePlanChanges(100)
+    : await deps.listSnApiDuePlanChanges(100);
   const results = [];
   for (const planChange of dueChanges) {
     try {
@@ -255,7 +356,13 @@ async function reconcileDuePlanChanges(deps) {
         results.push({ requestId: planChange.request_id, ...result });
         continue;
       }
-      if (["invoice_open", "payment_failed"].includes(planChange.status)) {
+      if (
+        [
+          "invoice_open",
+          "payment_failed",
+          "awaiting_commitment_payment",
+        ].includes(planChange.status)
+      ) {
         if (!planChange.commitment_invoice_id) {
           results.push({
             requestId: planChange.request_id,
@@ -290,13 +397,7 @@ async function reconcileDuePlanChanges(deps) {
         planChange.status === "scheduled" &&
         planChange.change_type === "downgrade"
       ) {
-        if (planChange.to_plan_key === "basic") {
-          const result = await completeBasicDowngrade(planChange, deps);
-          results.push({ requestId: planChange.request_id, ...result });
-          continue;
-        }
-        const subscription = await deps.activateReviewedPlanChange(planChange);
-        const result = await completePlanChange(planChange, subscription, deps);
+        const result = await processScheduledDowngrade(planChange, deps);
         results.push({ requestId: planChange.request_id, ...result });
         continue;
       }
@@ -341,6 +442,7 @@ module.exports = {
   invoicePlanChangeRequestId,
   invoiceMatchesPlanChange,
   completeBasicDowngrade,
+  processScheduledDowngrade,
   processPaidInvoice,
   processFailedInvoice,
   issueApprovedPlanChange,

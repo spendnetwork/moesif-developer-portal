@@ -71,6 +71,7 @@ async function provisionSnApiCustomer({
   price,
   product,
   rotateApiKey = false,
+  subscriptionStatusOverride = null,
 }) {
   const snApiBaseUrl = requireConfig("SN_API_BASE_URL", { url: true });
   const provisioningToken = requireConfig("SN_API_PROVISIONING_TOKEN");
@@ -106,7 +107,8 @@ async function provisionSnApiCustomer({
         stripe_product_id: product?.id,
         stripe_price_id: price?.id,
         plan_key: getPlanKey(price, product),
-        subscription_status: subscription.status,
+        subscription_status:
+          subscriptionStatusOverride || subscription.status,
         current_period_start: unixTimestampToIso(period.start),
         current_period_end: unixTimestampToIso(period.end),
         cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
@@ -299,6 +301,21 @@ function listSnApiDuePlanChanges(limit = 100) {
   );
 }
 
+function claimSnApiDuePlanChanges(
+  workerId,
+  limit = 100,
+  leaseSeconds = 300
+) {
+  return snApiKeyRequest("/api/v3/developer-portal/plan-changes/claim-due", {
+    method: "POST",
+    body: {
+      worker_id: workerId,
+      limit,
+      lease_seconds: leaseSeconds,
+    },
+  });
+}
+
 function updateSnApiPlanChange(requestId, update) {
   return snApiKeyRequest(
     `/api/v3/developer-portal/plan-changes/${encodeURIComponent(requestId)}`,
@@ -338,6 +355,7 @@ module.exports = {
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,
   listSnApiDuePlanChanges,
+  claimSnApiDuePlanChanges,
   updateSnApiPlanChange,
   updateSnApiSubscriptionStatus,
   subscriptionPeriod,

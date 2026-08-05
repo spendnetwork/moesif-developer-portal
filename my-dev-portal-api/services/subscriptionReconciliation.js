@@ -217,7 +217,14 @@ async function resolveAuthenticatedEntitlement(authUser, portalContext, deps) {
       error.code === "no_active_subscription" ||
       error.code === "stripe_customer_not_found"
     ) {
-      return { active: false, reason: error.code };
+      const result = {
+        active: false,
+        reason: error.code,
+      };
+      if (portalContext?.current_plan_key) {
+        result.planKey = portalContext.current_plan_key;
+      }
+      return result;
     }
     throw error;
   }
@@ -252,6 +259,19 @@ async function closePlanChangeForEndedSubscription(subscription, customerId, dep
       planChange.stripe_subscription_id !== subscription.id)
   ) {
     return null;
+  }
+
+  const effectiveAt = new Date(planChange.effective_at).getTime();
+  if (
+    planChange.change_type === "downgrade" &&
+    planChange.status === "scheduled" &&
+    Number.isFinite(effectiveAt) &&
+    Date.now() >= effectiveAt
+  ) {
+    return {
+      status: "scheduled_downgrade_transition",
+      requestId: planChange.request_id,
+    };
   }
 
   let invoice = null;
@@ -316,7 +336,14 @@ async function processSubscriptionLifecycle(subscription, deps) {
     );
   }
 
-  await closePlanChangeForEndedSubscription(subscription, customerId, deps);
+  const closedPlanChange = await closePlanChangeForEndedSubscription(
+    subscription,
+    customerId,
+    deps
+  );
+  if (closedPlanChange?.status === "scheduled_downgrade_transition") {
+    return closedPlanChange;
+  }
 
   const result = await deps.handleSubscriptionEnded(subscription, {
     getStripeCustomerById: deps.getStripeCustomerById,

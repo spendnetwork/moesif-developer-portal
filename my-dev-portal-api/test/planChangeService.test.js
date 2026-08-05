@@ -238,6 +238,7 @@ test("paid reviewed invoice applies the target plan before provisioning", async 
 
 test("scheduled downgrade activates only when returned as due", async () => {
   const updates = [];
+  let activationMarkerCalls = 0;
   const change = baseChange({
     status: "scheduled",
     change_type: "downgrade",
@@ -246,11 +247,22 @@ test("scheduled downgrade activates only when returned as due", async () => {
   });
   const result = await reconcileDuePlanChanges({
     listSnApiDuePlanChanges: async () => [change],
-    activateReviewedPlanChange: async () => ({
-      id: "sub_123",
-      status: "active",
-      items: { data: [{ price: { product: { id: "prod_growth" } } }] },
+    getScheduledDowngradeState: async () => ({
+      transitioned: true,
+      commitmentRequired: true,
+      invoice: { id: "in_growth", status: "paid" },
+      subscription: {
+        id: "sub_123",
+        status: "active",
+        items: { data: [{ price: { product: { id: "prod_growth" } } }] },
+      },
     }),
+    grantCommitmentFromInvoice: async () => {},
+    markStripePlanChangeActivated: async (subscription, requestId) => {
+      activationMarkerCalls += 1;
+      assert.equal(requestId, change.request_id);
+      return subscription;
+    },
     getStripeCustomerById: async () => ({
       id: "cus_123",
       email: "buyer@example.com",
@@ -262,7 +274,73 @@ test("scheduled downgrade activates only when returned as due", async () => {
   });
 
   assert.equal(result[0].status, "active");
-  assert.deepEqual(updates.map((update) => update.status), ["active"]);
+  assert.equal(activationMarkerCalls, 1);
+  assert.deepEqual(updates.map((update) => update.status), [
+    "activating",
+    "active",
+  ]);
+});
+
+test("scheduled downgrade waits until Stripe enters the target phase", async () => {
+  let provisionCalls = 0;
+  const result = await reconcileDuePlanChanges({
+    claimSnApiDuePlanChanges: async () => [
+      baseChange({
+        change_type: "downgrade",
+        from_plan_key: "enterprise",
+        to_plan_key: "growth",
+      }),
+    ],
+    getScheduledDowngradeState: async () => ({ transitioned: false }),
+    provisionSnApiCustomer: async () => {
+      provisionCalls += 1;
+    },
+  });
+
+  assert.equal(result[0].skipped, "stripe_schedule_not_transitioned");
+  assert.equal(provisionCalls, 0);
+});
+
+test("unpaid downgrade commitment switches permissions but keeps access locked", async () => {
+  const updates = [];
+  const provisionStatuses = [];
+  const change = baseChange({
+    change_type: "downgrade",
+    from_plan_key: "enterprise",
+    to_plan_key: "growth",
+  });
+  const result = await reconcileDuePlanChanges({
+    claimSnApiDuePlanChanges: async () => [change],
+    getScheduledDowngradeState: async () => ({
+      transitioned: true,
+      commitmentRequired: true,
+      invoice: { id: "in_growth", status: "open" },
+      subscription: {
+        id: "sub_123",
+        status: "active",
+        items: { data: [{ price: { product: { id: "prod_growth" } } }] },
+      },
+    }),
+    getStripeCustomerById: async () => ({
+      id: "cus_123",
+      email: "buyer@example.com",
+      metadata: { authUserId: "auth0|123" },
+    }),
+    provisionSnApiCustomer: async ({ subscriptionStatusOverride }) => {
+      provisionStatuses.push(subscriptionStatusOverride);
+      return { user_id: 7, organization_id: 9 };
+    },
+    updateStripeCustomerIdentity: async () => {},
+    updateSnApiPlanChange: async (_id, update) => updates.push(update),
+  });
+
+  assert.equal(result[0].status, "awaiting_commitment_payment");
+  assert.deepEqual(provisionStatuses, ["unpaid"]);
+  assert.deepEqual(updates.map((update) => update.status), [
+    "activating",
+    "awaiting_commitment_payment",
+  ]);
+  assert.equal(updates[1].commitment_invoice_id, "in_growth");
 });
 
 test("reconciliation fails a reviewed change when its invoice is void", async () => {
@@ -337,8 +415,9 @@ test("downgrade to Basic ends recurring billing and creates prepaid access", asy
     "sync_moesif",
     "prepaid_subscription",
     "cancel_recurring",
-    "provision:active",
+    "provision:inactive",
     "update_identity",
+    "change:activating",
     "change:active",
   ]);
 });
