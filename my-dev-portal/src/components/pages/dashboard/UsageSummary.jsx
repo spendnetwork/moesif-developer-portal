@@ -27,6 +27,49 @@ function formatCount(value) {
   return Number(value || 0).toLocaleString();
 }
 
+function planChangeCopy(planChange) {
+  if (planChange.status === "pending_review") {
+    return {
+      title: "Upgrade review requested",
+      body: "Your current plan remains active while we review the commitment and prepare the invoice.",
+    };
+  }
+  if (planChange.status === "approved") {
+    return {
+      title: "Upgrade approved",
+      body: "We are preparing your commitment invoice. Your plan will change only after payment.",
+    };
+  }
+  if (planChange.status === "invoice_open") {
+    return {
+      title: "Commitment invoice sent",
+      body: "Your current plan remains active. The new rates and permissions start after the invoice is paid.",
+    };
+  }
+  if (planChange.status === "payment_failed") {
+    return {
+      title: "Payment required",
+      body: "The required invoice has not been paid. Your current plan and permissions remain unchanged.",
+    };
+  }
+  if (planChange.change_type === "downgrade") {
+    return {
+      title: `${planChange.to_plan_key} downgrade scheduled`,
+      body: `Your current plan remains active until ${new Date(
+        planChange.effective_at
+      ).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })}.`,
+    };
+  }
+  return {
+    title: `${planChange.to_plan_key} plan change in progress`,
+    body: "Your current plan remains active until the required payment and access synchronization complete.",
+  };
+}
+
 function UsageSummary({ idToken }) {
   const { usage, usageLoading } = useUsageSummary({ idToken });
   const { planChange, refreshPlanChange } = usePlanChange({ idToken });
@@ -95,6 +138,7 @@ function UsageSummary({ idToken }) {
     credit &&
     Number.isFinite(credit.used) &&
     Number.isFinite(credit.granted);
+  const changeCopy = planChange ? planChangeCopy(planChange) : null;
 
   return (
     <section className="usage-summary">
@@ -104,25 +148,13 @@ function UsageSummary({ idToken }) {
         >
           <div>
             <strong>
-              {planChange.status === "payment_failed"
-                ? "Payment required"
-                : `${planChange.to_plan_key} plan scheduled`}
+              {changeCopy.title}
             </strong>
-            <p>
-              {planChange.status === "payment_failed"
-                ? "We could not collect the payment required to complete your plan change. Your current plan remains active."
-                : `Your current ${planChange.from_plan_key} plan remains active until ${new Date(
-                    planChange.effective_at
-                  ).toLocaleDateString(undefined, {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric",
-                  })}. The new plan activates only after the required payments succeed.`}
-            </p>
+            <p>{changeCopy.body}</p>
           </div>
           <div className="plan-change-notice__actions">
             <span>{planChange.status.replaceAll("_", " ")}</span>
-            {["scheduled", "awaiting_current_invoice", "payment_failed"].includes(
+            {["pending_review", "approved", "scheduled", "payment_failed"].includes(
               planChange.status
             ) && (
               <button

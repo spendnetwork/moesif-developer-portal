@@ -253,6 +253,13 @@ async function processSubscriptionLifecycle(subscription, deps) {
     );
   }
 
+  if (
+    subscription.metadata?.openopps_plan_change_request_id &&
+    subscription.metadata?.openopps_plan_change_activated !== "true"
+  ) {
+    return { status: "awaiting_plan_change_payment" };
+  }
+
   let statusWasKnown = true;
   try {
     await deps.updateSnApiSubscriptionStatus(subscription, customerId);

@@ -40,22 +40,51 @@ on the persisted plan-change request ID.
    ```
 
 3. Resolve any returned duplicates, then run Alembic migrations through
-   `b8c9d0e1f2a3`.
+   `d0e1f2a3b4c5`.
 4. Verify the developer-portal subscription and plan-change routes.
 5. Configure and verify the Stripe webhook events above.
 6. Deploy the developer portal backend.
 7. Deploy the developer portal frontend.
-8. Run a Stripe test-mode Basic to Growth change through a complete billing cycle.
+8. Run Stripe test-mode Basic to Growth and Growth to Enterprise upgrades through
+   review, invoice payment, and entitlement activation.
 
 Do not deploy the portal orchestration before the SN API migration and routes exist.
 
 ## State machine
 
-`scheduled` -> `activating` -> `awaiting_commitment_payment` -> `active`
+Upgrades:
 
-Payment failures move to `awaiting_current_invoice` or `payment_failed`. A customer
-can cancel before activation begins. Terminal states are `active`, `cancelled`, and
-`failed`.
+`pending_review` -> `approved` -> `invoice_open` -> `activating` -> `active`
+
+Downgrades:
+
+`scheduled` -> `activating` -> `active`
+
+Payment failures move an upgrade to `payment_failed`. A customer can cancel before
+an invoice is issued or downgrade activation begins. Terminal states are `active`,
+`cancelled`, and `failed`.
+
+## Approving an upgrade
+
+Upgrade requests never charge a card automatically. Review the customer, target
+plan, current credit, and `quoted_amount_gbp_pence`, then approve through the
+protected SN API endpoint using the provisioning token:
+
+```http
+PATCH /api/v3/developer-portal/plan-changes/{request_id}
+X-Developer-Portal-Token: {DEVELOPER_PORTAL_PROVISIONING_TOKEN}
+Content-Type: application/json
+
+{
+  "status": "approved",
+  "reviewed_by": "operator@spendnetwork.com"
+}
+```
+
+The portal reconciliation worker then creates an exact Stripe `send_invoice`
+invoice. Basic to Growth/Enterprise invoices the full commitment. Growth to
+Enterprise invoices the GBP 7,000 difference. The current entitlement remains
+unchanged until Stripe reports the invoice as paid.
 
 ## Reconciliation
 
@@ -78,13 +107,21 @@ For a stuck change, compare the persisted request ID with
 before retrying the webhook. Never create a replacement subscription to recover a
 plan change.
 
-## Supported self-service transitions
+## Supported transitions
 
 - Basic to Growth
 - Basic to Enterprise
+- Growth to Enterprise
+- Growth or Enterprise downgrades scheduled for the commitment boundary
 
-Other transitions require support until unused paid commitment-credit handling is
-defined and implemented.
+Upgrades require operator review. Existing monetary credit remains on the Stripe
+customer; the paid difference is added as a new credit grant and new rates apply
+only after activation.
+
+A downgrade to Basic ends the recurring Stripe subscription at the boundary and
+restores the non-recurring prepaid Basic entitlement. The downgrade does not
+invent credit: existing Basic credit remains available, otherwise the customer
+must add credit before billable API calls can continue.
 
 ## Entitlement reconciliation
 

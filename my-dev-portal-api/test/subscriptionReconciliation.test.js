@@ -279,6 +279,32 @@ test("subscription.created provisions when the SN API has not seen checkout yet"
   assert.equal(provisionCalls, 1);
 });
 
+test("reviewed send-invoice subscription stays locked until payment activation", async () => {
+  let statusWrites = 0;
+  let provisionCalls = 0;
+  const result = await processSubscriptionLifecycle(
+    subscription({
+      metadata: {
+        plan_id: "prod_growth",
+        authUserId: "auth0|123",
+        openopps_plan_change_request_id: "change-123",
+      },
+    }),
+    dependencies({
+      updateSnApiSubscriptionStatus: async () => {
+        statusWrites += 1;
+      },
+      provisionSnApiCustomer: async () => {
+        provisionCalls += 1;
+      },
+    })
+  );
+
+  assert.equal(result.status, "awaiting_plan_change_payment");
+  assert.equal(statusWrites, 0);
+  assert.equal(provisionCalls, 0);
+});
+
 test("cancellation revokes access when no replacement subscription is live", async () => {
   let endedCalls = 0;
   const result = await processSubscriptionLifecycle(

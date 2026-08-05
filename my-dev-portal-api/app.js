@@ -8,6 +8,7 @@ const {
   verifyStripeSession,
   getActiveStripeSubscription,
   cancelStripeSubscription,
+  endStripeSubscriptionForBasicDowngrade,
   ensureCreditGrant,
   getUsageSummary,
   invalidateUsageSummary,
@@ -21,6 +22,9 @@ const {
   markBasicTopUpReconciled,
   prepareStripePlanChange,
   activateStripePlanChange,
+  issueReviewedPlanChangeInvoice,
+  activateReviewedPlanChange,
+  getStripeInvoice,
   getStripeSubscription,
   listStripeInvoices,
   ensureSubscriptionMeteredPrices,
@@ -72,6 +76,8 @@ const {
 } = require("./services/moesifApis");
 const {
   reconcileBasicCreditPurchase,
+  prepaidSubscriptionPeriodEnd,
+  validateBasicMeteredPrices,
 } = require("./services/prepaidReconciliation");
 const {
   assertBasicPurchaseAllowed,
@@ -134,6 +140,9 @@ validateConfiguration();
 
 const planChangeDeps = {
   activateStripePlanChange,
+  issueReviewedPlanChangeInvoice,
+  activateReviewedPlanChange,
+  getStripeInvoice,
   getStripeCustomerById,
   getStripeSubscription,
   getSnApiPlanChangeByCustomer,
@@ -142,7 +151,15 @@ const planChangeDeps = {
   updateSnApiPlanChange,
   grantCommitmentFromInvoice,
   provisionSnApiCustomer,
+  provisionSnApiPrepaidCustomer,
   updateStripeCustomerIdentity,
+  endStripeSubscriptionForBasicDowngrade,
+  getStripeProduct,
+  getPlanPrices,
+  validateBasicMeteredPrices,
+  syncToMoesif,
+  sendPrepaidSubscriptionToMoesif,
+  prepaidSubscriptionPeriodEnd,
 };
 
 const subscriptionReconciliationDeps = {
@@ -376,20 +393,27 @@ app.post(
           const prepared = await prepareStripePlanChange(
             email,
             planId,
-            req.user
+            req.user,
+            req.portalContext
           );
           const scheduled = await createSnApiPlanChange(req.user, {
             request_id: requestId || crypto.randomUUID(),
             stripe_customer_id: prepared.customer.id,
-            stripe_subscription_id: prepared.subscription.id,
+            stripe_subscription_id: prepared.subscription?.id,
             from_plan_key: prepared.fromPlanKey,
             to_plan_key: prepared.toPlanKey,
             target_product_id: prepared.targetProductId,
             effective_at: new Date(prepared.effectiveAt * 1000).toISOString(),
-            metadata: { source: "developer_portal" },
+            quoted_amount_gbp_pence: prepared.quotedAmountGbpPence,
+            currency: prepared.currency,
+            metadata: {
+              source: "developer_portal",
+              change_type: prepared.changeType,
+            },
           });
           return res.status(200).json({
             scheduled: true,
+            requiresReview: prepared.changeType === "upgrade",
             planChange: scheduled,
           });
         } catch (planChangeError) {
@@ -872,7 +896,11 @@ app.delete("/plan-change", portalAuthMiddleware, async (req, res) => {
   try {
     const planChange = await getSnApiCurrentPlanChange(req.user);
     if (!planChange) return res.status(204).send();
-    if (["activating", "awaiting_commitment_payment"].includes(planChange.status)) {
+    if (
+      ["invoice_open", "activating", "awaiting_commitment_payment"].includes(
+        planChange.status
+      )
+    ) {
       return res.status(409).json({
         message: "This plan change is already being activated and can no longer be cancelled.",
       });
