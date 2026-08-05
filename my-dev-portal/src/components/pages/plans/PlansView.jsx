@@ -81,6 +81,14 @@ function checkoutPath(productId, planKey) {
   return `/checkout?${params.toString()}`;
 }
 
+function basicTopUpPath(productId) {
+  const params = new URLSearchParams({
+    plan_id_to_purchase: productId,
+    purchase_type: "basic_credit_top_up",
+  });
+  return `/checkout?${params.toString()}`;
+}
+
 export default function PlansView() {
   const { idToken } = useAuthCombined();
   const { plans, plansLoading } = usePlans();
@@ -280,7 +288,16 @@ export default function PlansView() {
                       </button>
                       <button
                         style={styles.btnOutline}
-                        onClick={() => navigate("/subscription")}
+                        onClick={() => {
+                          const productId = productByKey.basic;
+                          if (!productId) {
+                            setError(
+                              "Basic credit purchases are not available right now. Please try again shortly."
+                            );
+                            return;
+                          }
+                          navigate(basicTopUpPath(productId));
+                        }}
                       >
                         Add credit
                       </button>

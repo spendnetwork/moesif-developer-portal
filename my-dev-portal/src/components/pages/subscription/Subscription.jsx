@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 
 import { PageLayout } from "../../page-layout";
 import useSubscriptions from "../../../hooks/useSubscriptions";
@@ -16,12 +16,46 @@ const C = {
   line: "#DDE5E0",
 };
 
+function catalogPlanKey(plan) {
+  const configured = plan?.metadata?.plan_key;
+  if (configured) return configured.trim().toLowerCase();
+  const name = (plan?.name || "").toLowerCase();
+  return ["basic", "growth", "enterprise"].find((key) =>
+    name.includes(key)
+  );
+}
+
+function basicTopUpPath(productId) {
+  const params = new URLSearchParams({
+    plan_id_to_purchase: productId,
+    purchase_type: "basic_credit_top_up",
+  });
+  return `/checkout?${params.toString()}`;
+}
+
 function Subscription() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading, user, idToken } = useAuthCombined();
   const { subscriptions, finishedLoading, subscriptionsError } =
     useSubscriptions({ idToken });
   const { plansLoading, plans } = usePlans();
+  const [topUpError, setTopUpError] = useState("");
+
+  const basicProductId = useMemo(
+    () => (plans || []).find((plan) => catalogPlanKey(plan) === "basic")?.id,
+    [plans]
+  );
+
+  function startBasicTopUp() {
+    setTopUpError("");
+    if (!basicProductId) {
+      setTopUpError(
+        "Basic credit purchases are not available right now. Please try again shortly."
+      );
+      return;
+    }
+    navigate(basicTopUpPath(basicProductId));
+  }
 
   const sessionExpired = isSessionExpiredError(subscriptionsError);
 
@@ -86,6 +120,16 @@ function Subscription() {
         </div>
       )}
 
+      {topUpError && (
+        <div style={styles.errorCard} role="alert">
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "#8B2C21" }}>
+              {topUpError}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!subscriptionsError && !hasSubs && (
         <div style={styles.emptyCard}>
           <div style={styles.emptyIcon}>
@@ -120,7 +164,7 @@ function Subscription() {
               plans={plans}
               onManage={
                 sub.billing_model === "prepaid_credit"
-                  ? () => navigate("/plans")
+                  ? startBasicTopUp
                   : openStripeManagement
               }
             />
