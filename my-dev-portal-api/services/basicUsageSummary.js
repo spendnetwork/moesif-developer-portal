@@ -14,6 +14,7 @@ const {
   metricKey,
   metricOrder,
   priceUnitAmountPence,
+  summarizeEventUsage,
 } = require("./usageMetrics");
 
 function unixSeconds(value) {
@@ -21,12 +22,6 @@ function unixSeconds(value) {
   if (typeof value === "number") return value;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : null;
-}
-
-function addOneMonth(unixSecondsValue) {
-  const date = new Date(unixSecondsValue * 1000);
-  date.setUTCMonth(date.getUTCMonth() + 1);
-  return Math.floor(date.getTime() / 1000);
 }
 
 function normalizeCollection(body, keys) {
@@ -130,9 +125,9 @@ function buildBasicUsageSummary({
   totalPurchasedPence,
   reports,
   planCatalogue,
-  eventCount,
+  eventMetrics = null,
   analyticsAvailable = true,
-  eventCountAvailable = Number.isFinite(eventCount),
+  eventMetricsAvailable = eventMetrics != null,
   analyticsErrors = [],
   now = Date.now(),
 }) {
@@ -149,44 +144,34 @@ function buildBasicUsageSummary({
   const purchasedPence = Number.isFinite(totalPurchasedPence)
     ? Math.max(totalPurchasedPence, remainingPence || 0, currentPence || 0)
     : null;
-  const usedPence =
-    purchasedPence != null && remainingPence != null
-      ? Math.max(0, purchasedPence - remainingPence)
-      : null;
-  const meterLines = analyticsAvailable
-    ? summarizeMeterReports(reports, basicPriceDefinitions(planCatalogue))
+  const priceDefinitions = basicPriceDefinitions(planCatalogue);
+  const reportLines = analyticsAvailable
+    ? summarizeMeterReports(reports, priceDefinitions)
     : [];
-  const reportedMeterCount = meterLines.filter((line) => line.reported).length;
-  const lines = meterLines.map(({ reported: _reported, ...line }) => line);
-  const apiCalls = lines.find((line) => line.key === "api_call");
+  const lines = eventMetricsAvailable
+    ? summarizeEventUsage(eventMetrics, priceDefinitions)
+    : reportLines.map(({ reported: _reported, ...line }) => line);
+  const accruedPence = lines.reduce((total, line) => total + line.amount, 0);
+  const usedPence = purchasedPence != null ? accruedPence : null;
+  const projectedRemainingPence =
+    purchasedPence != null
+      ? Math.max(0, purchasedPence - accruedPence)
+      : remainingPence;
   const periodStart = unixSeconds(
     balance.subscription?.current_period_start ||
       balance.subscription?.subscription_period_start ||
       balance.subscription?.created_at
   );
-  // The billing window is the monthly cycle, not "start .. now" (which collapses
-  // to a single day on a fresh subscription). Prefer the cycle end from Moesif,
-  // otherwise one month after the start.
-  const periodEnd =
-    unixSeconds(
-      balance.subscription?.current_period_end ||
-        balance.subscription?.subscription_period_end
-    ) || (periodStart ? addOneMonth(periodStart) : Math.floor(now / 1000));
-  const reportsPending =
-    analyticsAvailable &&
-    eventCountAvailable &&
-    Number(eventCount) > 0 &&
-    reportedMeterCount === 0;
-  const unavailableSourceCount = [analyticsAvailable, eventCountAvailable].filter(
-    (available) => !available
-  ).length;
-  const analyticsStatus = unavailableSourceCount
-    ? unavailableSourceCount === 2
-      ? "unavailable"
-      : "partial"
-    : reportsPending
-      ? "pending"
-      : "ready";
+  // Basic credit has no recurring billing period. Its usage window starts when
+  // prepaid access is activated and ends at the time of this snapshot.
+  const periodEnd = Math.floor(now / 1000);
+  const reportsAvailable =
+    analyticsAvailable && reportLines.some((line) => line.reported);
+  const analyticsStatus = eventMetricsAvailable
+    ? "ready"
+    : reportsAvailable
+      ? "partial"
+      : "unavailable";
 
   return {
     hasSubscription: true,
@@ -196,42 +181,36 @@ function buildBasicUsageSummary({
       start: periodStart,
       end: periodEnd,
     },
-    accrued: lines.reduce((total, line) => total + line.amount, 0),
-    requestCount: Number.isFinite(eventCount)
-      ? eventCount
-      : apiCalls?.quantity ?? null,
+    accrued: accruedPence,
     lines,
     credit: {
       available: hasBalance,
       granted: purchasedPence,
       used: usedPence,
-      remaining: remainingPence,
+      remaining: projectedRemainingPence,
+      postedRemaining: remainingPence,
       current: currentPence,
       pending:
         hasBalance && Number.isFinite(balance.pending)
           ? Math.round(balance.pending * 100)
           : null,
-      projectedRemaining: remainingPence,
+      projectedRemaining: projectedRemainingPence,
     },
     analytics: {
       status: analyticsStatus,
       stale: false,
       updatedAt: new Date(now).toISOString(),
       sources: {
-        billingReports: analyticsAvailable
-          ? reportsPending
-            ? "pending"
-            : "ready"
-          : "unavailable",
-        events: eventCountAvailable ? "ready" : "unavailable",
+        billingReports: reportsAvailable ? "ready" : "unavailable",
+        events: eventMetricsAvailable ? "ready" : "unavailable",
       },
       errors: [...new Set(analyticsErrors.filter(Boolean))],
     },
   };
 }
 
-function cacheKey({ companyId, stripeCustomerId }) {
-  return `${companyId}:${stripeCustomerId}`;
+function cacheKey({ userId, companyId, stripeCustomerId }) {
+  return `${userId}:${companyId}:${stripeCustomerId}`;
 }
 
 function setCached(key, summary) {
@@ -309,12 +288,7 @@ async function getBasicReferenceData(context, deps) {
   return refreshBasicReferenceData(key, context, deps);
 }
 
-function invalidateBasicUsageSummary({ companyId, stripeCustomerId } = {}) {
-  if (companyId && stripeCustomerId) {
-    basicUsageCache.delete(cacheKey({ companyId, stripeCustomerId }));
-    basicReferenceCache.delete(stripeCustomerId);
-    return;
-  }
+function invalidateBasicUsageSummary() {
   basicUsageCache.clear();
   basicReferenceCache.clear();
 }
@@ -329,16 +303,18 @@ async function computeBasicPrepaidUsageSummary(context, deps) {
     balance.subscription?.subscription_period_start ||
     balance.subscription?.created_at;
   const analytics = await Promise.allSettled([
+    deps.getMoesifUsageMetrics({
+      userId: context.userId,
+      companyId: context.companyId,
+      subscriptionId: balance.subscriptionId,
+      from,
+      to: "now",
+    }),
     deps.getMoesifBillingReports({
       companyId: context.companyId,
       subscriptionId: balance.subscriptionId,
       from,
       to: new Date().toISOString(),
-    }),
-    deps.getMoesifEventCount({
-      companyId: context.companyId,
-      from,
-      to: "now",
     }),
   ]);
   const failures = [
@@ -356,13 +332,14 @@ async function computeBasicPrepaidUsageSummary(context, deps) {
   const summary = buildBasicUsageSummary({
     balance,
     totalPurchasedPence: reference.totalPurchasedPence,
-    reports: analytics[0].status === "fulfilled" ? analytics[0].value : [],
+    reports: analytics[1].status === "fulfilled" ? analytics[1].value : [],
     planCatalogue: reference.planCatalogue,
-    eventCount:
-      analytics[1].status === "fulfilled" ? analytics[1].value : null,
+    eventMetrics:
+      analytics[0].status === "fulfilled" ? analytics[0].value : null,
     analyticsAvailable:
+      analytics[1].status === "fulfilled" && reference.plansAvailable,
+    eventMetricsAvailable:
       analytics[0].status === "fulfilled" && reference.plansAvailable,
-    eventCountAvailable: analytics[1].status === "fulfilled",
     analyticsErrors: failures.map(
       (error) => error?.code || "usage_dependency_unavailable"
     ),
@@ -376,19 +353,26 @@ function preserveLastKnownAnalytics(summary, previous) {
   }
 
   const sources = summary.analytics?.sources || {};
-  const preserveReports =
-    sources.billingReports === "unavailable" ||
-    (sources.billingReports === "pending" && previous.lines?.length > 0);
-  const preserveEvents =
-    sources.events === "unavailable" && Number.isFinite(previous.requestCount);
-  if (!preserveReports && !preserveEvents) return summary;
+  const preserveEventSnapshot =
+    sources.events === "unavailable" && previous.lines?.length > 0;
+  if (!preserveEventSnapshot) return summary;
 
   return {
     ...summary,
-    ...(preserveReports
-      ? { lines: previous.lines, accrued: previous.accrued }
-      : {}),
-    ...(preserveEvents ? { requestCount: previous.requestCount } : {}),
+    lines: previous.lines,
+    accrued: previous.accrued,
+    credit: {
+      ...summary.credit,
+      used: previous.accrued,
+      remaining:
+        Number.isFinite(summary.credit?.granted)
+          ? Math.max(0, summary.credit.granted - previous.accrued)
+          : summary.credit?.remaining,
+      projectedRemaining:
+        Number.isFinite(summary.credit?.granted)
+          ? Math.max(0, summary.credit.granted - previous.accrued)
+          : summary.credit?.projectedRemaining,
+    },
     analytics: {
       ...summary.analytics,
       stale: true,

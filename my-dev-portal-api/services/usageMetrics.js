@@ -55,6 +55,31 @@ function metricOrder(left, right) {
     (rightIndex < 0 ? METRIC_ORDER.length : rightIndex);
 }
 
+function summarizeEventUsage(eventMetrics, priceDefinitions) {
+  const definitions =
+    priceDefinitions instanceof Map
+      ? [...priceDefinitions.values()]
+      : [...(priceDefinitions || [])];
+  return definitions
+    .map((definition) => {
+      const quantity = Math.max(
+        0,
+        finiteNumber(eventMetrics?.[definition.key]) || 0
+      );
+      return {
+        key: definition.key,
+        label: definition.label,
+        rate: definition.unitAmountPence,
+        quantity,
+        amount:
+          definition.unitAmountPence == null
+            ? 0
+            : Math.round(quantity * definition.unitAmountPence),
+      };
+    })
+    .sort(metricOrder);
+}
+
 module.exports = {
   METRIC_LABELS,
   METRIC_ORDER,
@@ -62,4 +87,5 @@ module.exports = {
   metricKey,
   metricOrder,
   priceUnitAmountPence,
+  summarizeEventUsage,
 };

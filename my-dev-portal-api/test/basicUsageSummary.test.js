@@ -82,28 +82,36 @@ const reports = [
   },
 ];
 
-test("Basic summary restores request count, credit used, and metric totals", () => {
+const eventMetrics = {
+  api_call: 6,
+  records_returned: 40,
+  aggregate_call: 0,
+  attachment: 2,
+};
+
+test("Basic summary prices identity-scoped event quantities", () => {
   const summary = buildBasicUsageSummary({
     balance: balance(),
     totalPurchasedPence: 50000,
     reports,
     planCatalogue: catalogue,
-    eventCount: 37,
+    eventMetrics,
     now: Date.parse("2026-07-30T12:00:00.000Z"),
   });
 
   assert.equal(summary.billingModel, "prepaid_credit");
-  assert.equal(summary.requestCount, 37);
   assert.equal(summary.credit.granted, 50000);
-  assert.equal(summary.credit.remaining, 37000);
-  assert.equal(summary.credit.used, 13000);
+  assert.equal(summary.credit.remaining, 49194);
+  assert.equal(summary.credit.postedRemaining, 37000);
+  assert.equal(summary.credit.used, 806);
   assert.equal(summary.lines.length, 4);
   assert.equal(summary.lines[0].rate, 26);
-  assert.equal(summary.lines[0].amount, 312);
-  assert.equal(summary.lines[1].amount, 1300);
+  assert.equal(summary.lines[0].amount, 156);
+  assert.equal(summary.lines[1].amount, 520);
   assert.equal(summary.lines[2].quantity, 0);
   assert.equal(summary.lines[2].rate, 46);
-  assert.equal(summary.accrued, 1612);
+  assert.equal(summary.lines[3].amount, 130);
+  assert.equal(summary.accrued, 806);
   assert.equal(summary.period.start, 1782864000);
   assert.equal(summary.analytics.status, "ready");
 });
@@ -114,13 +122,12 @@ test("adding another Basic top-up increases purchased credit without resetting u
     totalPurchasedPence: 80000,
     reports,
     planCatalogue: catalogue,
-    eventCount: 44,
+    eventMetrics,
   });
 
-  assert.equal(summary.requestCount, 44);
   assert.equal(summary.credit.granted, 80000);
-  assert.equal(summary.credit.remaining, 67000);
-  assert.equal(summary.credit.used, 13000);
+  assert.equal(summary.credit.remaining, 79194);
+  assert.equal(summary.credit.used, 806);
 });
 
 test("a temporary analytics failure still returns the authoritative balance", () => {
@@ -132,7 +139,6 @@ test("a temporary analytics failure still returns the authoritative balance", ()
     analyticsAvailable: false,
   });
 
-  assert.equal(summary.requestCount, null);
   assert.deepEqual(summary.lines, []);
   assert.equal(summary.credit.remaining, 37000);
   assert.equal(summary.credit.granted, null);
@@ -151,28 +157,28 @@ test("missing Moesif balance data is never presented as zero credit", () => {
     totalPurchasedPence: 50000,
     reports: [],
     planCatalogue: catalogue,
-    eventCount: 8,
+    eventMetrics,
   });
 
-  assert.equal(summary.requestCount, 8);
   assert.equal(summary.credit.available, false);
-  assert.equal(summary.credit.remaining, null);
-  assert.equal(summary.credit.used, null);
+  assert.equal(summary.credit.remaining, 49194);
+  assert.equal(summary.credit.used, 806);
   assert.equal(summary.credit.granted, 50000);
 });
 
-test("events without billing reports are identified as pending metering", () => {
+test("event usage remains ready when delayed billing reports are empty", () => {
   const summary = buildBasicUsageSummary({
     balance: balance(),
     totalPurchasedPence: 50000,
     reports: [],
     planCatalogue: catalogue,
-    eventCount: 8,
+    eventMetrics,
   });
 
-  assert.equal(summary.requestCount, 8);
-  assert.equal(summary.analytics.status, "pending");
-  assert.equal(summary.analytics.sources.billingReports, "pending");
+  assert.equal(summary.accrued, 806);
+  assert.equal(summary.analytics.status, "ready");
+  assert.equal(summary.analytics.sources.events, "ready");
+  assert.equal(summary.analytics.sources.billingReports, "unavailable");
 });
 
 test("a failed refresh preserves last confirmed analytics for the same period", () => {
@@ -181,22 +187,21 @@ test("a failed refresh preserves last confirmed analytics for the same period", 
     totalPurchasedPence: 50000,
     reports,
     planCatalogue: catalogue,
-    eventCount: 37,
+    eventMetrics,
   });
   const failed = buildBasicUsageSummary({
     balance: balance({ available: 360 }),
     totalPurchasedPence: 50000,
     reports: [],
     planCatalogue: [],
-    eventCount: null,
+    eventMetrics: null,
     analyticsAvailable: false,
-    eventCountAvailable: false,
+    eventMetricsAvailable: false,
   });
 
   const preserved = preserveLastKnownAnalytics(failed, previous);
-  assert.equal(preserved.requestCount, 37);
   assert.equal(preserved.accrued, previous.accrued);
   assert.deepEqual(preserved.lines, previous.lines);
-  assert.equal(preserved.credit.remaining, 36000);
+  assert.equal(preserved.credit.remaining, 49194);
   assert.equal(preserved.analytics.stale, true);
 });

@@ -110,9 +110,7 @@ export default function UsageView({
   const analytics = usage?.analytics;
   const analyticsWarning = usageError
     ? "Current usage could not be refreshed. Last confirmed values are shown where available."
-    : analytics?.status === "pending"
-      ? "Moesif has received API requests, but the billing reports are still being generated. Usage totals will update automatically."
-      : ["partial", "unavailable"].includes(analytics?.status)
+    : ["partial", "unavailable"].includes(analytics?.status)
         ? "Part of the usage service is unavailable. Last confirmed values are shown where available."
         : analytics?.stale
           ? "Usage is still refreshing. Last confirmed values are shown."
@@ -172,18 +170,6 @@ export default function UsageView({
                       true
                     )}`
                   : "Current billing period"}
-              </div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>API requests</div>
-              <div style={styles.metricValue}>
-                {Number.isFinite(usage?.requestCount)
-                  ? usage.requestCount.toLocaleString()
-                  : "Unavailable"}
-              </div>
-              <div style={styles.metricSub}>
-                Requests observed by Moesif this period
               </div>
             </div>
 
@@ -256,6 +242,9 @@ export default function UsageView({
                     {line.quantity != null && (
                       <span style={styles.mono}>
                         {line.quantity.toLocaleString()} units
+                        {Number.isFinite(line.rate)
+                          ? ` at ${formatMoney(line.rate, currency)} each`
+                          : ""}
                       </span>
                     )}
                   </div>

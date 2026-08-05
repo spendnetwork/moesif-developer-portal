@@ -30,7 +30,7 @@ async function readMoesifResponse(response, operation) {
     const normalized = detail.toLowerCase();
     if (
       [401, 403].includes(response.status) &&
-      operation === "Moesif event count lookup"
+      operation === "Moesif usage metrics lookup"
     ) {
       // Some Moesif authorization responses omit the missing scope from the
       // body. The operation itself is unambiguous and requires read:events.
@@ -278,32 +278,42 @@ async function getMoesifBillingReports({
   return readMoesifResponse(response, "Moesif billing report lookup");
 }
 
-function eventCountValue(body) {
-  const candidates = [
-    body,
-    body?.count,
-    body?.total,
-    body?.value,
-    body?.hits?.total,
-    body?.hits?.total?.value,
-  ];
-  for (const candidate of candidates) {
-    const value = Number(candidate);
-    if (Number.isFinite(value) && value >= 0) return value;
-  }
-  const error = new Error("Moesif event count response did not contain a count");
-  error.code = "moesif_event_count_invalid";
-  throw error;
+function aggregationValue(body, key) {
+  const value = Number(body?.aggregations?.[key]?.value);
+  return Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-async function getMoesifEventCount({ companyId, from, to }) {
+function eventUsageMetricValues(body) {
+  return {
+    api_call: aggregationValue(body, "api_calls"),
+    records_returned: aggregationValue(body, "records_returned"),
+    aggregate_call: aggregationValue(body, "aggregate_calls"),
+    attachment:
+      aggregationValue(body, "attachment_list") +
+      aggregationValue(body, "attachment_download"),
+  };
+}
+
+async function getMoesifUsageMetrics({
+  userId,
+  companyId,
+  subscriptionId,
+  from,
+  to,
+}) {
+  if (!userId || !companyId || !subscriptionId) {
+    const error = new Error(
+      "Moesif usage metrics require user, company, and subscription IDs"
+    );
+    error.code = "moesif_usage_identity_incomplete";
+    throw error;
+  }
   const params = new URLSearchParams({
     from: from || "-30d",
     to: to || "now",
-    track_total_hits: "true",
   });
   const response = await fetch(
-    `${moesifApiEndpoint}/v1/search/~/count/events?${params.toString()}`,
+    `${moesifApiEndpoint}/v1/search/~/search/events?${params.toString()}`,
     {
       method: "POST",
       headers: {
@@ -311,12 +321,38 @@ async function getMoesifEventCount({ companyId, from, to }) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: { term: { "company_id.raw": String(companyId) } },
+        query: {
+          bool: {
+            filter: [
+              { term: { "user_id.raw": String(userId) } },
+              { term: { "company_id.raw": String(companyId) } },
+              { term: { "subscription_id.raw": String(subscriptionId) } },
+            ],
+          },
+        },
+        size: 0,
+        aggs: {
+          api_calls: {
+            sum: { field: "metadata.api_call_quantity", missing: 0 },
+          },
+          records_returned: {
+            sum: { field: "metadata.records_returned", missing: 0 },
+          },
+          aggregate_calls: {
+            sum: { field: "metadata.aggregate_call_quantity", missing: 0 },
+          },
+          attachment_list: {
+            sum: { field: "metadata.attachment_list_quantity", missing: 0 },
+          },
+          attachment_download: {
+            sum: { field: "metadata.attachment_download_quantity", missing: 0 },
+          },
+        },
       }),
     }
   );
-  return eventCountValue(
-    await readMoesifResponse(response, "Moesif event count lookup")
+  return eventUsageMetricValues(
+    await readMoesifResponse(response, "Moesif usage metrics lookup")
   );
 }
 
@@ -384,11 +420,11 @@ module.exports = {
   getInfoForEmbeddedWorkspaces,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
-  getMoesifEventCount,
+  getMoesifUsageMetrics,
   getMoesifBillingReports,
   getMoesifPrepaidBalance,
   basicPrepaidSubscriptionId,
-  eventCountValue,
+  eventUsageMetricValues,
   latestEndingBalance,
   normalizedBalance,
   readMoesifResponse,

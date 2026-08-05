@@ -5,7 +5,8 @@ process.env.MOESIF_APPLICATION_ID ||= "00000000000000000000000000000000";
 process.env.MOESIF_MANAGEMENT_TOKEN ||= "test-token";
 
 const {
-  eventCountValue,
+  eventUsageMetricValues,
+  getMoesifUsageMetrics,
   latestEndingBalance,
   normalizedBalance,
   readMoesifResponse,
@@ -47,19 +48,19 @@ test("Moesif read:events failures have a stable operational code", async () => {
   );
 
   await assert.rejects(
-    readMoesifResponse(response, "Moesif event count lookup"),
+    readMoesifResponse(response, "Moesif usage metrics lookup"),
     (error) => error.code === "moesif_event_scope_missing"
   );
 });
 
-test("event-count authorization failures are classified even without scope detail", async () => {
+test("usage authorization failures are classified even without scope detail", async () => {
   const response = new Response(
     JSON.stringify({ moesif_error: { message: "Unauthorized" } }),
     { status: 401, headers: { "Content-Type": "application/json" } }
   );
 
   await assert.rejects(
-    readMoesifResponse(response, "Moesif event count lookup"),
+    readMoesifResponse(response, "Moesif usage metrics lookup"),
     (error) => error.code === "moesif_event_scope_missing"
   );
 });
@@ -96,7 +97,66 @@ test("missing balance fields are not converted into a zero balance", () => {
   );
 });
 
-test("event count parser supports Moesif total-hit responses", () => {
-  assert.equal(eventCountValue({ hits: { total: { value: 42 } } }), 42);
-  assert.equal(eventCountValue({ count: 11 }), 11);
+test("event metric parser combines attachment list and download units", () => {
+  assert.deepEqual(
+    eventUsageMetricValues({
+      aggregations: {
+        api_calls: { value: 6 },
+        records_returned: { value: 40 },
+        aggregate_calls: { value: 2 },
+        attachment_list: { value: 3 },
+        attachment_download: { value: 4 },
+      },
+    }),
+    {
+      api_call: 6,
+      records_returned: 40,
+      aggregate_call: 2,
+      attachment: 7,
+    }
+  );
+});
+
+test("usage metrics query is constrained by user, company, and subscription", async () => {
+  const originalFetch = global.fetch;
+  let request;
+  global.fetch = async (url, options) => {
+    request = { url, options, body: JSON.parse(options.body) };
+    return new Response(
+      JSON.stringify({
+        aggregations: {
+          api_calls: { value: 1 },
+          records_returned: { value: 2 },
+          aggregate_calls: { value: 3 },
+          attachment_list: { value: 4 },
+          attachment_download: { value: 5 },
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  };
+
+  try {
+    const result = await getMoesifUsageMetrics({
+      userId: 10,
+      companyId: 11,
+      subscriptionId: "sub_basic",
+      from: "2026-08-01T00:00:00.000Z",
+      to: "now",
+    });
+    assert.deepEqual(result, {
+      api_call: 1,
+      records_returned: 2,
+      aggregate_call: 3,
+      attachment: 9,
+    });
+    assert.match(request.url, /search\/events/);
+    assert.deepEqual(request.body.query.bool.filter, [
+      { term: { "user_id.raw": "10" } },
+      { term: { "company_id.raw": "11" } },
+      { term: { "subscription_id.raw": "sub_basic" } },
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

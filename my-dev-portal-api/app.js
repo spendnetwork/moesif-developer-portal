@@ -71,7 +71,7 @@ const {
   getPlansFromMoesif,
   sendPrepaidSubscriptionToMoesif,
   createMoesifBalanceTransaction,
-  getMoesifEventCount,
+  getMoesifUsageMetrics,
   getMoesifBillingReports,
   getMoesifPrepaidBalance,
 } = require("./services/moesifApis");
@@ -208,6 +208,11 @@ const moesifMiddleware = moesif({
   },
   identifyCompany: function (req, _res) {
     return req?.user?.moesif_company_id;
+  },
+  skip: function (req, _res) {
+    return ["/usage-summary", "/embed-charts", "/portal-context"].includes(
+      req.path
+    );
   },
 });
 
@@ -710,13 +715,14 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
     ) {
       const summary = await getBasicPrepaidUsageSummary(
         {
+          userId: req.portalContext.moesif_user_id,
           companyId: req.portalContext.moesif_company_id,
           stripeCustomerId: req.portalContext.stripe_customer_id,
         },
         {
           getMoesifPrepaidBalance,
           getMoesifBillingReports,
-          getMoesifEventCount,
+          getMoesifUsageMetrics,
           getPlansFromMoesif,
           getBasicTopUpTotalPence,
         }
@@ -724,8 +730,10 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
       return res.status(200).json(summary);
     }
     const summary = await getUsageSummary(req.user?.email, req.user, {
+      userId: req.portalContext?.moesif_user_id,
       companyId: req.portalContext?.moesif_company_id,
       getMoesifBillingReports,
+      getMoesifUsageMetrics,
     });
     return res.status(200).json(summary);
   } catch (error) {

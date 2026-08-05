@@ -6,6 +6,7 @@ const {
   metricKey,
   metricOrder,
   priceUnitAmountPence,
+  summarizeEventUsage,
 } = require("./usageMetrics");
 const {
   BASIC_ACTIVATION,
@@ -1380,7 +1381,12 @@ async function getStripeUsageContext(cacheKey, email, authUser) {
 
 // Aggregate current-period spend + credit balance for the usage dashboard.
 async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
-  const { companyId, getMoesifBillingReports } = options;
+  const {
+    userId,
+    companyId,
+    getMoesifBillingReports,
+    getMoesifUsageMetrics,
+  } = options;
   const {
     customer,
     subscription,
@@ -1392,19 +1398,37 @@ async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
 
   const canUseMoesif =
     Boolean(companyId) && typeof getMoesifBillingReports === "function";
-  const moesifReports = canUseMoesif
-    ? await getMoesifBillingReports({
-        companyId,
-        subscriptionId: subscription.id,
-        from: periodStartSec
-          ? new Date(periodStartSec * 1000).toISOString()
-          : undefined,
-        to: new Date().toISOString(),
-      }).catch((error) => {
-        console.error("Moesif usage reports unavailable:", error.message);
-        return null;
-      })
-    : null;
+  const canUseEventMetrics =
+    Boolean(userId && companyId && subscription.id) &&
+    typeof getMoesifUsageMetrics === "function";
+  const from = periodStartSec
+    ? new Date(periodStartSec * 1000).toISOString()
+    : undefined;
+  const [eventMetrics, moesifReports] = await Promise.all([
+    canUseEventMetrics
+      ? getMoesifUsageMetrics({
+          userId,
+          companyId,
+          subscriptionId: subscription.id,
+          from,
+          to: "now",
+        }).catch((error) => {
+          console.error("Moesif event usage unavailable:", error.message);
+          return null;
+        })
+      : null,
+    canUseMoesif
+      ? getMoesifBillingReports({
+          companyId,
+          subscriptionId: subscription.id,
+          from,
+          to: new Date().toISOString(),
+        }).catch((error) => {
+          console.error("Moesif usage reports unavailable:", error.message);
+          return null;
+        })
+      : null,
+  ]);
 
   let currency = (
     subscription.items?.data?.[0]?.price?.currency || "gbp"
@@ -1412,16 +1436,19 @@ async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
 
   // Prefer each available Moesif meter, but fill missing meters from Stripe's
   // invoice preview so asynchronously generated reports cannot undercount.
+  const priceDefinitions = commitmentMeterDefinitions(subscription);
   const moesifLines = moesifReports
     ? summarizeMeterReports(
         moesifReports,
-        commitmentMeterDefinitions(subscription)
+        priceDefinitions
       )
     : [];
   const reportsAreComplete =
     moesifLines.length > 0 && moesifLines.every((line) => line.reported);
-  let lines = moesifLines.map(({ reported: _reported, ...line }) => line);
-  if (!reportsAreComplete) {
+  let lines = eventMetrics
+    ? summarizeEventUsage(eventMetrics, priceDefinitions)
+    : moesifLines.map(({ reported: _reported, ...line }) => line);
+  if (!eventMetrics && !reportsAreComplete) {
     const preview = await getStripeInvoicePreview(
       customer.id,
       subscription.id
@@ -1490,6 +1517,15 @@ async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
     accrued: grossUsage,
     lines,
     credit,
+    analytics: {
+      status: eventMetrics ? "ready" : lines.length ? "partial" : "unavailable",
+      stale: false,
+      updatedAt: new Date().toISOString(),
+      sources: {
+        events: eventMetrics ? "ready" : "unavailable",
+        billingReports: reportsAreComplete ? "ready" : "unavailable",
+      },
+    },
   };
   return summary;
 }
