@@ -1142,6 +1142,22 @@ async function cancelStripeSubscription(subscriptionId) {
   return stripe.subscriptions.cancel(subscriptionId);
 }
 
+async function closeStripeInvoice(invoiceId) {
+  if (!invoiceId) return null;
+  const invoice = await stripe.invoices.retrieve(invoiceId);
+  if (invoice.status === "draft") {
+    return stripe.invoices.del(invoice.id, {
+      idempotencyKey: `delete-plan-change-invoice-${invoice.id}`,
+    });
+  }
+  if (invoice.status === "open") {
+    return stripe.invoices.voidInvoice(invoice.id, {}, {
+      idempotencyKey: `void-plan-change-invoice-${invoice.id}`,
+    });
+  }
+  return invoice;
+}
+
 async function endStripeSubscriptionForBasicDowngrade(planChange) {
   const planKey = await getPlanKeyForProduct(planChange.target_product_id);
   if (planKey !== "basic") {
@@ -1596,6 +1612,7 @@ module.exports = {
   getUsageSummary,
   invalidateUsageSummary,
   cancelStripeSubscription,
+  closeStripeInvoice,
   endStripeSubscriptionForBasicDowngrade,
   hasActiveStripeSubscription,
   createStripePlanCheckoutSession,

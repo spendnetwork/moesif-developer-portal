@@ -8,6 +8,7 @@ const {
   verifyStripeSession,
   getActiveStripeSubscription,
   cancelStripeSubscription,
+  closeStripeInvoice,
   endStripeSubscriptionForBasicDowngrade,
   ensureCreditGrant,
   getUsageSummary,
@@ -179,6 +180,9 @@ const subscriptionReconciliationDeps = {
   updateSnApiSubscriptionStatus,
   handleSubscriptionEnded,
   listStripeSubscriptions,
+  getSnApiPlanChangeByCustomer,
+  updateSnApiPlanChange,
+  closeStripeInvoice,
 };
 
 const prepaidReconciliationDeps = {

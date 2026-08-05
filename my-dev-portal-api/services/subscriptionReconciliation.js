@@ -244,6 +244,35 @@ async function resolveAuthenticatedEntitlement(authUser, portalContext, deps) {
   return { ...reconciled, reconciled: true };
 }
 
+async function closePlanChangeForEndedSubscription(subscription, customerId, deps) {
+  const planChange = await deps.getSnApiPlanChangeByCustomer(customerId);
+  if (
+    !planChange ||
+    (planChange.stripe_subscription_id &&
+      planChange.stripe_subscription_id !== subscription.id)
+  ) {
+    return null;
+  }
+
+  let invoice = null;
+  if (planChange.commitment_invoice_id) {
+    invoice = await deps.closeStripeInvoice(planChange.commitment_invoice_id);
+  }
+  const activationStarted = [
+    "activating",
+    "awaiting_commitment_payment",
+  ].includes(planChange.status);
+  const paidInvoice = invoice?.status === "paid";
+  const status = activationStarted || paidInvoice ? "failed" : "cancelled";
+  await deps.updateSnApiPlanChange(planChange.request_id, {
+    status,
+    failure_code: "source_subscription_ended",
+    failure_message:
+      "The source subscription ended before the plan change completed.",
+  });
+  return { status, requestId: planChange.request_id };
+}
+
 async function processSubscriptionLifecycle(subscription, deps) {
   const customerId = stripeId(subscription.customer);
   if (!customerId) {
@@ -254,6 +283,7 @@ async function processSubscriptionLifecycle(subscription, deps) {
   }
 
   if (
+    deps.liveStatuses.includes(subscription.status) &&
     subscription.metadata?.openopps_plan_change_request_id &&
     subscription.metadata?.openopps_plan_change_activated !== "true"
   ) {
@@ -285,6 +315,8 @@ async function processSubscriptionLifecycle(subscription, deps) {
       deps
     );
   }
+
+  await closePlanChangeForEndedSubscription(subscription, customerId, deps);
 
   const result = await deps.handleSubscriptionEnded(subscription, {
     getStripeCustomerById: deps.getStripeCustomerById,
@@ -321,5 +353,6 @@ module.exports = {
   reconcileActiveSubscription,
   reconcileCheckoutSession,
   resolveAuthenticatedEntitlement,
+  closePlanChangeForEndedSubscription,
   processSubscriptionLifecycle,
 };

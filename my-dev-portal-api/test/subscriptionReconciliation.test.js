@@ -64,6 +64,9 @@ function dependencies(overrides = {}) {
     ensureCreditGrant: async () => {},
     grantCommitmentFromInvoice: async () => {},
     syncToMoesif: async () => {},
+    getSnApiPlanChangeByCustomer: async () => null,
+    updateSnApiPlanChange: async () => {},
+    closeStripeInvoice: async () => null,
     ...overrides,
   };
 }
@@ -320,6 +323,59 @@ test("cancellation revokes access when no replacement subscription is live", asy
 
   assert.equal(endedCalls, 1);
   assert.deepEqual(result.revoked, [1]);
+});
+
+test("cancellation also closes a pending upgrade from that subscription", async () => {
+  const updates = [];
+  await processSubscriptionLifecycle(
+    subscription({ status: "canceled" }),
+    dependencies({
+      updateSnApiSubscriptionStatus: async () => ({ is_current: true }),
+      getSnApiPlanChangeByCustomer: async () => ({
+        request_id: "change-123",
+        status: "pending_review",
+        stripe_subscription_id: "sub_growth",
+        commitment_invoice_id: null,
+      }),
+      updateSnApiPlanChange: async (_id, update) => updates.push(update),
+      handleSubscriptionEnded: async () => ({ revoked: [1], failed: [] }),
+    })
+  );
+
+  assert.equal(updates[0].status, "cancelled");
+  assert.equal(updates[0].failure_code, "source_subscription_ended");
+});
+
+test("cancellation voids an unpaid upgrade invoice before closing its request", async () => {
+  const updates = [];
+  let closedInvoiceId = null;
+  await processSubscriptionLifecycle(
+    subscription({
+      status: "canceled",
+      metadata: {
+        openopps_plan_change_request_id: "change-123",
+        openopps_plan_change_activated: "false",
+      },
+    }),
+    dependencies({
+      updateSnApiSubscriptionStatus: async () => ({ is_current: true }),
+      getSnApiPlanChangeByCustomer: async () => ({
+        request_id: "change-123",
+        status: "invoice_open",
+        stripe_subscription_id: "sub_growth",
+        commitment_invoice_id: "in_upgrade",
+      }),
+      closeStripeInvoice: async (invoiceId) => {
+        closedInvoiceId = invoiceId;
+        return { id: invoiceId, status: "void" };
+      },
+      updateSnApiPlanChange: async (_id, update) => updates.push(update),
+      handleSubscriptionEnded: async () => ({ revoked: [1], failed: [] }),
+    })
+  );
+
+  assert.equal(closedInvoiceId, "in_upgrade");
+  assert.equal(updates[0].status, "cancelled");
 });
 
 test("late cancellation reconciles the sole live replacement without revoking keys", async () => {
