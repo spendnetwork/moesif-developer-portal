@@ -26,6 +26,8 @@ const C = {
 };
 
 const PLAN_KEY_ORDER = ["basic", "growth", "enterprise"];
+const CONTACT_LED_PLAN_KEYS = new Set(["growth", "enterprise"]);
+const DEFAULT_SALES_CONTACT_EMAIL = "contact@spendnetwork.com";
 
 const TIERS = [
   {
@@ -90,7 +92,7 @@ function basicTopUpPath(productId) {
 }
 
 export default function PlansView() {
-  const { idToken } = useAuthCombined();
+  const { idToken, userEmail } = useAuthCombined();
   const { plans, plansLoading } = usePlans();
   const { subscriptions, finishedLoading } = useSubscriptions({ idToken });
   const { planChange, refreshPlanChange } = usePlanChange({ idToken });
@@ -128,7 +130,9 @@ export default function PlansView() {
   }, [subscriptions]);
 
   const hasActive = Boolean(currentPlan);
-  const currentRank = PLAN_KEY_ORDER.indexOf(currentPlan);
+  const contactEmail =
+    import.meta.env.REACT_APP_SALES_CONTACT_EMAIL ||
+    DEFAULT_SALES_CONTACT_EMAIL;
 
   if (plansLoading || (idToken && !finishedLoading)) {
     return (
@@ -145,6 +149,14 @@ export default function PlansView() {
 
   async function requestChange(tierKey) {
     setError("");
+    if (CONTACT_LED_PLAN_KEYS.has(tierKey)) {
+      setError(
+        `Growth and Enterprise are arranged with our team. Contact ${contactEmail} to continue.`
+      );
+      setPending(null);
+      return;
+    }
+
     const productId = productByKey[tierKey];
     if (!productId) {
       setError("That plan is not available right now. Please try again shortly.");
@@ -193,11 +205,19 @@ export default function PlansView() {
   }
 
   const pendingTier = TIERS.find((t) => t.key === pending);
-  const pendingIsUpgrade = Boolean(
-    hasActive &&
-      pendingTier &&
-      PLAN_KEY_ORDER.indexOf(pendingTier.key) > currentRank
+  const pendingRequiresContact = Boolean(
+    pendingTier && CONTACT_LED_PLAN_KEYS.has(pendingTier.key)
   );
+  const contactParams = new URLSearchParams({
+    subject: `Open Opportunities API ${pendingTier?.name || "commitment"} plan enquiry`,
+    body: [
+      `I would like to discuss the Open Opportunities API ${pendingTier?.name || "commitment"} plan.`,
+      "",
+      `Account email: ${userEmail || "Not provided"}`,
+      `Current plan: ${currentPlan || "None"}`,
+    ].join("\n"),
+  });
+  const contactHref = `mailto:${contactEmail}?${contactParams.toString()}`;
   return (
     <PageLayout>
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
@@ -205,8 +225,8 @@ export default function PlansView() {
           <div style={styles.eyebrow}>Pricing</div>
           <h1 style={styles.h1}>Open Opportunities API plans</h1>
           <p style={styles.lead}>
-            Prepay to lower every unit rate. Paid upgrades can start during the
-            billing period; downgrades take effect at the commitment boundary.
+            Basic is self-service. Growth and Enterprise are arranged with our
+            team and invoiced against the annual commitment.
           </p>
         </div>
 
@@ -251,8 +271,7 @@ export default function PlansView() {
         >
           {TIERS.map((tier) => {
             const isCurrent = currentPlan === tier.key;
-            const isUpgrade =
-              hasActive && PLAN_KEY_ORDER.indexOf(tier.key) > currentRank;
+            const requiresContact = CONTACT_LED_PLAN_KEYS.has(tier.key);
             return (
               <div
                 key={tier.key}
@@ -312,14 +331,14 @@ export default function PlansView() {
                     className={`plan-choice-button${
                       pending === tier.key ? " plan-choice-button--selected" : ""
                     }`}
-                    disabled={busy || Boolean(planChange)}
+                    disabled={busy || (Boolean(planChange) && !requiresContact)}
                     onClick={() => setPending(tier.key)}
                   >
-                    {hasActive
-                      ? isUpgrade
-                        ? `Request ${tier.name}`
-                        : `Schedule ${tier.name}`
-                      : `Choose ${tier.name}`}
+                    {requiresContact
+                      ? "Contact us"
+                      : hasActive
+                        ? `Schedule ${tier.name}`
+                        : `Choose ${tier.name}`}
                   </button>
                 )}
               </div>
@@ -333,15 +352,17 @@ export default function PlansView() {
           <div style={styles.backdrop} onClick={() => !busy && setPending(null)}>
             <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
               <div style={styles.modalTitle}>
-                {hasActive
+                {pendingRequiresContact
+                  ? `Talk to us about ${pendingTier.name}`
+                  : hasActive
                   ? `Switch to ${pendingTier.name}?`
                   : `Subscribe to ${pendingTier.name}`}
               </div>
               <p style={styles.modalLead}>
-                {hasActive
-                  ? pendingIsUpgrade
-                    ? "We will review the upgrade and send an invoice for the additional annual commitment. Your current plan remains active until payment."
-                    : "The downgrade will take effect at the end of your current commitment period. Nothing changes today."
+                {pendingRequiresContact
+                  ? `${pendingTier.name} is arranged directly with our team. We will confirm the commercial terms and provide an invoice for the annual commitment.`
+                  : hasActive
+                    ? "The downgrade will take effect at the end of your current commitment period. Nothing changes today."
                   : `You'll continue to secure checkout to start your ${pendingTier.name} subscription.`}
               </p>
               <div style={styles.modalSummary}>
@@ -356,32 +377,50 @@ export default function PlansView() {
                   </div>
                 ))}
               </div>
-              {hasActive && (
+              {pendingRequiresContact ? (
+                <p style={styles.modalFine}>
+                  Email us at{" "}
+                  <a href={`mailto:${contactEmail}`} style={styles.emailLink}>
+                    {contactEmail}
+                  </a>
+                  . Your current access will remain unchanged while we arrange
+                  the plan.
+                </p>
+              ) : hasActive ? (
                 <p style={styles.modalFine}>
                   Existing credit remains on the account. New rates apply only
                   after the plan change is activated.
                 </p>
-              )}
+              ) : null}
               <div style={styles.modalActions}>
                 <button
                   style={styles.btnOutlineAuto}
                   onClick={() => setPending(null)}
                   disabled={busy}
                 >
-                  {hasActive ? "Keep current plan" : "Cancel"}
+                  {hasActive && !pendingRequiresContact
+                    ? "Keep current plan"
+                    : "Cancel"}
                 </button>
                 <button
                   style={styles.btnPrimaryAuto}
-                  onClick={() => requestChange(pendingTier.key)}
+                  onClick={() => {
+                    if (pendingRequiresContact) {
+                      window.location.assign(contactHref);
+                      setPending(null);
+                      return;
+                    }
+                    requestChange(pendingTier.key);
+                  }}
                   disabled={busy}
                 >
-                  {busy
-                    ? "Working…"
-                    : hasActive
-                      ? pendingIsUpgrade
-                        ? "Request review"
-                        : "Schedule downgrade"
-                      : "Continue to checkout"}
+                  {pendingRequiresContact
+                    ? "Email our team"
+                    : busy
+                      ? "Working…"
+                      : hasActive
+                        ? "Schedule downgrade"
+                        : "Continue to checkout"}
                 </button>
               </div>
             </div>
@@ -577,6 +616,7 @@ const styles = {
   },
   summaryRow: { display: "flex", justifyContent: "space-between", fontSize: 13.5 },
   modalFine: { margin: "0 0 20px", fontSize: 12.5, lineHeight: 1.55, color: C.muted },
+  emailLink: { color: C.green, fontWeight: 500 },
   modalActions: { display: "flex", justifyContent: "flex-end", gap: 10 },
   toast: {
     position: "fixed",

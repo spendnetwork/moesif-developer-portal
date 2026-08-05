@@ -90,6 +90,9 @@ const {
   isBasicCreditSession,
 } = require("./services/basicPurchasePolicy");
 const {
+  getContactLedPlanDetails,
+} = require("./services/planPurchasePolicy");
+const {
   getBasicPrepaidUsageSummary,
   invalidateBasicUsageSummary,
 } = require("./services/basicUsageSummary");
@@ -421,6 +424,14 @@ app.post(
 
     try {
       const selectedPlanKey = await getPlanKeyForProduct(planId);
+      const contactLedPlan = getContactLedPlanDetails(
+        selectedPlanKey,
+        process.env.SALES_CONTACT_EMAIL
+      );
+      if (contactLedPlan) {
+        return res.status(409).json(contactLedPlan);
+      }
+
       const entitlement =
         selectedPlanKey === "basic"
           ? await ensureRequestEntitlement(req)
