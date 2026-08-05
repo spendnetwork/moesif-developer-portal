@@ -736,8 +736,22 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
           "Multiple active subscriptions were found. Please contact support to correct the account.",
       });
     }
-    // No active subscription yet - not an error state for this widget.
-    return res.status(200).json({ hasSubscription: false });
+    if (error.code === "no_active_subscription") {
+      // No active subscription yet is not an error state for this widget.
+      return res.status(200).json({ hasSubscription: false });
+    }
+    console.error("Usage summary unavailable", {
+      code: error.code || "usage_summary_unavailable",
+      status: error.status,
+      companyId: req.portalContext?.moesif_company_id,
+      planKey: req.portalContext?.current_plan_key,
+      message: error.message,
+    });
+    return res.status(503).json({
+      code: error.code || "usage_summary_unavailable",
+      message:
+        "Your subscription is active, but current usage data is temporarily unavailable.",
+    });
   }
 });
 

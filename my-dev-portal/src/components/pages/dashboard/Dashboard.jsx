@@ -3,7 +3,6 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import useSWR from "swr";
 import { PageLoader } from "../../page-loader";
-import NoticeBox from "../../notice-box";
 import SVG from "react-inlinesvg";
 import dashIcon from "../../../images/icons/bar-chart.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
@@ -53,9 +52,6 @@ const Dashboard = () => {
 
   return (
     <PageLayout>
-      {!error && (
-        <UsageView idToken={idToken} embedTemplateUrls={embedTemplateUrls || []} />
-      )}
       {error && isNotProvisionedError(error) && (
         <div className="empty-state">
           <SVG src={dashIcon} aria-hidden="true" />
@@ -72,16 +68,11 @@ const Dashboard = () => {
           </button>
         </div>
       )}
-      {error && !isNotProvisionedError(error) && (
-        <NoticeBox
-          iconSrc={dashIcon}
-          title={error.message}
-          description={
-            <p>
-              We could not load your usage dashboards yet. If you have just
-              subscribed, try again shortly.
-            </p>
-          }
+      {(!error || !isNotProvisionedError(error)) && (
+        <UsageView
+          idToken={idToken}
+          embedTemplateUrls={embedTemplateUrls || []}
+          embedError={error}
         />
       )}
     </PageLayout>

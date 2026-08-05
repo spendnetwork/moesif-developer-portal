@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   buildBasicUsageSummary,
+  preserveLastKnownAnalytics,
 } = require("../services/basicUsageSummary");
 
 const catalogue = {
@@ -104,6 +105,7 @@ test("Basic summary restores request count, credit used, and metric totals", () 
   assert.equal(summary.lines[2].rate, 46);
   assert.equal(summary.accrued, 1612);
   assert.equal(summary.period.start, 1782864000);
+  assert.equal(summary.analytics.status, "ready");
 });
 
 test("adding another Basic top-up increases purchased credit without resetting usage", () => {
@@ -135,6 +137,7 @@ test("a temporary analytics failure still returns the authoritative balance", ()
   assert.equal(summary.credit.remaining, 37000);
   assert.equal(summary.credit.granted, null);
   assert.equal(summary.credit.used, null);
+  assert.equal(summary.analytics.status, "unavailable");
 });
 
 test("missing Moesif balance data is never presented as zero credit", () => {
@@ -156,4 +159,44 @@ test("missing Moesif balance data is never presented as zero credit", () => {
   assert.equal(summary.credit.remaining, null);
   assert.equal(summary.credit.used, null);
   assert.equal(summary.credit.granted, 50000);
+});
+
+test("events without billing reports are identified as pending metering", () => {
+  const summary = buildBasicUsageSummary({
+    balance: balance(),
+    totalPurchasedPence: 50000,
+    reports: [],
+    planCatalogue: catalogue,
+    eventCount: 8,
+  });
+
+  assert.equal(summary.requestCount, 8);
+  assert.equal(summary.analytics.status, "pending");
+  assert.equal(summary.analytics.sources.billingReports, "pending");
+});
+
+test("a failed refresh preserves last confirmed analytics for the same period", () => {
+  const previous = buildBasicUsageSummary({
+    balance: balance(),
+    totalPurchasedPence: 50000,
+    reports,
+    planCatalogue: catalogue,
+    eventCount: 37,
+  });
+  const failed = buildBasicUsageSummary({
+    balance: balance({ available: 360 }),
+    totalPurchasedPence: 50000,
+    reports: [],
+    planCatalogue: [],
+    eventCount: null,
+    analyticsAvailable: false,
+    eventCountAvailable: false,
+  });
+
+  const preserved = preserveLastKnownAnalytics(failed, previous);
+  assert.equal(preserved.requestCount, 37);
+  assert.equal(preserved.accrued, previous.accrued);
+  assert.deepEqual(preserved.lines, previous.lines);
+  assert.equal(preserved.credit.remaining, 36000);
+  assert.equal(preserved.analytics.stale, true);
 });

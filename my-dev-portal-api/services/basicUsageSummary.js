@@ -132,6 +132,8 @@ function buildBasicUsageSummary({
   planCatalogue,
   eventCount,
   analyticsAvailable = true,
+  eventCountAvailable = Number.isFinite(eventCount),
+  analyticsErrors = [],
   now = Date.now(),
 }) {
   const hasBalance =
@@ -151,11 +153,11 @@ function buildBasicUsageSummary({
     purchasedPence != null && remainingPence != null
       ? Math.max(0, purchasedPence - remainingPence)
       : null;
-  const lines = analyticsAvailable
-    ? summarizeMeterReports(reports, basicPriceDefinitions(planCatalogue)).map(
-        ({ reported: _reported, ...line }) => line
-      )
+  const meterLines = analyticsAvailable
+    ? summarizeMeterReports(reports, basicPriceDefinitions(planCatalogue))
     : [];
+  const reportedMeterCount = meterLines.filter((line) => line.reported).length;
+  const lines = meterLines.map(({ reported: _reported, ...line }) => line);
   const apiCalls = lines.find((line) => line.key === "api_call");
   const periodStart = unixSeconds(
     balance.subscription?.current_period_start ||
@@ -170,6 +172,21 @@ function buildBasicUsageSummary({
       balance.subscription?.current_period_end ||
         balance.subscription?.subscription_period_end
     ) || (periodStart ? addOneMonth(periodStart) : Math.floor(now / 1000));
+  const reportsPending =
+    analyticsAvailable &&
+    eventCountAvailable &&
+    Number(eventCount) > 0 &&
+    reportedMeterCount === 0;
+  const unavailableSourceCount = [analyticsAvailable, eventCountAvailable].filter(
+    (available) => !available
+  ).length;
+  const analyticsStatus = unavailableSourceCount
+    ? unavailableSourceCount === 2
+      ? "unavailable"
+      : "partial"
+    : reportsPending
+      ? "pending"
+      : "ready";
 
   return {
     hasSubscription: true,
@@ -195,6 +212,20 @@ function buildBasicUsageSummary({
           ? Math.round(balance.pending * 100)
           : null,
       projectedRemaining: remainingPence,
+    },
+    analytics: {
+      status: analyticsStatus,
+      stale: false,
+      updatedAt: new Date(now).toISOString(),
+      sources: {
+        billingReports: analyticsAvailable
+          ? reportsPending
+            ? "pending"
+            : "ready"
+          : "unavailable",
+        events: eventCountAvailable ? "ready" : "unavailable",
+      },
+      errors: [...new Set(analyticsErrors.filter(Boolean))],
     },
   };
 }
@@ -241,6 +272,7 @@ async function computeBasicReferenceData(context, deps) {
   return {
     totalPurchasedPence:
       results[0].status === "fulfilled" ? results[0].value : null,
+    purchaseTotalAvailable: results[0].status === "fulfilled",
     planCatalogue: results[1].status === "fulfilled" ? results[1].value : [],
     plansAvailable: results[1].status === "fulfilled",
     failures: results
@@ -330,16 +362,50 @@ async function computeBasicPrepaidUsageSummary(context, deps) {
       analytics[1].status === "fulfilled" ? analytics[1].value : null,
     analyticsAvailable:
       analytics[0].status === "fulfilled" && reference.plansAvailable,
+    eventCountAvailable: analytics[1].status === "fulfilled",
+    analyticsErrors: failures.map(
+      (error) => error?.code || "usage_dependency_unavailable"
+    ),
   });
   return summary;
 }
 
+function preserveLastKnownAnalytics(summary, previous) {
+  if (!previous || summary?.period?.start !== previous?.period?.start) {
+    return summary;
+  }
+
+  const sources = summary.analytics?.sources || {};
+  const preserveReports =
+    sources.billingReports === "unavailable" ||
+    (sources.billingReports === "pending" && previous.lines?.length > 0);
+  const preserveEvents =
+    sources.events === "unavailable" && Number.isFinite(previous.requestCount);
+  if (!preserveReports && !preserveEvents) return summary;
+
+  return {
+    ...summary,
+    ...(preserveReports
+      ? { lines: previous.lines, accrued: previous.accrued }
+      : {}),
+    ...(preserveEvents ? { requestCount: previous.requestCount } : {}),
+    analytics: {
+      ...summary.analytics,
+      stale: true,
+      lastSuccessfulAt:
+        previous.analytics?.updatedAt || previous.analytics?.lastSuccessfulAt,
+    },
+  };
+}
+
 function refreshBasicPrepaidUsageSummary(key, context, deps) {
   if (basicUsageInflight.has(key)) return basicUsageInflight.get(key);
+  const previous = basicUsageCache.get(key)?.summary;
   const promise = computeBasicPrepaidUsageSummary(context, deps)
     .then((summary) => {
-      setCached(key, summary);
-      return summary;
+      const resilientSummary = preserveLastKnownAnalytics(summary, previous);
+      setCached(key, resilientSummary);
+      return resilientSummary;
     })
     .finally(() => basicUsageInflight.delete(key));
   basicUsageInflight.set(key, promise);
@@ -369,5 +435,6 @@ module.exports = {
   buildBasicUsageSummary,
   getBasicPrepaidUsageSummary,
   invalidateBasicUsageSummary,
+  preserveLastKnownAnalytics,
   summarizeMeterReports,
 };

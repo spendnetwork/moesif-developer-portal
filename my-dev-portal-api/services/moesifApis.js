@@ -30,17 +30,19 @@ async function readMoesifResponse(response, operation) {
     const normalized = detail.toLowerCase();
     if (
       [401, 403].includes(response.status) &&
+      operation === "Moesif event count lookup"
+    ) {
+      // Some Moesif authorization responses omit the missing scope from the
+      // body. The operation itself is unambiguous and requires read:events.
+      error.code = "moesif_event_scope_missing";
+    } else if (
+      [401, 403].includes(response.status) &&
       (normalized.includes("create:billing_meters") ||
         normalized.includes("create:billing_reports") ||
         normalized.includes("read:billing_meters") ||
         normalized.includes("read:billing_reports"))
     ) {
       error.code = "moesif_management_scope_missing";
-    } else if (
-      [401, 403].includes(response.status) &&
-      normalized.includes("read:events")
-    ) {
-      error.code = "moesif_event_scope_missing";
     }
     throw error;
   }
@@ -342,7 +344,10 @@ async function createEmbeddedWorkspaceInfo({ companyId, workspaceId }) {
       },
       body: JSON.stringify({
         template: {
-          values: { company_id: [String(companyId)] },
+          // Built-in dynamic IDs are scalar values in Moesif's workspace API.
+          // An array is accepted by the endpoint but does not match the
+          // Dynamic Company ID sandbox criterion, producing an empty chart.
+          values: { company_id: String(companyId) },
           from: from.toISOString(),
           to: to.toISOString(),
         },

@@ -73,8 +73,12 @@ function ChartCard({ title, url }) {
   );
 }
 
-export default function UsageView({ idToken, embedTemplateUrls = [] }) {
-  const { usage, usageLoading } = useUsageSummary({ idToken });
+export default function UsageView({
+  idToken,
+  embedTemplateUrls = [],
+  embedError = null,
+}) {
+  const { usage, usageLoading, usageError } = useUsageSummary({ idToken });
 
   const loading = usageLoading && !usage;
   const currency = usage?.currency || "GBP";
@@ -103,6 +107,16 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
           )
         )
       : 0;
+  const analytics = usage?.analytics;
+  const analyticsWarning = usageError
+    ? "Current usage could not be refreshed. Last confirmed values are shown where available."
+    : analytics?.status === "pending"
+      ? "Moesif has received API requests, but the billing reports are still being generated. Usage totals will update automatically."
+      : ["partial", "unavailable"].includes(analytics?.status)
+        ? "Part of the usage service is unavailable. Last confirmed values are shown where available."
+        : analytics?.stale
+          ? "Usage is still refreshing. Last confirmed values are shown."
+          : null;
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto" }}>
@@ -114,6 +128,13 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
           down.
         </p>
       </div>
+
+      {analyticsWarning && (
+        <div role="status" style={styles.warning}>
+          <strong style={{ color: C.head }}>Usage update delayed.</strong>{" "}
+          {analyticsWarning}
+        </div>
+      )}
 
       {loading ? (
         <div>
@@ -136,7 +157,7 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
             <Skeleton w="60%" h={14} />
           </div>
         </div>
-      ) : (
+      ) : usage ? (
         <div>
           <div style={styles.twoCol}>
             <div style={styles.metricCard}>
@@ -151,6 +172,18 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
                       true
                     )}`
                   : "Current billing period"}
+              </div>
+            </div>
+
+            <div style={styles.metricCard}>
+              <div style={styles.metricLabel}>API requests</div>
+              <div style={styles.metricValue}>
+                {Number.isFinite(usage?.requestCount)
+                  ? usage.requestCount.toLocaleString()
+                  : "Unavailable"}
+              </div>
+              <div style={styles.metricSub}>
+                Requests observed by Moesif this period
               </div>
             </div>
 
@@ -243,9 +276,30 @@ export default function UsageView({ idToken, embedTemplateUrls = [] }) {
           )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+            {embedError && (
+              <div role="status" style={styles.warning}>
+                <strong style={{ color: C.head }}>Charts are unavailable.</strong>{" "}
+                Usage totals will continue updating while the embedded Moesif
+                workspaces reconnect.
+              </div>
+            )}
             <ChartCard title="Recent API activity" url={embedTemplateUrls[0]} />
             <ChartCard title="Usage over time" url={embedTemplateUrls[1]} />
           </div>
+          {analytics?.updatedAt && (
+            <div style={styles.updatedAt}>
+              Usage checked {new Date(analytics.updatedAt).toLocaleTimeString()}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={styles.metricCard}>
+          <div style={{ fontSize: 15, fontWeight: 500, color: C.head }}>
+            Usage data is temporarily unavailable
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 13, color: C.muted }}>
+            Your subscription remains active. This page will retry automatically.
+          </p>
         </div>
       )}
     </div>
@@ -269,7 +323,11 @@ const styles = {
     color: C.head,
   },
   lead: { margin: 0, fontSize: 15, color: C.muted },
-  twoCol: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
+  twoCol: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+    gap: 16,
+  },
   metricCard: {
     background: "#FFFFFF",
     border: `1px solid ${C.line}`,
@@ -355,5 +413,21 @@ const styles = {
     border: `1px solid ${C.line}`,
     padding: "4px 10px",
     borderRadius: 999,
+  },
+  warning: {
+    marginBottom: 16,
+    padding: "12px 14px",
+    border: "1px solid #E8C66A",
+    borderRadius: 8,
+    background: "#FFF8E5",
+    color: C.body,
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
+  updatedAt: {
+    marginTop: 10,
+    textAlign: "right",
+    color: C.muted,
+    fontSize: 12,
   },
 };

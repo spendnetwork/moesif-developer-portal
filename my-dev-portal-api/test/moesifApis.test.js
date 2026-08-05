@@ -52,6 +52,18 @@ test("Moesif read:events failures have a stable operational code", async () => {
   );
 });
 
+test("event-count authorization failures are classified even without scope detail", async () => {
+  const response = new Response(
+    JSON.stringify({ moesif_error: { message: "Unauthorized" } }),
+    { status: 401, headers: { "Content-Type": "application/json" } }
+  );
+
+  await assert.rejects(
+    readMoesifResponse(response, "Moesif event count lookup"),
+    (error) => error.code === "moesif_event_scope_missing"
+  );
+});
+
 test("latest balance is selected by Moesif sequence rather than array order", () => {
   const latest = latestEndingBalance([
     {
