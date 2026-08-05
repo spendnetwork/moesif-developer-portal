@@ -73,6 +73,14 @@ function catalogPlanKey(plan) {
   return PLAN_KEY_ORDER.find((key) => name.includes(key));
 }
 
+function checkoutPath(productId, planKey) {
+  const params = new URLSearchParams({ plan_id_to_purchase: productId });
+  if (planKey === "basic") {
+    params.set("purchase_type", "basic_activation");
+  }
+  return `/checkout?${params.toString()}`;
+}
+
 export default function PlansView() {
   const { idToken } = useAuthCombined();
   const { plans, plansLoading } = usePlans();
@@ -138,7 +146,7 @@ export default function PlansView() {
     // No active subscription yet -> take them through checkout to subscribe.
     if (!hasActive) {
       setPending(null);
-      navigate(`/checkout?plan_id_to_purchase=${encodeURIComponent(productId)}`);
+      navigate(checkoutPath(productId, tierKey));
       return;
     }
 
@@ -160,7 +168,7 @@ export default function PlansView() {
         );
       } else if (result?.clientSecret) {
         setPending(null);
-        navigate(`/checkout?plan_id_to_purchase=${encodeURIComponent(productId)}`);
+        navigate(checkoutPath(productId, tierKey));
       } else {
         setPending(null);
         flash("Plan switch requested");
