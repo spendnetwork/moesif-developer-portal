@@ -7,6 +7,7 @@ import { PageLoader } from "../../page-loader";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import usePlans from "../../../hooks/usePlans";
 import useSubscriptions from "../../../hooks/useSubscriptions";
+import usePlanChange from "../../../hooks/usePlanChange";
 import { apiRequest } from "../../../lib/portal-api";
 
 // Design tokens (from the OpenOpps developer portal design).
@@ -37,7 +38,7 @@ const TIERS = [
       ["Aggregate calls", "£0.46"],
       ["Attachments", "£0.65"],
     ],
-    note: "Billed monthly in arrears. First-time Basic accounts receive a £500 development credit, and you can top up credit at any time.",
+    note: "Prepay any amount from the minimum top-up. Credit draws down at Basic rates and access pauses when the balance reaches zero.",
     variant: "outline",
   },
   {
@@ -79,10 +80,10 @@ export default function PlansView() {
   const { idToken } = useAuthCombined();
   const { plans, plansLoading } = usePlans();
   const { subscriptions, finishedLoading } = useSubscriptions({ idToken });
+  const { planChange, refreshPlanChange } = usePlanChange({ idToken });
 
   const navigate = useNavigate();
   const [pending, setPending] = useState(null); // tier key awaiting confirm
-  const [scheduled, setScheduled] = useState(null); // tier key scheduled
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
@@ -114,6 +115,7 @@ export default function PlansView() {
   }, [subscriptions]);
 
   const hasActive = Boolean(currentPlan);
+  const currentRank = PLAN_KEY_ORDER.indexOf(currentPlan);
 
   if (plansLoading || (idToken && !finishedLoading)) {
     return (
@@ -143,7 +145,7 @@ export default function PlansView() {
       return;
     }
 
-    // Active subscription -> schedule a plan change for period end.
+    // Existing accounts create a reviewed upgrade or a scheduled downgrade.
     setBusy(true);
     try {
       const result = await apiRequest(
@@ -152,9 +154,13 @@ export default function PlansView() {
         { method: "POST" }
       );
       if (result?.scheduled) {
-        setScheduled(tierKey);
         setPending(null);
-        flash("Plan switch scheduled");
+        await refreshPlanChange();
+        flash(
+          result.requiresReview
+            ? "Upgrade request sent for review"
+            : "Downgrade scheduled"
+        );
       } else if (result?.clientSecret) {
         setPending(null);
         navigate(`/checkout?plan_id_to_purchase=${encodeURIComponent(productId)}`);
@@ -174,8 +180,11 @@ export default function PlansView() {
   }
 
   const pendingTier = TIERS.find((t) => t.key === pending);
-  const scheduledTier = TIERS.find((t) => t.key === scheduled);
-
+  const pendingIsUpgrade = Boolean(
+    hasActive &&
+      pendingTier &&
+      PLAN_KEY_ORDER.indexOf(pendingTier.key) > currentRank
+  );
   return (
     <PageLayout>
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
@@ -183,8 +192,8 @@ export default function PlansView() {
           <div style={styles.eyebrow}>Pricing</div>
           <h1 style={styles.h1}>Open Opportunities API plans</h1>
           <p style={styles.lead}>
-            Prepay to lower every unit rate. Changes take effect at the end of
-            your billing period.
+            Prepay to lower every unit rate. Paid upgrades can start during the
+            billing period; downgrades take effect at the commitment boundary.
           </p>
         </div>
 
@@ -194,17 +203,23 @@ export default function PlansView() {
           </div>
         )}
 
-        {scheduledTier && (
+        {planChange && (
           <div style={styles.scheduledBanner}>
             <span style={{ color: C.successText, fontSize: 14 }}>
-              Scheduled — switching to {scheduledTier.name} at the end of your
-              billing period. Your current rates apply until then.
+              {planChange.change_type === "upgrade"
+                ? `Upgrade to ${planChange.to_plan_key} is ${planChange.status.replaceAll("_", " ")}. Your current plan remains active until its invoice is paid.`
+                : `Downgrade to ${planChange.to_plan_key} is scheduled for ${new Date(planChange.effective_at).toLocaleDateString()}.`}
             </span>
             <div style={{ flex: 1 }} />
             <button
+              disabled={["invoice_open", "activating"].includes(planChange.status)}
               onClick={() => {
-                setScheduled(null);
-                flash("Scheduled change cancelled");
+                apiRequest("/plan-change", idToken, { method: "DELETE" })
+                  .then(() => refreshPlanChange())
+                  .then(() => flash("Plan change cancelled"))
+                  .catch((cancelError) =>
+                    setError(cancelError.message || "Unable to cancel the plan change")
+                  );
               }}
               style={styles.linkGreen}
             >
@@ -223,6 +238,8 @@ export default function PlansView() {
         >
           {TIERS.map((tier) => {
             const isCurrent = currentPlan === tier.key;
+            const isUpgrade =
+              hasActive && PLAN_KEY_ORDER.indexOf(tier.key) > currentRank;
             return (
               <div
                 key={tier.key}
@@ -271,10 +288,14 @@ export default function PlansView() {
                 ) : (
                   <button
                     style={tier.variant === "primary" ? styles.btnPrimary : styles.btnOutlineStrong}
-                    disabled={busy}
+                    disabled={busy || Boolean(planChange)}
                     onClick={() => setPending(tier.key)}
                   >
-                    {hasActive ? `Switch to ${tier.name}` : `Choose ${tier.name}`}
+                    {hasActive
+                      ? isUpgrade
+                        ? `Request ${tier.name}`
+                        : `Schedule ${tier.name}`
+                      : `Choose ${tier.name}`}
                   </button>
                 )}
               </div>
@@ -294,7 +315,9 @@ export default function PlansView() {
               </div>
               <p style={styles.modalLead}>
                 {hasActive
-                  ? "The change is scheduled for the end of your current billing period. Nothing changes today and your existing credit carries over."
+                  ? pendingIsUpgrade
+                    ? "We will review the upgrade and send an invoice for the additional annual commitment. Your current plan remains active until payment."
+                    : "The downgrade will take effect at the end of your current commitment period. Nothing changes today."
                   : `You'll continue to secure checkout to start your ${pendingTier.name} subscription.`}
               </p>
               <div style={styles.modalSummary}>
@@ -311,8 +334,8 @@ export default function PlansView() {
               </div>
               {hasActive && (
                 <p style={styles.modalFine}>
-                  Usage before the change is billed at your current rates. Any
-                  prepaid balance is prorated onto the new plan.
+                  Existing credit remains on the account. New rates apply only
+                  after the plan change is activated.
                 </p>
               )}
               <div style={styles.modalActions}>
@@ -331,7 +354,9 @@ export default function PlansView() {
                   {busy
                     ? "Working…"
                     : hasActive
-                      ? "Schedule change"
+                      ? pendingIsUpgrade
+                        ? "Request review"
+                        : "Schedule downgrade"
                       : "Continue to checkout"}
                 </button>
               </div>

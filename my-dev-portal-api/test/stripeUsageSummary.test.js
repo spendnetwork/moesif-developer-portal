@@ -7,6 +7,7 @@ const {
   buildStripeUsageLines,
   isMissingStripeCustomer,
   mergeMoesifAndStripeUsageLines,
+  isPendingReviewedSubscription,
 } = require("../services/stripeApis");
 
 test("recognizes Stripe's missing-customer responses as stale references", () => {
@@ -151,5 +152,23 @@ test("partial Moesif reports are completed with Stripe usage", () => {
         amount: 1000,
       },
     ]
+  );
+});
+
+test("unpaid reviewed subscriptions are excluded from active entitlement", () => {
+  assert.equal(
+    isPendingReviewedSubscription({
+      metadata: { openopps_plan_change_request_id: "change-123" },
+    }),
+    true
+  );
+  assert.equal(
+    isPendingReviewedSubscription({
+      metadata: {
+        openopps_plan_change_request_id: "change-123",
+        openopps_plan_change_activated: "true",
+      },
+    }),
+    false
   );
 });

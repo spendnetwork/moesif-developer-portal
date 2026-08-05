@@ -32,6 +32,11 @@ const stripePreviewCache = new Map();
 const stripePreviewInflight = new Map();
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
 const BASIC_TOP_UP_MIN_AMOUNT_GBP = 1;
+const PLAN_RANK = { basic: 0, growth: 1, enterprise: 2 };
+const PLAN_CHANGE_INVOICE_DAYS = Number.parseInt(
+  process.env.PLAN_CHANGE_INVOICE_DAYS || "14",
+  10
+);
 
 function getFrontendUrl(pathname) {
   const configured = String(process.env.FRONT_END_DOMAIN || "").replace(/\/$/, "");
@@ -102,6 +107,13 @@ function invalidateUsageSummary() {
   usageSummaryCache.clear();
   stripeUsageContextCache.clear();
   stripePreviewCache.clear();
+}
+
+function isPendingReviewedSubscription(subscription) {
+  return Boolean(
+    subscription?.metadata?.openopps_plan_change_request_id &&
+      subscription.metadata?.openopps_plan_change_activated !== "true"
+  );
 }
 
 async function getStripeInvoicePreview(customerId, subscriptionId) {
@@ -306,8 +318,10 @@ async function getActiveStripeSubscription(email, authUserId, preferredCustomerI
     status: "all",
     limit: 100,
   });
-  const activeSubscriptions = subscriptions.data.filter((candidate) =>
-    LIVE_SUBSCRIPTION_STATUSES.includes(candidate.status)
+  const activeSubscriptions = subscriptions.data.filter(
+    (candidate) =>
+      LIVE_SUBSCRIPTION_STATUSES.includes(candidate.status) &&
+      !isPendingReviewedSubscription(candidate)
   );
   if (!activeSubscriptions.length) {
     const error = new Error("Active Stripe subscription not found");
@@ -358,6 +372,27 @@ async function getPlanPrices(planId) {
     throw new Error(`No active metered prices found for plan ${planId}`);
   }
   return { commitmentPrices, meteredPrices };
+}
+
+function commitmentAmountPence(price) {
+  if (!price) return 0;
+  const configured = Number(price.metadata?.commitment_amount);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.round(configured * 100);
+  }
+  return Number.isFinite(price.unit_amount) ? price.unit_amount : 0;
+}
+
+function planChangeDirection(fromPlanKey, toPlanKey) {
+  if (!(fromPlanKey in PLAN_RANK) || !(toPlanKey in PLAN_RANK)) {
+    throw stripeLookupError("unsupported_plan_change", "Unsupported plan transition");
+  }
+  if (fromPlanKey === toPlanKey) {
+    throw stripeLookupError("already_on_plan", "You are already subscribed to this plan");
+  }
+  return PLAN_RANK[toPlanKey] > PLAN_RANK[fromPlanKey]
+    ? "upgrade"
+    : "downgrade";
 }
 
 function getStripeProduct(productId) {
@@ -670,14 +705,27 @@ async function markBasicTopUpReconciled(
   );
 }
 
-async function prepareStripePlanChange(email, planId, authUser) {
-  const { customer, subscription, product } =
-    await getActiveStripeSubscription(
+async function prepareStripePlanChange(email, planId, authUser, portalContext = {}) {
+  const currentPlanFromContext = String(
+    portalContext.current_plan_key || ""
+  ).toLowerCase();
+  let customer;
+  let subscription = null;
+  let product = null;
+  if (currentPlanFromContext === "basic" && !portalContext.current_subscription_id) {
+    customer = await resolveStripeCustomer(
       email,
       authUser?.sub,
-      authUser?.stripe_customer_id
+      portalContext.stripe_customer_id || authUser?.stripe_customer_id
     );
-  if (["past_due", "unpaid", "incomplete"].includes(subscription.status)) {
+  } else {
+    ({ customer, subscription, product } = await getActiveStripeSubscription(
+      email,
+      authUser?.sub,
+      portalContext.stripe_customer_id || authUser?.stripe_customer_id
+    ));
+  }
+  if (subscription && ["past_due", "unpaid", "incomplete"].includes(subscription.status)) {
     const error = new Error(
       "Resolve the outstanding subscription payment before changing plans"
     );
@@ -686,7 +734,7 @@ async function prepareStripePlanChange(email, planId, authUser) {
   }
   const openInvoices = await stripe.invoices.list({
     customer: customer.id,
-    subscription: subscription.id,
+    ...(subscription ? { subscription: subscription.id } : {}),
     status: "open",
     limit: 1,
   });
@@ -697,25 +745,48 @@ async function prepareStripePlanChange(email, planId, authUser) {
     error.code = "outstanding_payment";
     throw error;
   }
-  await getPlanPrices(planId);
-  const currentProductId =
-    typeof product === "string" ? product : product?.id;
-  const [fromPlanKey, toPlanKey] = await Promise.all([
-    getPlanKeyForProduct(currentProductId),
-    getPlanKeyForProduct(planId),
-  ]);
-  if (fromPlanKey === toPlanKey) {
-    const error = new Error("You are already subscribed to this plan");
-    error.code = "already_on_plan";
-    throw error;
+  const targetPrices = await getPlanPrices(planId);
+  const currentProductId = typeof product === "string" ? product : product?.id;
+  const fromPlanKey = currentPlanFromContext ||
+    (await getPlanKeyForProduct(currentProductId));
+  const toPlanKey = await getPlanKeyForProduct(planId);
+  const changeType = planChangeDirection(fromPlanKey, toPlanKey);
+  const targetCommitment = commitmentAmountPence(targetPrices.commitmentPrices[0]);
+  const currentCommitment = subscription
+    ? Math.max(
+        0,
+        ...subscription.items.data.map((item) =>
+          isCommitmentPrice(item.price) ? commitmentAmountPence(item.price) : 0
+        )
+      )
+    : 0;
+  const quotedAmountGbpPence =
+    changeType === "upgrade" ? Math.max(0, targetCommitment - currentCommitment) : 0;
+  if (changeType === "upgrade" && quotedAmountGbpPence <= 0) {
+    throw stripeLookupError(
+      "commitment_quote_invalid",
+      "The target plan does not have a valid higher commitment amount"
+    );
   }
 
-  const periodEnds = subscription.items.data
+  const periodEnds = (subscription?.items?.data || [])
     .filter((item) => item.price?.recurring?.usage_type === "metered")
     .map((item) => item.current_period_end)
     .filter((value) => Number.isFinite(value));
-  if (!periodEnds.length) {
+  if (changeType === "downgrade" && !periodEnds.length) {
     throw new Error("Current subscription has no metered billing period");
+  }
+
+  const currency = String(
+    targetPrices.commitmentPrices[0]?.currency ||
+      targetPrices.meteredPrices[0]?.currency ||
+      "gbp"
+  ).toUpperCase();
+  if (currency !== "GBP") {
+    throw stripeLookupError(
+      "unsupported_commitment_currency",
+      "Reviewed Open Opportunities commitments must be configured in GBP"
+    );
   }
 
   return {
@@ -723,9 +794,193 @@ async function prepareStripePlanChange(email, planId, authUser) {
     subscription,
     fromPlanKey,
     toPlanKey,
+    changeType,
     targetProductId: planId,
-    effectiveAt: Math.min(...periodEnds),
+    effectiveAt:
+      changeType === "upgrade"
+        ? Math.floor(Date.now() / 1000) + 5
+        : Math.min(...periodEnds),
+    quotedAmountGbpPence,
+    currency,
   };
+}
+
+function planChangeMetadata(planChange, extra = {}) {
+  return {
+    openopps_plan_change_request_id: String(planChange.request_id),
+    openopps_plan_change_type: String(planChange.change_type || "upgrade"),
+    openopps_from_plan: String(planChange.from_plan_key),
+    openopps_to_plan: String(planChange.to_plan_key),
+    openopps_target_product_id: String(planChange.target_product_id),
+    openopps_commitment_amount_pence: String(
+      planChange.quoted_amount_gbp_pence || 0
+    ),
+    ...extra,
+  };
+}
+
+async function finaliseAndSendInvoice(invoice) {
+  let current = invoice;
+  if (current.status === "draft") {
+    current = await stripe.invoices.finalizeInvoice(current.id, {
+      auto_advance: false,
+    });
+  }
+  if (current.status === "open") {
+    current = await stripe.invoices.sendInvoice(current.id);
+  }
+  return current;
+}
+
+async function issueReviewedPlanChangeInvoice(planChange) {
+  const { commitmentPrices, meteredPrices } = await getPlanPrices(
+    planChange.target_product_id
+  );
+  const targetCommitment = commitmentAmountPence(commitmentPrices[0]);
+  let currentCommitment = 0;
+  let currentSubscription = null;
+  if (planChange.stripe_subscription_id) {
+    currentSubscription = await stripe.subscriptions.retrieve(
+      planChange.stripe_subscription_id,
+      { expand: ["items.data.price"] }
+    );
+    currentCommitment = Math.max(
+      0,
+      ...currentSubscription.items.data.map((item) =>
+        isCommitmentPrice(item.price) ? commitmentAmountPence(item.price) : 0
+      )
+    );
+  }
+  const exactAmount = Math.max(0, targetCommitment - currentCommitment);
+  if (exactAmount <= 0 || exactAmount !== planChange.quoted_amount_gbp_pence) {
+    throw stripeLookupError(
+      "commitment_quote_changed",
+      "The reviewed commitment quote no longer matches the Stripe catalogue"
+    );
+  }
+  const currency = String(
+    commitmentPrices[0]?.currency || planChange.currency || "gbp"
+  ).toLowerCase();
+  if (
+    currency !== "gbp" ||
+    String(planChange.currency || "GBP").toLowerCase() !== "gbp"
+  ) {
+    throw stripeLookupError(
+      "unsupported_commitment_currency",
+      "Reviewed Open Opportunities commitments must be invoiced in GBP"
+    );
+  }
+
+  if (!currentSubscription) {
+    const created = await stripe.subscriptions.create(
+      {
+        customer: planChange.stripe_customer_id,
+        items: [
+          ...commitmentPrices.map((price) => ({ price: price.id })),
+          ...meteredPrices.map((price) => ({ price: price.id })),
+        ],
+        collection_method: "send_invoice",
+        days_until_due: PLAN_CHANGE_INVOICE_DAYS,
+        billing_mode: { type: "flexible" },
+        metadata: planChangeMetadata(planChange),
+        expand: ["latest_invoice", "items.data.price.product"],
+      },
+      { idempotencyKey: `reviewed-plan-subscription-${planChange.request_id}` }
+    );
+    const invoice = await finaliseAndSendInvoice(created.latest_invoice);
+    return { subscription: created, invoice, amount: exactAmount };
+  }
+
+  const periodEnds = currentSubscription.items.data
+    .map((item) => item.current_period_end)
+    .filter(Number.isFinite);
+  const creditExpiresAt = periodEnds.length ? Math.max(...periodEnds) : null;
+  const invoice = await stripe.invoices.create(
+    {
+      customer: planChange.stripe_customer_id,
+      collection_method: "send_invoice",
+      days_until_due: PLAN_CHANGE_INVOICE_DAYS,
+      auto_advance: false,
+      metadata: planChangeMetadata(planChange, {
+        openopps_credit_expires_at: creditExpiresAt
+          ? String(creditExpiresAt)
+          : "",
+        openopps_stripe_subscription_id: currentSubscription.id,
+      }),
+    },
+    { idempotencyKey: `reviewed-plan-invoice-${planChange.request_id}` }
+  );
+  await stripe.invoiceItems.create(
+    {
+      customer: planChange.stripe_customer_id,
+      invoice: invoice.id,
+      amount: exactAmount,
+      currency,
+      description: `${planChange.from_plan_key} to ${planChange.to_plan_key} annual commitment upgrade`,
+      metadata: planChangeMetadata(planChange),
+    },
+    { idempotencyKey: `reviewed-plan-item-${planChange.request_id}` }
+  );
+  return {
+    subscription: currentSubscription,
+    invoice: await finaliseAndSendInvoice(invoice),
+    amount: exactAmount,
+  };
+}
+
+async function activateReviewedPlanChange(planChange) {
+  const subscription = await stripe.subscriptions.retrieve(
+    planChange.stripe_subscription_id,
+    { expand: ["items.data.price.product"] }
+  );
+  const { commitmentPrices, meteredPrices } = await getPlanPrices(
+    planChange.target_product_id
+  );
+  const targetPriceIds = new Set(
+    [...commitmentPrices, ...meteredPrices].map((price) => price.id)
+  );
+  const currentPriceIds = new Set(
+    subscription.items.data.map((item) => item.price.id)
+  );
+  const alreadyOnTarget =
+    targetPriceIds.size === currentPriceIds.size &&
+    [...targetPriceIds].every((priceId) => currentPriceIds.has(priceId));
+  return stripe.subscriptions.update(
+    subscription.id,
+    {
+      ...(!alreadyOnTarget
+        ? {
+            items: [
+              ...subscription.items.data.map((item) => ({
+                id: item.id,
+                deleted: true,
+              })),
+              ...[...commitmentPrices, ...meteredPrices].map((price) => ({
+                price: price.id,
+              })),
+            ],
+          }
+        : {}),
+      billing_cycle_anchor: "unchanged",
+      proration_behavior: "none",
+      collection_method: "send_invoice",
+      days_until_due: PLAN_CHANGE_INVOICE_DAYS,
+      metadata: {
+        ...subscription.metadata,
+        plan_id: planChange.target_product_id,
+        plan_change_request_id: planChange.request_id,
+        openopps_plan_change_activated: "true",
+      },
+      expand: ["items.data.price.product"],
+    },
+    { idempotencyKey: `activate-reviewed-plan-${planChange.request_id}` }
+  );
+}
+
+function getStripeInvoice(invoiceId) {
+  return stripe.invoices.retrieve(invoiceId, {
+    expand: ["lines.data.price", "parent.subscription_details.subscription"],
+  });
 }
 
 async function activateStripePlanChange(planChange) {
@@ -885,6 +1140,25 @@ async function updateStripeCustomerIdentity(
 async function cancelStripeSubscription(subscriptionId) {
   if (!subscriptionId) return null;
   return stripe.subscriptions.cancel(subscriptionId);
+}
+
+async function endStripeSubscriptionForBasicDowngrade(planChange) {
+  const planKey = await getPlanKeyForProduct(planChange.target_product_id);
+  if (planKey !== "basic") {
+    throw stripeLookupError(
+      "invalid_basic_downgrade",
+      "The requested downgrade target is not the Basic plan"
+    );
+  }
+  const subscription = await stripe.subscriptions.retrieve(
+    planChange.stripe_subscription_id
+  );
+  if (subscription.status === "canceled") return subscription;
+  return stripe.subscriptions.cancel(
+    subscription.id,
+    { invoice_now: false, prorate: false },
+    { idempotencyKey: `basic-downgrade-${planChange.request_id}` }
+  );
 }
 
 async function hasActiveStripeSubscription(email, authUser, preferredCustomerId) {
@@ -1255,6 +1529,28 @@ async function grantCommitmentFromInvoice(invoice) {
       : invoice.customer?.id;
   if (!customerId) return;
 
+  const reviewedAmount = Number(
+    invoice.metadata?.openopps_commitment_amount_pence
+  );
+  if (Number.isFinite(reviewedAmount) && reviewedAmount > 0) {
+    const configuredExpiry = Number(
+      invoice.metadata?.openopps_credit_expires_at
+    );
+    await createCreditGrantOnce(customerId, {
+      value: reviewedAmount,
+      currency: invoice.currency || "gbp",
+      category: "paid",
+      name: `${invoice.metadata?.openopps_to_plan || "Plan"} commitment upgrade`,
+      marker: `oo_commitment_${invoice.id}`,
+      planKey: invoice.metadata?.openopps_to_plan,
+      expiresAt:
+        Number.isFinite(configuredExpiry) && configuredExpiry > 0
+          ? configuredExpiry
+          : Math.floor(Date.now() / 1000) + YEAR_SECONDS,
+    });
+    return;
+  }
+
   for (const line of invoice.lines?.data || []) {
     const priceId = line.price?.id || line.pricing?.price_details?.price;
     if (!priceId) continue;
@@ -1300,6 +1596,7 @@ module.exports = {
   getUsageSummary,
   invalidateUsageSummary,
   cancelStripeSubscription,
+  endStripeSubscriptionForBasicDowngrade,
   hasActiveStripeSubscription,
   createStripePlanCheckoutSession,
   createBasicCreditCheckoutSession,
@@ -1307,6 +1604,9 @@ module.exports = {
   markBasicTopUpReconciled,
   prepareStripePlanChange,
   activateStripePlanChange,
+  issueReviewedPlanChangeInvoice,
+  activateReviewedPlanChange,
+  getStripeInvoice,
   getStripeSubscription,
   listStripeInvoices,
   attachPlanMeteredPrices,
@@ -1321,6 +1621,7 @@ module.exports = {
   ensureSubscriptionMeteredPrices,
   buildStripeUsageLines,
   mergeMoesifAndStripeUsageLines,
+  isPendingReviewedSubscription,
   subscriptionProductIds,
   getSubscriptionPlanKey,
   assertBasicTopUpAllowed,
