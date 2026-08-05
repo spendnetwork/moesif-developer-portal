@@ -39,7 +39,6 @@ const TIERS = [
       ["Attachments", "£0.65"],
     ],
     note: "Prepay any amount from the minimum top-up. Credit draws down at Basic rates and access pauses when the balance reaches zero.",
-    variant: "outline",
   },
   {
     key: "growth",
@@ -52,7 +51,6 @@ const TIERS = [
       ["Attachments", "£0.50"],
     ],
     note: "Prepaid credit draws down as you use the API. Overage is billed monthly in arrears. Credit re-grants on renewal.",
-    variant: "primary",
   },
   {
     key: "enterprise",
@@ -65,7 +63,6 @@ const TIERS = [
       ["Attachments", "£0.35"],
     ],
     note: "Our lowest unit rates, with prepaid credit and monthly overage. Includes onboarding support and a shared Slack channel.",
-    variant: "outline",
   },
 ];
 
@@ -233,7 +230,7 @@ export default function PlansView() {
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
             gap: 16,
-            alignItems: "start",
+            alignItems: "stretch",
           }}
         >
           {TIERS.map((tier) => {
@@ -287,7 +284,9 @@ export default function PlansView() {
                   )
                 ) : (
                   <button
-                    style={tier.variant === "primary" ? styles.btnPrimary : styles.btnOutlineStrong}
+                    className={`plan-choice-button${
+                      pending === tier.key ? " plan-choice-button--selected" : ""
+                    }`}
                     disabled={busy || Boolean(planChange)}
                     onClick={() => setPending(tier.key)}
                   >
@@ -399,6 +398,10 @@ const styles = {
   },
   lead: { margin: 0, fontSize: 15, color: C.muted },
   card: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    boxSizing: "border-box",
     background: "#FFFFFF",
     borderRadius: 12,
     padding: 24,
@@ -428,7 +431,13 @@ const styles = {
     borderBottom: `1px solid ${C.lineSoft}`,
   },
   rateRow: { display: "flex", justifyContent: "space-between", fontSize: 13.5 },
-  note: { margin: "18px 0 22px", fontSize: 13, lineHeight: 1.55, color: C.muted },
+  note: {
+    flexGrow: 1,
+    margin: "18px 0 22px",
+    fontSize: 13,
+    lineHeight: 1.55,
+    color: C.muted,
+  },
   btnPrimary: {
     width: "100%",
     background: C.green,
@@ -445,17 +454,6 @@ const styles = {
     background: "transparent",
     border: `1px solid #C9D6CF`,
     color: C.head,
-    fontSize: 14,
-    fontWeight: 500,
-    padding: "11px 18px",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  btnOutlineStrong: {
-    width: "100%",
-    background: "transparent",
-    border: `1px solid ${C.green}`,
-    color: C.green,
     fontSize: 14,
     fontWeight: 500,
     padding: "11px 18px",

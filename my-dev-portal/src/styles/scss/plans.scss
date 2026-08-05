@@ -11,6 +11,42 @@
   max-width: 1200px;
 }
 
+.plan-choice-button {
+  width: 100%;
+  padding: 11px 18px;
+  border: 1px solid #034737;
+  border-radius: 8px;
+  color: #034737;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.plan-choice-button:hover,
+.plan-choice-button:focus-visible,
+.plan-choice-button--selected {
+  border-color: #034737;
+  color: #ffffff;
+  background: #034737;
+}
+
+.plan-choice-button:focus-visible {
+  outline: 3px solid rgba(3, 71, 55, 0.2);
+  outline-offset: 2px;
+}
+
+.plan-choice-button:disabled {
+  border-color: #9eb0a8;
+  color: #758880;
+  background: transparent;
+  cursor: not-allowed;
+}
+
 .plans--container {
   display: grid;
   grid-template-columns: 1fr;
