@@ -103,6 +103,8 @@ test("Basic summary prices identity-scoped event quantities", () => {
   assert.equal(summary.credit.granted, 50000);
   assert.equal(summary.credit.remaining, 49194);
   assert.equal(summary.credit.postedRemaining, 37000);
+  assert.equal(summary.credit.purchased, 50000);
+  assert.equal(summary.credit.paidRemaining, 37000);
   assert.equal(summary.credit.used, 806);
   assert.equal(summary.lines.length, 4);
   assert.equal(summary.lines[0].rate, 26);
@@ -128,6 +130,20 @@ test("adding another Basic top-up increases purchased credit without resetting u
   assert.equal(summary.credit.granted, 80000);
   assert.equal(summary.credit.remaining, 79194);
   assert.equal(summary.credit.used, 806);
+  assert.equal(summary.credit.paidRemaining, 67000);
+});
+
+test("promotional balance cannot increase transferable paid credit", () => {
+  const summary = buildBasicUsageSummary({
+    balance: balance({ current: 1300, available: 1200 }),
+    totalPurchasedPence: 80000,
+    reports,
+    planCatalogue: catalogue,
+    eventMetrics,
+  });
+
+  assert.equal(summary.credit.postedRemaining, 120000);
+  assert.equal(summary.credit.paidRemaining, 80000);
 });
 
 test("a temporary analytics failure still returns the authoritative balance", () => {
