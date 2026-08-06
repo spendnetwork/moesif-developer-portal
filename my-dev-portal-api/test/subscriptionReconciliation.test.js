@@ -61,7 +61,7 @@ function dependencies(overrides = {}) {
       moesif_company_id: "9",
     }),
     updateStripeCustomerIdentity: async () => {},
-    ensureCreditGrant: async () => {},
+    ensureDevelopmentCreditGrant: async () => {},
     grantCommitmentFromInvoice: async () => {},
     syncToMoesif: async () => {},
     getSnApiPlanChangeByCustomer: async () => null,
@@ -73,6 +73,7 @@ function dependencies(overrides = {}) {
 
 test("initial Growth checkout provisions Gold-plan entitlement without the browser", async () => {
   let provisioned = null;
+  let developmentCredit = null;
   const result = await reconcileCheckoutSession(
     {
       id: "cs_123",
@@ -86,12 +87,19 @@ test("initial Growth checkout provisions Gold-plan entitlement without the brows
         provisioned = input;
         return { user_id: 7, organization_id: 9 };
       },
+      ensureDevelopmentCreditGrant: async (customerId, options) => {
+        developmentCredit = { customerId, ...options };
+      },
     })
   );
 
   assert.equal(result.planKey, "growth");
   assert.equal(provisioned.authUser.sub, "auth0|123");
   assert.equal(provisioned.subscription.id, "sub_growth");
+  assert.deepEqual(developmentCredit, {
+    customerId: "cus_123",
+    currency: "gbp",
+  });
 });
 
 test("completed but unpaid checkout never provisions API access", async () => {

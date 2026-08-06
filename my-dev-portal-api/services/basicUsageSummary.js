@@ -141,8 +141,8 @@ function buildBasicUsageSummary({
   const currentPence = hasBalance
     ? Math.max(0, Math.round(balance.current * 100))
     : null;
-  const purchasedPence = Number.isFinite(totalPurchasedPence)
-    ? Math.max(totalPurchasedPence, remainingPence || 0, currentPence || 0)
+  const paidPurchasedPence = Number.isFinite(totalPurchasedPence)
+    ? Math.max(0, Math.round(totalPurchasedPence))
     : null;
   const priceDefinitions = basicPriceDefinitions(planCatalogue);
   const reportLines = analyticsAvailable
@@ -152,10 +152,19 @@ function buildBasicUsageSummary({
     ? summarizeEventUsage(eventMetrics, priceDefinitions)
     : reportLines.map(({ reported: _reported, ...line }) => line);
   const accruedPence = lines.reduce((total, line) => total + line.amount, 0);
-  const usedPence = purchasedPence != null ? accruedPence : null;
+  // Reconstruct total granted credit from the live Moesif balance plus usage.
+  // This includes promotional credit without pretending it was purchased.
+  const balanceBackedGrantedPence =
+    hasBalance && (paidPurchasedPence != null || eventMetricsAvailable)
+      ? remainingPence + accruedPence
+      : null;
+  const grantedPence = [paidPurchasedPence, balanceBackedGrantedPence]
+    .filter(Number.isFinite)
+    .reduce((highest, value) => Math.max(highest, value), null);
+  const usedPence = grantedPence != null ? accruedPence : null;
   const projectedRemainingPence =
-    purchasedPence != null
-      ? Math.max(0, purchasedPence - accruedPence)
+    grantedPence != null
+      ? Math.max(0, grantedPence - accruedPence)
       : remainingPence;
   const periodStart = unixSeconds(
     balance.subscription?.current_period_start ||
@@ -185,7 +194,7 @@ function buildBasicUsageSummary({
     lines,
     credit: {
       available: hasBalance,
-      granted: purchasedPence,
+      granted: grantedPence,
       used: usedPence,
       remaining: projectedRemainingPence,
       postedRemaining: remainingPence,

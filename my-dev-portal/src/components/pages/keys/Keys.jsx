@@ -368,8 +368,8 @@ function Keys() {
             Subscribe to unlock API keys
           </div>
           <p style={styles.lockedBody}>
-            Choose a plan to start issuing keys. Basic has no commitment and
-            includes a £500 development credit.
+            Choose a plan to start issuing keys. Every new company receives a
+            one-time £50 development credit with its first plan.
           </p>
           <button type="button" onClick={() => navigate("/plans")} style={styles.primaryBtn}>
             View plans

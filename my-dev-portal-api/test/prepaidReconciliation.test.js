@@ -66,7 +66,7 @@ function dependencies(overrides = {}) {
 
 test("paid Basic Checkout provisions access and credits Moesif idempotently", async () => {
   let subscriptionInput;
-  let creditInput;
+  const creditInputs = [];
   let reconciliationMarker;
   const provisioningStatuses = [];
   const result = await reconcileBasicCreditPurchase(
@@ -78,7 +78,7 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
         return "openopps_basic_prepaid_cus_123";
       },
       createMoesifBalanceTransaction: async (input) => {
-        creditInput = input;
+        creditInputs.push(input);
       },
       markBasicTopUpReconciled: async (paymentIntentId, input) => {
         reconciliationMarker = { paymentIntentId, ...input };
@@ -102,9 +102,17 @@ test("paid Basic Checkout provisions access and credits Moesif idempotently", as
   const latestAllowedEnd = new Date();
   latestAllowedEnd.setUTCFullYear(latestAllowedEnd.getUTCFullYear() + 50);
   assert.ok(periodEnd < latestAllowedEnd);
-  assert.equal(creditInput.amountGbp, 500);
-  assert.equal(creditInput.transactionId, "pi_123");
-  assert.equal(creditInput.companyId, "9");
+  assert.deepEqual(creditInputs[0], {
+    companyId: "9",
+    subscriptionId: "openopps_basic_prepaid_cus_123",
+    amountGbp: 50,
+    transactionId: "oo_development_credit_v1_9",
+    type: "promotion",
+    description: "One-time Open Opportunities development credit",
+  });
+  assert.equal(creditInputs[1].amountGbp, 500);
+  assert.equal(creditInputs[1].transactionId, "pi_123");
+  assert.equal(creditInputs[1].companyId, "9");
   assert.deepEqual(reconciliationMarker, {
     paymentIntentId: "pi_123",
     companyId: "9",
@@ -138,6 +146,7 @@ test("a new Basic account stays blocked when Moesif credit creation fails", asyn
 
 test("adding credit does not suspend an existing active Basic account", async () => {
   const provisioningStatuses = [];
+  const creditInputs = [];
   const topUpSession = checkoutSession({
     metadata: {
       ...checkoutSession().metadata,
@@ -157,9 +166,14 @@ test("adding credit does not suspend an existing active Basic account", async ()
         provisioningStatuses.push(subscriptionStatus);
         return { user_id: 7, organization_id: 9, moesif_company_id: "9" };
       },
+      createMoesifBalanceTransaction: async (input) => {
+        creditInputs.push(input);
+      },
     })
   );
   assert.deepEqual(provisioningStatuses, ["active", "active"]);
+  assert.equal(creditInputs.length, 1);
+  assert.equal(creditInputs[0].transactionId, "pi_123");
 });
 
 test("top-up checkout cannot establish a new Basic plan", async () => {

@@ -179,6 +179,7 @@ async function createMoesifBalanceTransaction({
   amountGbp,
   transactionId,
   description,
+  type = "credit",
 }) {
   const response = await fetch(
     `${moesifApiEndpoint}/~/billing/reports/balance_transactions`,
@@ -192,7 +193,7 @@ async function createMoesifBalanceTransaction({
         company_id: String(companyId),
         subscription_id: subscriptionId,
         amount: amountGbp,
-        type: "credit",
+        type,
         transaction_id: transactionId,
         description: description || "Open Opportunities Basic credit top-up",
       }),

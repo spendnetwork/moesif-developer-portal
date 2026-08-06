@@ -13,6 +13,10 @@ const {
   BASIC_CREDIT_TOP_UP,
   isBasicPurchaseType,
 } = require("./basicPurchasePolicy");
+const {
+  DEVELOPMENT_CREDIT_MARKER,
+  DEVELOPMENT_CREDIT_PENCE,
+} = require("./developmentCredit");
 const { summarizeMeterReports } = require("./basicUsageSummary");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
@@ -1528,30 +1532,9 @@ async function hasActiveStripeSubscription(email, authUser, preferredCustomerId)
   }
 }
 
-// Prepaid commitment / dev-credit amounts per tier, in minor units (pence).
-// Commitments are annual, so their credit expires after a year and is
-// re-granted on renewal. The dev credit does not expire.
+// Commitments expire annually and are re-granted only after the renewal
+// invoice is paid.
 const YEAR_SECONDS = 365 * 24 * 60 * 60;
-const CREDIT_GRANTS = {
-  basic: {
-    value: 50000,
-    category: "promotional",
-    name: "Development credit",
-    expiresInSeconds: null,
-  },
-  growth: {
-    value: 500000,
-    category: "paid",
-    name: "Growth prepaid commitment",
-    expiresInSeconds: YEAR_SECONDS,
-  },
-  enterprise: {
-    value: 1200000,
-    category: "paid",
-    name: "Enterprise prepaid commitment",
-    expiresInSeconds: YEAR_SECONDS,
-  },
-};
 
 // Create the tier's credit grant once. Idempotent: skips if a grant with the
 // same marker already exists for the customer.
@@ -1593,20 +1576,17 @@ async function createCreditGrantOnce(customerId, opts) {
   });
 }
 
-// Basic development credit at checkout (fixed amount from config).
-async function ensureCreditGrant(customerId, planKey, { currency = "gbp", marker } = {}) {
-  const config = CREDIT_GRANTS[String(planKey || "").toLowerCase()];
-  if (!config) return null;
+async function ensureDevelopmentCreditGrant(
+  customerId,
+  { currency = "gbp" } = {}
+) {
   return createCreditGrantOnce(customerId, {
-    value: config.value,
+    value: DEVELOPMENT_CREDIT_PENCE,
     currency,
-    category: config.category,
-    name: config.name,
-    marker: marker || `oo_${planKey}_grant`,
-    planKey,
-    expiresAt: config.expiresInSeconds
-      ? Math.floor(Date.now() / 1000) + config.expiresInSeconds
-      : null,
+    category: "promotional",
+    name: "Open Opportunities development credit",
+    marker: DEVELOPMENT_CREDIT_MARKER,
+    planKey: "development",
   });
 }
 
@@ -1980,7 +1960,7 @@ module.exports = {
   verifyStripeSession,
   constructStripeEvent,
   grantCommitmentFromInvoice,
-  ensureCreditGrant,
+  ensureDevelopmentCreditGrant,
   getUsageSummary,
   invalidateUsageSummary,
   cancelStripeSubscription,

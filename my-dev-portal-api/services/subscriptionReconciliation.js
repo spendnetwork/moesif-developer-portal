@@ -121,11 +121,9 @@ async function reconcileActiveSubscription(
     subscriptionId: subscription.id,
   });
 
-  if (planKey === "basic") {
-    await deps.ensureCreditGrant(customer.id, "basic", {
-      currency: price?.currency || "gbp",
-    });
-  }
+  await deps.ensureDevelopmentCreditGrant(customer.id, {
+    currency: price?.currency || "gbp",
+  });
   if (subscription.latest_invoice?.status === "paid") {
     await deps.grantCommitmentFromInvoice(subscription.latest_invoice);
   }

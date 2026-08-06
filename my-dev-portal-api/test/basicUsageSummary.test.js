@@ -130,6 +130,21 @@ test("adding another Basic top-up increases purchased credit without resetting u
   assert.equal(summary.credit.used, 806);
 });
 
+test("Basic promotional credit remains part of the grant after usage", () => {
+  const summary = buildBasicUsageSummary({
+    balance: balance({ current: 42.94, pending: 0, available: 42.94 }),
+    totalPurchasedPence: 100,
+    reports,
+    planCatalogue: catalogue,
+    eventMetrics,
+  });
+
+  assert.equal(summary.credit.granted, 5100);
+  assert.equal(summary.credit.used, 806);
+  assert.equal(summary.credit.remaining, 4294);
+  assert.equal(summary.credit.postedRemaining, 4294);
+});
+
 test("a temporary analytics failure still returns the authoritative balance", () => {
   const summary = buildBasicUsageSummary({
     balance: balance(),

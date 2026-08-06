@@ -2,6 +2,10 @@ const {
   assertBasicPurchaseAllowed,
   isBasicCreditSession,
 } = require("./basicPurchasePolicy");
+const {
+  DEVELOPMENT_CREDIT_GBP,
+  developmentCreditTransactionId,
+} = require("./developmentCredit");
 
 function stripeId(value) {
   return typeof value === "string" ? value : value?.id;
@@ -198,6 +202,16 @@ async function reconcileBasicCreditPurchase(sessionOrId, authUser, deps) {
     ).toISOString(),
     currentPeriodEnd: prepaidSubscriptionPeriodEnd(),
   });
+  if (purchaseType === "basic_activation") {
+    await deps.createMoesifBalanceTransaction({
+      companyId,
+      subscriptionId,
+      amountGbp: DEVELOPMENT_CREDIT_GBP,
+      transactionId: developmentCreditTransactionId(companyId),
+      type: "promotion",
+      description: "One-time Open Opportunities development credit",
+    });
+  }
   const transactionId = stripeId(session.payment_intent) || session.id;
   await deps.createMoesifBalanceTransaction({
     companyId,
