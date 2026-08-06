@@ -9,9 +9,6 @@ const {
   summarizeEventUsage,
 } = require("./usageMetrics");
 const {
-  commitmentUpgradeQuote,
-} = require("./planPurchasePolicy");
-const {
   BASIC_ACTIVATION,
   BASIC_CREDIT_TOP_UP,
   isBasicPurchaseType,
@@ -778,13 +775,7 @@ async function markBasicTopUpReconciled(
   );
 }
 
-async function prepareStripePlanChange(
-  email,
-  planId,
-  authUser,
-  portalContext = {},
-  { eligibleBasicCreditPence = 0 } = {}
-) {
+async function prepareStripePlanChange(email, planId, authUser, portalContext = {}) {
   const currentPlanFromContext = String(
     portalContext.current_plan_key || ""
   ).toLowerCase();
@@ -841,18 +832,12 @@ async function prepareStripePlanChange(
         )
       )
     : 0;
-  const quote = commitmentUpgradeQuote({
-    fromPlanKey,
-    targetCommitmentPence: targetCommitment,
-    currentCommitmentPence: currentCommitment,
-    paidBasicCreditPence: eligibleBasicCreditPence,
-  });
   const quotedAmountGbpPence =
-    changeType === "upgrade" ? quote.amountDuePence : 0;
-  if (changeType === "upgrade" && targetCommitment <= 0) {
+    changeType === "upgrade" ? Math.max(0, targetCommitment - currentCommitment) : 0;
+  if (changeType === "upgrade" && quotedAmountGbpPence <= 0) {
     throw stripeLookupError(
       "commitment_quote_invalid",
-      "The target plan does not have a valid commitment amount"
+      "The target plan does not have a valid higher commitment amount"
     );
   }
 
@@ -886,8 +871,6 @@ async function prepareStripePlanChange(
         : downgradeBoundary.commitmentEndsAt,
     commitmentEndsAt: downgradeBoundary?.commitmentEndsAt || null,
     creditExpiresAt: downgradeBoundary?.creditExpiresAt || null,
-    targetCommitmentGbpPence: quote.targetCommitmentPence,
-    creditAppliedGbpPence: quote.creditAppliedPence,
     quotedAmountGbpPence,
     currency,
   };

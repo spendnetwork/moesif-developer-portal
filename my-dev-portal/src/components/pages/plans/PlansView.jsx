@@ -28,7 +28,6 @@ const C = {
 const PLAN_KEY_ORDER = ["basic", "growth", "enterprise"];
 const CONTACT_LED_PLAN_KEYS = new Set(["growth", "enterprise"]);
 const DEFAULT_SALES_CONTACT_EMAIL = "contact@spendnetwork.com";
-const PLAN_RANK = { basic: 0, growth: 1, enterprise: 2 };
 
 const TIERS = [
   {
@@ -92,22 +91,8 @@ function basicTopUpPath(productId) {
   return `/checkout?${params.toString()}`;
 }
 
-function requiresManagedContact(fromPlanKey, toPlanKey) {
-  if (!CONTACT_LED_PLAN_KEYS.has(toPlanKey)) return false;
-  if (!(fromPlanKey in PLAN_RANK)) return true;
-  return PLAN_RANK[toPlanKey] > PLAN_RANK[fromPlanKey];
-}
-
-function formatGbpPence(value) {
-  if (!Number.isFinite(value)) return "Pending confirmation";
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  }).format(value / 100);
-}
-
 export default function PlansView() {
-  const { idToken } = useAuthCombined();
+  const { idToken, userEmail } = useAuthCombined();
   const { plans, plansLoading } = usePlans();
   const { subscriptions, finishedLoading } = useSubscriptions({ idToken });
   const { planChange, refreshPlanChange } = usePlanChange({ idToken });
@@ -117,9 +102,6 @@ export default function PlansView() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
-  const [managedQuote, setManagedQuote] = useState(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState("");
 
   // Lock background scroll while the confirm dialog is open.
   useEffect(() => {
@@ -148,54 +130,9 @@ export default function PlansView() {
   }, [subscriptions]);
 
   const hasActive = Boolean(currentPlan);
-  const pendingTier = TIERS.find((tier) => tier.key === pending);
-  const pendingRequiresContact = Boolean(
-    pendingTier && requiresManagedContact(currentPlan, pendingTier.key)
-  );
-  const pendingIsManagedUpgrade = pendingRequiresContact && hasActive;
   const contactEmail =
     import.meta.env.REACT_APP_SALES_CONTACT_EMAIL ||
     DEFAULT_SALES_CONTACT_EMAIL;
-
-  useEffect(() => {
-    if (!pendingIsManagedUpgrade || !idToken) {
-      setManagedQuote(null);
-      setQuoteError("");
-      setQuoteLoading(false);
-      return undefined;
-    }
-    const productId = productByKey[pendingTier.key];
-    if (!productId) {
-      setManagedQuote(null);
-      setQuoteError("That plan is not available right now.");
-      return undefined;
-    }
-
-    let cancelled = false;
-    setManagedQuote(null);
-    setQuoteError("");
-    setQuoteLoading(true);
-    apiRequest(
-      `/plan-change/quote?plan_id=${encodeURIComponent(productId)}`,
-      idToken
-    )
-      .then((quote) => {
-        if (!cancelled) setManagedQuote(quote);
-      })
-      .catch((quoteFailure) => {
-        if (!cancelled) {
-          setQuoteError(
-            quoteFailure.message || "We could not prepare the upgrade estimate."
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setQuoteLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [idToken, pendingIsManagedUpgrade, pendingTier?.key, productByKey]);
 
   if (plansLoading || (idToken && !finishedLoading)) {
     return (
@@ -212,7 +149,7 @@ export default function PlansView() {
 
   async function requestChange(tierKey) {
     setError("");
-    if (requiresManagedContact(currentPlan, tierKey)) {
+    if (CONTACT_LED_PLAN_KEYS.has(tierKey)) {
       setError(
         `Growth and Enterprise are arranged with our team. Contact ${contactEmail} to continue.`
       );
@@ -267,36 +204,17 @@ export default function PlansView() {
     }
   }
 
-  async function requestManagedUpgrade() {
-    const productId = productByKey[pendingTier?.key];
-    if (!productId || !managedQuote) return;
-
-    setBusy(true);
-    setQuoteError("");
-    try {
-      await apiRequest("/plan-change/request", idToken, {
-        method: "POST",
-        body: JSON.stringify({
-          plan_id: productId,
-          request_id: crypto.randomUUID(),
-        }),
-      });
-      setPending(null);
-      await refreshPlanChange();
-      flash("Upgrade request recorded. Our team will contact you.");
-    } catch (requestError) {
-      setQuoteError(
-        requestError.message || "We could not record the upgrade request."
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  const pendingTier = TIERS.find((t) => t.key === pending);
+  const pendingRequiresContact = Boolean(
+    pendingTier && CONTACT_LED_PLAN_KEYS.has(pendingTier.key)
+  );
   const contactParams = new URLSearchParams({
     subject: `Open Opportunities API ${pendingTier?.name || "commitment"} plan enquiry`,
     body: [
       `I would like to discuss the Open Opportunities API ${pendingTier?.name || "commitment"} plan.`,
+      "",
+      `Account email: ${userEmail || "Not provided"}`,
+      `Current plan: ${currentPlan || "None"}`,
     ].join("\n"),
   });
   const contactHref = `mailto:${contactEmail}?${contactParams.toString()}`;
@@ -353,10 +271,7 @@ export default function PlansView() {
         >
           {TIERS.map((tier) => {
             const isCurrent = currentPlan === tier.key;
-            const requiresContact = requiresManagedContact(
-              currentPlan,
-              tier.key
-            );
+            const requiresContact = CONTACT_LED_PLAN_KEYS.has(tier.key);
             return (
               <div
                 key={tier.key}
@@ -437,19 +352,15 @@ export default function PlansView() {
           <div style={styles.backdrop} onClick={() => !busy && setPending(null)}>
             <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
               <div style={styles.modalTitle}>
-                {pendingIsManagedUpgrade
-                  ? `Request an upgrade to ${pendingTier.name}`
-                  : pendingRequiresContact
-                    ? `Talk to us about ${pendingTier.name}`
+                {pendingRequiresContact
+                  ? `Talk to us about ${pendingTier.name}`
                   : hasActive
                   ? `Switch to ${pendingTier.name}?`
                   : `Subscribe to ${pendingTier.name}`}
               </div>
               <p style={styles.modalLead}>
-                {pendingIsManagedUpgrade
-                  ? `Your ${currentPlan} access remains active while our team confirms the terms and provides the manual invoice.`
-                  : pendingRequiresContact
-                    ? `${pendingTier.name} is arranged directly with our team. We will confirm the commercial terms and provide an invoice for the annual commitment.`
+                {pendingRequiresContact
+                  ? `${pendingTier.name} is arranged directly with our team. We will confirm the commercial terms and provide an invoice for the annual commitment.`
                   : hasActive
                     ? "The downgrade will take effect at the end of your current commitment period. Nothing changes today."
                   : `You'll continue to secure checkout to start your ${pendingTier.name} subscription.`}
@@ -459,32 +370,6 @@ export default function PlansView() {
                   <span style={{ color: C.muted }}>Commitment</span>
                   <span style={{ color: C.head }}>{pendingTier.commitment}</span>
                 </div>
-                {pendingIsManagedUpgrade && (
-                  <>
-                    <div style={styles.summaryRow}>
-                      <span style={{ color: C.muted }}>
-                        Eligible paid credit
-                      </span>
-                      <span style={{ color: C.head }}>
-                        {quoteLoading
-                          ? "Checking…"
-                          : formatGbpPence(
-                              managedQuote?.eligible_paid_credit_gbp_pence
-                            )}
-                      </span>
-                    </div>
-                    <div style={styles.summaryRowStrong}>
-                      <span>Estimated invoice</span>
-                      <span>
-                        {quoteLoading
-                          ? "Checking…"
-                          : formatGbpPence(
-                              managedQuote?.estimated_invoice_gbp_pence
-                            )}
-                      </span>
-                    </div>
-                  </>
-                )}
                 {pendingTier.rates.slice(0, 2).map(([label, value]) => (
                   <div key={label} style={styles.summaryRow}>
                     <span style={{ color: C.muted }}>{label}</span>
@@ -492,17 +377,9 @@ export default function PlansView() {
                   </div>
                 ))}
               </div>
-              {quoteError && (
-                <div style={styles.modalError} role="alert">
-                  {quoteError}
-                </div>
-              )}
               {pendingRequiresContact ? (
                 <p style={styles.modalFine}>
-                  {pendingIsManagedUpgrade
-                    ? "The estimate recognises unused card-purchased Basic credit. Promotional credit does not reduce the annual commitment. "
-                    : ""}
-                  Contact us at{" "}
+                  Email us at{" "}
                   <a href={`mailto:${contactEmail}`} style={styles.emailLink}>
                     {contactEmail}
                   </a>
@@ -528,10 +405,6 @@ export default function PlansView() {
                 <button
                   style={styles.btnPrimaryAuto}
                   onClick={() => {
-                    if (pendingIsManagedUpgrade) {
-                      requestManagedUpgrade();
-                      return;
-                    }
                     if (pendingRequiresContact) {
                       window.location.assign(contactHref);
                       setPending(null);
@@ -539,17 +412,9 @@ export default function PlansView() {
                     }
                     requestChange(pendingTier.key);
                   }}
-                  disabled={
-                    busy ||
-                    (pendingIsManagedUpgrade &&
-                      (quoteLoading || !managedQuote || Boolean(quoteError)))
-                  }
+                  disabled={busy}
                 >
-                  {pendingIsManagedUpgrade
-                    ? busy
-                      ? "Submitting…"
-                      : "Request upgrade"
-                    : pendingRequiresContact
+                  {pendingRequiresContact
                     ? "Email our team"
                     : busy
                       ? "Working…"
@@ -750,25 +615,7 @@ const styles = {
     gap: 10,
   },
   summaryRow: { display: "flex", justifyContent: "space-between", fontSize: 13.5 },
-  summaryRowStrong: {
-    display: "flex",
-    justifyContent: "space-between",
-    paddingTop: 10,
-    borderTop: `1px solid ${C.line}`,
-    fontSize: 14,
-    fontWeight: 600,
-    color: C.head,
-  },
   modalFine: { margin: "0 0 20px", fontSize: 12.5, lineHeight: 1.55, color: C.muted },
-  modalError: {
-    margin: "0 0 16px",
-    padding: "11px 13px",
-    border: "1px solid #F5CFC9",
-    borderRadius: 8,
-    background: "#FDE8E5",
-    color: "#8B2C21",
-    fontSize: 13,
-  },
   emailLink: { color: C.green, fontWeight: 500 },
   modalActions: { display: "flex", justifyContent: "flex-end", gap: 10 },
   toast: {

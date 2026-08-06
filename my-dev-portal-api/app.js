@@ -91,8 +91,6 @@ const {
 } = require("./services/basicPurchasePolicy");
 const {
   getContactLedPlanDetails,
-  normalizedSalesContactEmail,
-  requiresManagedContact,
 } = require("./services/planPurchasePolicy");
 const {
   getBasicPrepaidUsageSummary,
@@ -380,176 +378,6 @@ async function requireActiveSubscription(req, res, next) {
   return next();
 }
 
-function planChangeErrorStatus(error) {
-  if (
-    [
-      "active_plan_required",
-      "already_on_plan",
-      "outstanding_payment",
-      "multiple_active_subscriptions",
-      "active_subscription_exists",
-    ].includes(error.code)
-  ) {
-    return 409;
-  }
-  if (error.code === "basic_credit_balance_unavailable") return 503;
-  return error.status || 400;
-}
-
-async function prepareManagedUpgrade(req, planId) {
-  if (!planId) {
-    const error = new Error("plan_id is required");
-    error.code = "plan_required";
-    throw error;
-  }
-
-  const fromPlanKey = String(
-    req.portalContext?.current_plan_key || ""
-  ).toLowerCase();
-  const toPlanKey = await getPlanKeyForProduct(planId);
-  if (!fromPlanKey) {
-    const error = new Error(
-      "Choose Basic first or contact our team directly to arrange an initial commitment plan."
-    );
-    error.code = "active_plan_required";
-    throw error;
-  }
-  if (!requiresManagedContact(fromPlanKey, toPlanKey)) {
-    const error = new Error("This transition is not a managed plan upgrade");
-    error.code = "managed_upgrade_not_required";
-    throw error;
-  }
-
-  let eligibleBasicCreditPence = 0;
-  if (fromPlanKey === "basic") {
-    const context = req.portalContext || {};
-    if (
-      !context.moesif_user_id ||
-      !context.moesif_company_id ||
-      !context.stripe_customer_id
-    ) {
-      const error = new Error(
-        "We could not verify the paid Basic credit available for this upgrade."
-      );
-      error.code = "basic_credit_balance_unavailable";
-      throw error;
-    }
-    const summary = await getBasicPrepaidUsageSummary(
-      {
-        userId: context.moesif_user_id,
-        companyId: context.moesif_company_id,
-        stripeCustomerId: context.stripe_customer_id,
-      },
-      {
-        getMoesifPrepaidBalance,
-        getMoesifBillingReports,
-        getMoesifUsageMetrics,
-        getPlansFromMoesif,
-        getBasicTopUpTotalPence,
-      }
-    );
-    eligibleBasicCreditPence = summary.credit?.paidRemaining;
-    if (!Number.isFinite(eligibleBasicCreditPence)) {
-      const error = new Error(
-        "We could not verify the paid Basic credit available for this upgrade."
-      );
-      error.code = "basic_credit_balance_unavailable";
-      throw error;
-    }
-  }
-
-  const prepared = await prepareStripePlanChange(
-    req.user?.email,
-    planId,
-    req.user,
-    req.portalContext,
-    { eligibleBasicCreditPence }
-  );
-  if (prepared.changeType !== "upgrade") {
-    const error = new Error("This transition is not an upgrade");
-    error.code = "managed_upgrade_not_required";
-    throw error;
-  }
-  return prepared;
-}
-
-function managedUpgradeResponse(prepared) {
-  return {
-    from_plan_key: prepared.fromPlanKey,
-    to_plan_key: prepared.toPlanKey,
-    currency: prepared.currency,
-    target_commitment_gbp_pence: prepared.targetCommitmentGbpPence,
-    eligible_paid_credit_gbp_pence: prepared.creditAppliedGbpPence,
-    estimated_invoice_gbp_pence: prepared.quotedAmountGbpPence,
-    manual_confirmation_required: true,
-    contact_email: normalizedSalesContactEmail(
-      process.env.SALES_CONTACT_EMAIL
-    ),
-  };
-}
-
-app.get("/plan-change/quote", portalAuthMiddleware, async (req, res) => {
-  try {
-    const prepared = await prepareManagedUpgrade(req, req.query?.plan_id);
-    return res.status(200).json(managedUpgradeResponse(prepared));
-  } catch (error) {
-    console.error("Failed to prepare managed upgrade quote", error);
-    return res.status(planChangeErrorStatus(error)).json({
-      code: error.code || "plan_change_quote_failed",
-      message: error.message || "We could not prepare the upgrade quote.",
-    });
-  }
-});
-
-app.post(
-  "/plan-change/request",
-  portalAuthMiddleware,
-  jsonParser,
-  async (req, res) => {
-    try {
-      const prepared = await prepareManagedUpgrade(req, req.body?.plan_id);
-      const suppliedRequestId = req.body?.request_id;
-      const requestId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(
-        suppliedRequestId || ""
-      )
-        ? suppliedRequestId
-        : crypto.randomUUID();
-      const planChange = await createSnApiPlanChange(req.user, {
-        request_id: requestId,
-        stripe_customer_id: prepared.customer.id,
-        stripe_subscription_id: prepared.subscription?.id,
-        from_plan_key: prepared.fromPlanKey,
-        to_plan_key: prepared.toPlanKey,
-        target_product_id: prepared.targetProductId,
-        effective_at: new Date(prepared.effectiveAt * 1000).toISOString(),
-        quoted_amount_gbp_pence: prepared.quotedAmountGbpPence,
-        currency: prepared.currency,
-        metadata: {
-          source: "developer_portal",
-          change_type: "upgrade",
-          invoice_method: "external_manual",
-          target_commitment_gbp_pence:
-            prepared.targetCommitmentGbpPence,
-          eligible_paid_basic_credit_gbp_pence:
-            prepared.creditAppliedGbpPence,
-        },
-      });
-
-      return res.status(201).json({
-        requested: true,
-        plan_change: planChange,
-        quote: managedUpgradeResponse(prepared),
-      });
-    } catch (error) {
-      console.error("Failed to record managed upgrade request", error);
-      return res.status(planChangeErrorStatus(error)).json({
-        code: error.code || "plan_change_request_failed",
-        message: error.message || "We could not record the upgrade request.",
-      });
-    }
-  }
-);
-
 app.post(
   "/create-stripe-checkout-session",
   portalAuthMiddleware,
@@ -596,15 +424,10 @@ app.post(
 
     try {
       const selectedPlanKey = await getPlanKeyForProduct(planId);
-      const contactLedPlan = requiresManagedContact(
-        req.portalContext?.current_plan_key,
-        selectedPlanKey
-      )
-        ? getContactLedPlanDetails(
-            selectedPlanKey,
-            process.env.SALES_CONTACT_EMAIL
-          )
-        : null;
+      const contactLedPlan = getContactLedPlanDetails(
+        selectedPlanKey,
+        process.env.SALES_CONTACT_EMAIL
+      );
       if (contactLedPlan) {
         return res.status(409).json(contactLedPlan);
       }

@@ -16,9 +16,6 @@ const {
   priceUnitAmountPence,
   summarizeEventUsage,
 } = require("./usageMetrics");
-const {
-  eligiblePaidBasicCreditPence,
-} = require("./planPurchasePolicy");
 
 function unixSeconds(value) {
   if (!value) return null;
@@ -160,10 +157,6 @@ function buildBasicUsageSummary({
     purchasedPence != null
       ? Math.max(0, purchasedPence - accruedPence)
       : remainingPence;
-  const paidRemainingPence = eligiblePaidBasicCreditPence({
-    totalPurchasedPence,
-    balancePence: remainingPence,
-  });
   const periodStart = unixSeconds(
     balance.subscription?.current_period_start ||
       balance.subscription?.subscription_period_start ||
@@ -197,10 +190,6 @@ function buildBasicUsageSummary({
       remaining: projectedRemainingPence,
       postedRemaining: remainingPence,
       current: currentPence,
-      purchased: Number.isFinite(totalPurchasedPence)
-        ? Math.max(0, Math.round(totalPurchasedPence))
-        : null,
-      paidRemaining: paidRemainingPence,
       pending:
         hasBalance && Number.isFinite(balance.pending)
           ? Math.round(balance.pending * 100)
