@@ -368,7 +368,7 @@ async function ensureRequestEntitlement(req) {
     req.portalContext?.current_subscription_id || ""
   );
   if (
-    ["growth", "enterprise"].includes(contextPlan) &&
+    ["test", "growth", "enterprise"].includes(contextPlan) &&
     contextSubscriptionId.startsWith("manual_") &&
     String(req.portalContext?.billing_status || "").toLowerCase() === "active"
   ) {
@@ -683,7 +683,7 @@ app.post("/admin/plan-change", jsonParser, async (req, res) => {
       message: "auth0_user_id and to_plan_key are required.",
     });
   }
-  if (!["basic", "growth", "enterprise"].includes(toPlanKey)) {
+  if (!["basic", "test", "growth", "enterprise"].includes(toPlanKey)) {
     return res
       .status(400)
       .json({ code: "invalid_plan", message: "Unknown plan." });
@@ -730,10 +730,10 @@ app.post("/admin/plan-change", jsonParser, async (req, res) => {
     }
   }
 
-  // Growth and Enterprise are invoiced and paid outside Stripe. Selecting one
+  // Test, Growth, and Enterprise use the auditable manual commitment flow.
   // creates an auditable commitment request; access changes only after an
   // administrator confirms the external invoice payment.
-  if (["growth", "enterprise"].includes(toPlanKey)) {
+  if (["test", "growth", "enterprise"].includes(toPlanKey)) {
     try {
       const manualCommitment = await createSnApiManualCommitment(
         { sub: auth0UserId },
@@ -902,7 +902,7 @@ app.post(
     ).trim();
     const actorEmail = String(req.body?.actor_email || "admin").trim();
     const planKey = String(req.body?.plan_key || "").trim().toLowerCase();
-    if (!invoiceReference || !["growth", "enterprise"].includes(planKey)) {
+    if (!invoiceReference || !["test", "growth", "enterprise"].includes(planKey)) {
       return res.status(400).json({
         code: "invalid_request",
         message: "external_invoice_reference and a commitment plan are required.",
@@ -1226,7 +1226,7 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
 app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
   try {
     if (
-      ["growth", "enterprise"].includes(
+      ["test", "growth", "enterprise"].includes(
         String(req.portalContext?.current_plan_key || "").toLowerCase()
       ) &&
       String(req.portalContext?.current_subscription_id || "").startsWith(
