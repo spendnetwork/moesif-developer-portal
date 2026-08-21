@@ -62,6 +62,7 @@ const {
   createSnApiManualCommitment,
   getSnApiCurrentManualCommitment,
   confirmSnApiManualCommitmentPayment,
+  overrideSnApiManualPlanDowngrade,
   updateSnApiSubscriptionStatus,
 } = require("./services/snApiProvisioning");
 const {
@@ -669,6 +670,8 @@ app.post("/admin/plan-change", jsonParser, async (req, res) => {
   const auth0UserId = req.body?.auth0_user_id;
   const toPlanKey = String(req.body?.to_plan_key || "").trim().toLowerCase();
   const actorEmail = req.body?.actor_email || "admin";
+  const overrideImmediate = req.body?.override_immediate === true;
+  const overrideReason = String(req.body?.reason || "").trim();
   const suppliedRequestId = req.body?.request_id;
   const requestId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(suppliedRequestId || "")
     ? suppliedRequestId
@@ -684,6 +687,47 @@ app.post("/admin/plan-change", jsonParser, async (req, res) => {
     return res
       .status(400)
       .json({ code: "invalid_plan", message: "Unknown plan." });
+  }
+
+  if (overrideImmediate) {
+    if (toPlanKey !== "growth" || overrideReason.length < 5) {
+      return res.status(422).json({
+        code: "invalid_manual_downgrade_override",
+        message:
+          "Immediate override supports Enterprise to Growth and requires a reason.",
+      });
+    }
+    try {
+      const planChange = await overrideSnApiManualPlanDowngrade(
+        { sub: auth0UserId },
+        {
+          request_id: requestId,
+          to_plan_key: toPlanKey,
+          requested_by: actorEmail,
+          reason: overrideReason,
+        }
+      );
+      invalidatePortalContext(auth0UserId);
+      return res.status(200).json({
+        ok: true,
+        pending: false,
+        scheduled: false,
+        changeType: "downgrade",
+        overrideApplied: true,
+        moesifSyncPending: planChange.failure_code === "moesif_sync_failed",
+        message:
+          planChange.failure_code === "moesif_sync_failed"
+            ? "Downgrade applied immediately. Moesif synchronization requires attention."
+            : "Enterprise downgraded to Growth immediately. Existing prepaid credit was preserved.",
+        planChange,
+      });
+    } catch (err) {
+      console.error("Admin manual downgrade override failed", err);
+      return res.status(err.status || 400).json({
+        code: err.code || "manual_downgrade_override_failed",
+        message: err.message || "The immediate downgrade could not be applied.",
+      });
+    }
   }
 
   // Growth and Enterprise are invoiced and paid outside Stripe. Selecting one

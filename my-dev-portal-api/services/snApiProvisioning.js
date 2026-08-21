@@ -375,6 +375,16 @@ function updateSnApiManualCommitmentMoesifSync(requestId, update) {
   );
 }
 
+function overrideSnApiManualPlanDowngrade(authUser, override) {
+  return snApiKeyRequest(
+    "/api/v3/developer-portal/manual-plan-downgrades/override",
+    {
+      method: "POST",
+      body: { auth0_user_id: authUser.sub, ...override },
+    }
+  );
+}
+
 function updateSnApiSubscriptionStatus(subscription, customerId) {
   const period = subscriptionPeriod(subscription);
   return snApiKeyRequest(
@@ -414,6 +424,7 @@ module.exports = {
   getSnApiCurrentManualCommitment,
   confirmSnApiManualCommitmentPayment,
   updateSnApiManualCommitmentMoesifSync,
+  overrideSnApiManualPlanDowngrade,
   updateSnApiSubscriptionStatus,
   subscriptionPeriod,
 };
