@@ -39,28 +39,52 @@ function planKey(plan) {
   ).toLowerCase();
 }
 
-function basicPriceDefinitions(planCatalogue) {
+function subscriptionPriceIds(subscription) {
+  const items = normalizeCollection(subscription?.items, ["data", "items"]);
+  return new Set(
+    items
+      .map((item) =>
+        typeof item?.price === "string"
+          ? item.price
+          : item?.price_id || item?.price?.id
+      )
+      .filter(Boolean)
+  );
+}
+
+function basicPriceDefinitions(
+  planCatalogue,
+  allowedPriceIds = null,
+  requestedPlanKey = "basic"
+) {
   const plans = normalizeCollection(planCatalogue, ["hits", "data", "plans"]);
   const basicPlan = plans.find((plan) => {
     const key = planKey(plan);
-    return key === "basic" || key.includes("basic");
+    return key === requestedPlanKey || key.includes(requestedPlanKey);
   });
   const prices = normalizeCollection(basicPlan?.prices, ["data", "prices"]);
-  return new Map(
-    prices
-      .filter((price) => price?.id)
-      .map((price) => {
-        const key = metricKey(price);
-        return [
-          price.id,
-          {
-            key,
-            label: METRIC_LABELS[key] || price.nickname || price.name || "Usage",
-            unitAmountPence: priceUnitAmountPence(price),
-          },
-        ];
-      })
-  );
+  const definitions = new Map();
+  const seenMetrics = new Set();
+  const candidates = prices
+    .filter(
+      (price) =>
+        price?.id &&
+        (price.active !== false || allowedPriceIds?.has(price.id)) &&
+        (!price.currency || String(price.currency).toLowerCase() === "gbp") &&
+        (!allowedPriceIds?.size || allowedPriceIds.has(price.id))
+    )
+    .sort((left, right) => Number(right.created || 0) - Number(left.created || 0));
+  for (const price of candidates) {
+    const key = metricKey(price);
+    if (!METRIC_LABELS[key] || seenMetrics.has(key)) continue;
+    seenMetrics.add(key);
+    definitions.set(price.id, {
+      key,
+      label: METRIC_LABELS[key],
+      unitAmountPence: priceUnitAmountPence(price),
+    });
+  }
+  return definitions;
 }
 
 function reportTimestamp(report) {
@@ -129,6 +153,8 @@ function buildBasicUsageSummary({
   analyticsAvailable = true,
   eventMetricsAvailable = eventMetrics != null,
   analyticsErrors = [],
+  planKey: requestedPlanKey = "basic",
+  billingModel = "prepaid_credit",
   now = Date.now(),
 }) {
   const hasBalance =
@@ -144,7 +170,11 @@ function buildBasicUsageSummary({
   const paidPurchasedPence = Number.isFinite(totalPurchasedPence)
     ? Math.max(0, Math.round(totalPurchasedPence))
     : null;
-  const priceDefinitions = basicPriceDefinitions(planCatalogue);
+  const priceDefinitions = basicPriceDefinitions(
+    planCatalogue,
+    subscriptionPriceIds(balance.subscription),
+    requestedPlanKey
+  );
   const reportLines = analyticsAvailable
     ? summarizeMeterReports(reports, priceDefinitions)
     : [];
@@ -158,9 +188,12 @@ function buildBasicUsageSummary({
     hasBalance && (paidPurchasedPence != null || eventMetricsAvailable)
       ? remainingPence + accruedPence
       : null;
-  const grantedPence = [paidPurchasedPence, balanceBackedGrantedPence]
-    .filter(Number.isFinite)
-    .reduce((highest, value) => Math.max(highest, value), null);
+  const grantedPence =
+    billingModel === "prepaid_commitment" && paidPurchasedPence != null
+      ? paidPurchasedPence
+      : [paidPurchasedPence, balanceBackedGrantedPence]
+          .filter(Number.isFinite)
+          .reduce((highest, value) => Math.max(highest, value), null);
   const usedPence = grantedPence != null ? accruedPence : null;
   const projectedRemainingPence =
     grantedPence != null
@@ -173,7 +206,11 @@ function buildBasicUsageSummary({
   );
   // Basic credit has no recurring billing period. Its usage window starts when
   // prepaid access is activated and ends at the time of this snapshot.
-  const periodEnd = Math.floor(now / 1000);
+  const periodEnd =
+    billingModel === "prepaid_credit"
+      ? Math.floor(now / 1000)
+      : unixSeconds(balance.subscription?.current_period_end) ||
+        Math.floor(now / 1000);
   const reportsAvailable =
     analyticsAvailable && reportLines.some((line) => line.reported);
   const analyticsStatus = eventMetricsAvailable
@@ -184,7 +221,7 @@ function buildBasicUsageSummary({
 
   return {
     hasSubscription: true,
-    billingModel: "prepaid_credit",
+    billingModel,
     currency: balance.currency,
     period: {
       start: periodStart,
@@ -423,10 +460,57 @@ async function getBasicPrepaidUsageSummary(context, deps) {
   return refreshBasicPrepaidUsageSummary(key, context, deps);
 }
 
+async function getManualPrepaidUsageSummary(context, deps) {
+  const balance = await deps.getMoesifSubscriptionBalance({
+    companyId: context.companyId,
+    subscriptionId: context.subscriptionId,
+  });
+  const from =
+    balance.subscription?.current_period_start ||
+    balance.subscription?.subscription_period_start ||
+    balance.subscription?.created_at;
+  const results = await Promise.allSettled([
+    deps.getMoesifUsageMetrics({
+      userId: context.userId,
+      companyId: context.companyId,
+      subscriptionId: context.subscriptionId,
+      from,
+      to: "now",
+    }),
+    deps.getMoesifBillingReports({
+      companyId: context.companyId,
+      subscriptionId: context.subscriptionId,
+      from,
+      to: new Date().toISOString(),
+    }),
+    deps.getPlansFromMoesif("custom"),
+  ]);
+  const failures = results
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason);
+  return buildBasicUsageSummary({
+    balance,
+    totalPurchasedPence: context.commitmentAmountPence,
+    reports: results[1].status === "fulfilled" ? results[1].value : [],
+    planCatalogue: results[2].status === "fulfilled" ? results[2].value : [],
+    eventMetrics: results[0].status === "fulfilled" ? results[0].value : null,
+    analyticsAvailable:
+      results[1].status === "fulfilled" && results[2].status === "fulfilled",
+    eventMetricsAvailable:
+      results[0].status === "fulfilled" && results[2].status === "fulfilled",
+    analyticsErrors: failures.map(
+      (error) => error?.code || "usage_dependency_unavailable"
+    ),
+    planKey: context.planKey,
+    billingModel: "prepaid_commitment",
+  });
+}
+
 module.exports = {
   basicPriceDefinitions,
   buildBasicUsageSummary,
   getBasicPrepaidUsageSummary,
+  getManualPrepaidUsageSummary,
   invalidateBasicUsageSummary,
   preserveLastKnownAnalytics,
   summarizeMeterReports,

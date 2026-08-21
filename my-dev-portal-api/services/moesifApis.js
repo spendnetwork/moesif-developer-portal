@@ -173,6 +173,41 @@ async function sendPrepaidSubscriptionToMoesif({
   return subscriptionId;
 }
 
+async function sendManualSubscriptionToMoesif({
+  companyId,
+  subscriptionId,
+  planKey,
+  planId,
+  priceIds,
+  currentPeriodStart,
+  currentPeriodEnd,
+  invoiceReference,
+}) {
+  const response = await fetch("https://api.moesif.net/v1/subscriptions", {
+    method: "POST",
+    headers: {
+      "X-Moesif-Application-Id": process.env.MOESIF_APPLICATION_ID,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      subscription_id: subscriptionId,
+      company_id: String(companyId),
+      current_period_start: currentPeriodStart,
+      current_period_end: currentPeriodEnd,
+      status: "active",
+      items: priceIds.map((priceId) => ({ plan_id: planId, price_id: priceId })),
+      metadata: {
+        billing_provider: "manual",
+        billing_model: "prepaid_commitment",
+        plan_key: planKey,
+        external_invoice_reference: invoiceReference,
+      },
+    }),
+  });
+  await readMoesifResponse(response, "Moesif manual subscription update");
+  return subscriptionId;
+}
+
 async function createMoesifBalanceTransaction({
   companyId,
   subscriptionId,
@@ -181,25 +216,43 @@ async function createMoesifBalanceTransaction({
   description,
   type = "credit",
 }) {
-  const response = await fetch(
-    `${moesifApiEndpoint}/~/billing/reports/balance_transactions`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${moesifManagementToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        company_id: String(companyId),
-        subscription_id: subscriptionId,
-        amount: amountGbp,
-        type,
-        transaction_id: transactionId,
-        description: description || "Open Opportunities Basic credit top-up",
-      }),
+  const payload = {
+    company_id: String(companyId),
+    subscription_id: subscriptionId,
+    amount: amountGbp,
+    type,
+    transaction_id: transactionId,
+    description: description || "Open Opportunities Basic credit top-up",
+  };
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(
+        `${moesifApiEndpoint}/~/billing/reports/balance_transactions`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${moesifManagementToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+      return await readMoesifResponse(response, "Moesif balance credit");
+    } catch (error) {
+      error.code = error.code || "moesif_balance_credit_failed";
+      lastError = error;
+      const retryable =
+        !error.status ||
+        error.status === 429 ||
+        error.status >= 500;
+      if (!retryable || attempt === 3) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, 250 * 2 ** (attempt - 1))
+      );
     }
-  );
-  return readMoesifResponse(response, "Moesif balance credit");
+  }
+  throw lastError;
 }
 
 async function getMoesifPrepaidBalance({ companyId, stripeCustomerId }) {
@@ -246,8 +299,52 @@ async function getMoesifPrepaidBalance({ companyId, stripeCustomerId }) {
   };
 }
 
-async function getPlansFromMoesif() {
-  const provider = process.env.APP_PAYMENT_PROVIDER || "stripe";
+async function getMoesifSubscriptionBalance({ companyId, subscriptionId }) {
+  const response = await fetch(
+    `${moesifApiEndpoint}/v1/search/~/companies/${encodeURIComponent(
+      companyId
+    )}/subscriptions`,
+    { headers: { Authorization: `Bearer ${moesifManagementToken}` } }
+  );
+  const body = await readMoesifResponse(response, "Moesif subscription lookup");
+  const subscriptions = Array.isArray(body)
+    ? body
+    : body?.data || body?.subscriptions || [];
+  const subscription = subscriptions.find(
+    (candidate) =>
+      candidate.subscription_id === subscriptionId ||
+      candidate.external_id === subscriptionId
+  );
+  if (!subscription) {
+    const error = new Error("Manual subscription was not found in Moesif");
+    error.code = "moesif_manual_subscription_not_found";
+    error.status = 404;
+    throw error;
+  }
+  const reports = await getMoesifBillingReports({
+    companyId,
+    subscriptionId,
+    type: null,
+  });
+  const balanceReport = latestEndingBalance(reports);
+  const balance =
+    normalizedBalance(subscription.balance) ||
+    normalizedBalance(balanceReport?.ending_balance);
+  return {
+    subscriptionId,
+    subscription,
+    currency: String(
+      balanceReport?.currency || subscription.currency || "GBP"
+    ).toUpperCase(),
+    balanceAvailable: Boolean(balance),
+    current: balance?.current ?? null,
+    pending: balance?.pending ?? null,
+    available: balance?.available ?? null,
+  };
+}
+
+async function getPlansFromMoesif(providerOverride) {
+  const provider = providerOverride || process.env.APP_PAYMENT_PROVIDER || "stripe";
   const response = await fetch(
     `${moesifApiEndpoint}/v1/~/billing/catalog/plans?includes=prices&provider=${encodeURIComponent(
       provider
@@ -420,10 +517,12 @@ module.exports = {
   getPlansFromMoesif,
   getInfoForEmbeddedWorkspaces,
   sendPrepaidSubscriptionToMoesif,
+  sendManualSubscriptionToMoesif,
   createMoesifBalanceTransaction,
   getMoesifUsageMetrics,
   getMoesifBillingReports,
   getMoesifPrepaidBalance,
+  getMoesifSubscriptionBalance,
   basicPrepaidSubscriptionId,
   eventUsageMetricValues,
   latestEndingBalance,

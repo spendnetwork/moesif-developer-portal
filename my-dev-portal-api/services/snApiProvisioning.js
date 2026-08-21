@@ -287,6 +287,25 @@ function getSnApiCurrentPlanChange(authUser) {
   );
 }
 
+function registerSnApiPortalAccount(authUser) {
+  if (!authUser?.sub || !authUser?.email) {
+    throw new Error("Authenticated Auth0 user id and email are required");
+  }
+  return snApiKeyRequest("/api/v3/developer-portal/register", {
+    method: "POST",
+    body: {
+      auth0_user_id: authUser.sub,
+      email: authUser.email,
+      full_name: authUser.name || authUser.nickname || authUser.email,
+      organization_name:
+        authUser.organization_name ||
+        authUser.org_name ||
+        authUser.email.split("@")[1] ||
+        authUser.email,
+    },
+  });
+}
+
 function getSnApiPlanChangeByCustomer(stripeCustomerId) {
   return snApiKeyRequest(
     `/api/v3/developer-portal/plan-changes/by-customer/${encodeURIComponent(
@@ -323,6 +342,39 @@ function updateSnApiPlanChange(requestId, update) {
   );
 }
 
+function createSnApiManualCommitment(authUser, commitment) {
+  return snApiKeyRequest("/api/v3/developer-portal/manual-commitments", {
+    method: "POST",
+    body: { auth0_user_id: authUser.sub, ...commitment },
+  });
+}
+
+function getSnApiCurrentManualCommitment(authUser) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/manual-commitments/current?auth0_user_id=${encodeURIComponent(
+      authUser.sub
+    )}`
+  );
+}
+
+function confirmSnApiManualCommitmentPayment(requestId, payment) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/manual-commitments/${encodeURIComponent(
+      requestId
+    )}/confirm-payment`,
+    { method: "POST", body: payment }
+  );
+}
+
+function updateSnApiManualCommitmentMoesifSync(requestId, update) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/manual-commitments/${encodeURIComponent(
+      requestId
+    )}/moesif-sync`,
+    { method: "PATCH", body: update }
+  );
+}
+
 function updateSnApiSubscriptionStatus(subscription, customerId) {
   const period = subscriptionPeriod(subscription);
   return snApiKeyRequest(
@@ -347,6 +399,7 @@ module.exports = {
   provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
+  registerSnApiPortalAccount,
   listSnApiKeys,
   createSnApiKey,
   revokeSnApiKey,
@@ -357,6 +410,10 @@ module.exports = {
   listSnApiDuePlanChanges,
   claimSnApiDuePlanChanges,
   updateSnApiPlanChange,
+  createSnApiManualCommitment,
+  getSnApiCurrentManualCommitment,
+  confirmSnApiManualCommitmentPayment,
+  updateSnApiManualCommitmentMoesifSync,
   updateSnApiSubscriptionStatus,
   subscriptionPeriod,
 };

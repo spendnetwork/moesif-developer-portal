@@ -34,6 +34,7 @@ const {
   listStripeInvoices,
   ensureSubscriptionMeteredPrices,
   getPlanKeyForProduct,
+  getProductIdForPlanKey,
   getStripeProduct,
   getPlanPrices,
   LIVE_SUBSCRIPTION_STATUSES,
@@ -47,6 +48,7 @@ const {
   provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
+  registerSnApiPortalAccount,
   listSnApiKeys,
   createSnApiKey,
   revokeSnApiKey,
@@ -57,6 +59,9 @@ const {
   listSnApiDuePlanChanges,
   claimSnApiDuePlanChanges,
   updateSnApiPlanChange,
+  createSnApiManualCommitment,
+  getSnApiCurrentManualCommitment,
+  confirmSnApiManualCommitmentPayment,
   updateSnApiSubscriptionStatus,
 } = require("./services/snApiProvisioning");
 const {
@@ -79,6 +84,7 @@ const {
   getMoesifUsageMetrics,
   getMoesifBillingReports,
   getMoesifPrepaidBalance,
+  getMoesifSubscriptionBalance,
 } = require("./services/moesifApis");
 const {
   reconcileBasicCreditPurchase,
@@ -94,6 +100,7 @@ const {
 } = require("./services/planPurchasePolicy");
 const {
   getBasicPrepaidUsageSummary,
+  getManualPrepaidUsageSummary,
   invalidateBasicUsageSummary,
 } = require("./services/basicUsageSummary");
 
@@ -118,6 +125,16 @@ const templateWorkspaceIdTimeSeries =
   process.env.MOESIF_TEMPLATE_WORKSPACE_ID_TIME_SERIES;
 
 const jsonParser = express.json({ limit: "100kb" });
+
+function serviceTokenMatches(provided, expected) {
+  if (typeof provided !== "string" || typeof expected !== "string") return false;
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  return (
+    providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  );
+}
 
 function validateConfiguration() {
   const required = [
@@ -276,6 +293,7 @@ app.use(
 
 const PORTAL_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
 const portalContextCache = new Map();
+const portalRegistrationRequests = new Map();
 
 function applyPortalContext(req, context) {
   req.portalContext = context;
@@ -302,14 +320,29 @@ async function attachSnApiPortalContext(req, _res, next) {
   }
 
   try {
-    const context = await getSnApiPortalContext(req.user);
+    let context;
+    try {
+      context = await getSnApiPortalContext(req.user);
+    } catch (error) {
+      if (error.status !== 404) throw error;
+
+      // A browser commonly starts several authenticated requests together.
+      // Share one registration call so account creation stays idempotent.
+      let registration = portalRegistrationRequests.get(auth0UserId);
+      if (!registration) {
+        registration = registerSnApiPortalAccount(req.user).finally(() => {
+          portalRegistrationRequests.delete(auth0UserId);
+        });
+        portalRegistrationRequests.set(auth0UserId, registration);
+      }
+      context = await registration;
+    }
     portalContextCache.set(auth0UserId, { context, fetchedAt: Date.now() });
     applyPortalContext(req, context);
   } catch (error) {
     if (error.status === 404) {
-      // Authentication can happen before checkout has provisioned the
-      // API account. Not cached so the context appears promptly once
-      // provisioning completes.
+      // Keep compatibility during rolling deployments where the SN API may
+      // not have the registration endpoint yet.
       invalidatePortalContext(auth0UserId);
     } else {
       console.error("Failed to resolve SN API portal context:", error);
@@ -327,6 +360,39 @@ const portalAuthMiddleware = [authMiddleware, attachSnApiPortalContext];
 
 async function ensureRequestEntitlement(req) {
   if (req.entitlement) return req.entitlement;
+  const contextPlan = String(
+    req.portalContext?.current_plan_key || ""
+  ).toLowerCase();
+  const contextSubscriptionId = String(
+    req.portalContext?.current_subscription_id || ""
+  );
+  if (
+    ["growth", "enterprise"].includes(contextPlan) &&
+    contextSubscriptionId.startsWith("manual_") &&
+    String(req.portalContext?.billing_status || "").toLowerCase() === "active"
+  ) {
+    const commitment = await getSnApiCurrentManualCommitment(req.user);
+    const synchronized =
+      commitment?.status === "paid" &&
+      commitment?.subscription_id === contextSubscriptionId &&
+      commitment?.moesif_sync_status === "synced";
+    if (!synchronized) {
+      const error = new Error(
+        "Your invoiced plan is awaiting billing synchronization. Please retry shortly or contact support."
+      );
+      error.code = "manual_commitment_sync_pending";
+      error.status = 503;
+      throw error;
+    }
+    req.entitlement = {
+      active: true,
+      planKey: contextPlan,
+      subscription: null,
+      subscriptionId: contextSubscriptionId,
+      billingProvider: "manual",
+    };
+    return req.entitlement;
+  }
   const entitlement = await resolveAuthenticatedEntitlement(
     req.user,
     req.portalContext,
@@ -350,8 +416,8 @@ async function ensureRequestEntitlement(req) {
 }
 
 // API keys grant API access, so they may only be created or rotated while the
-// customer has a live subscription. Checked against Stripe directly so a
-// cancellation takes effect immediately, not after Moesif sync.
+// customer has a fully active entitlement. Stripe is authoritative for Basic;
+// SN API plus the Moesif sync state are authoritative for invoiced plans.
 async function requireActiveSubscription(req, res, next) {
   try {
     const entitlement = await ensureRequestEntitlement(req);
@@ -573,6 +639,292 @@ app.post(
   }
 );
 
+// -------------------------------------------------------------------------
+// Admin (service-to-service) plan change.
+//
+// The internal admin console has already authenticated the human admin
+// (Auth0 + allowlist). This endpoint is machine-to-machine, protected by a
+// shared secret (ADMIN_PLAN_CHANGE_TOKEN) in the X-Admin-Service-Token header,
+// mirroring the X-Developer-Portal-Token pattern SN API uses.
+//
+// Basic uses the existing Stripe flow. Growth and Enterprise create a manual
+// commitment request and remain inactive until an administrator confirms the
+// externally issued invoice has been paid.
+// -------------------------------------------------------------------------
+app.post("/admin/plan-change", jsonParser, async (req, res) => {
+  const expected = process.env.ADMIN_PLAN_CHANGE_TOKEN;
+  if (!expected) {
+    return res.status(503).json({
+      code: "admin_plan_change_not_configured",
+      message: "Admin plan change is not configured on this service.",
+    });
+  }
+  const provided = req.headers["x-admin-service-token"];
+  if (!serviceTokenMatches(provided, expected)) {
+    return res
+      .status(401)
+      .json({ code: "unauthorized", message: "Invalid admin service token." });
+  }
+
+  const auth0UserId = req.body?.auth0_user_id;
+  const toPlanKey = String(req.body?.to_plan_key || "").trim().toLowerCase();
+  const actorEmail = req.body?.actor_email || "admin";
+  const suppliedRequestId = req.body?.request_id;
+  const requestId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(suppliedRequestId || "")
+    ? suppliedRequestId
+    : crypto.randomUUID();
+
+  if (!auth0UserId || !toPlanKey) {
+    return res.status(400).json({
+      code: "invalid_request",
+      message: "auth0_user_id and to_plan_key are required.",
+    });
+  }
+  if (!["basic", "growth", "enterprise"].includes(toPlanKey)) {
+    return res
+      .status(400)
+      .json({ code: "invalid_plan", message: "Unknown plan." });
+  }
+
+  // Growth and Enterprise are invoiced and paid outside Stripe. Selecting one
+  // creates an auditable commitment request; access changes only after an
+  // administrator confirms the external invoice payment.
+  if (["growth", "enterprise"].includes(toPlanKey)) {
+    try {
+      const manualCommitment = await createSnApiManualCommitment(
+        { sub: auth0UserId },
+        {
+          request_id: requestId,
+          to_plan_key: toPlanKey,
+          requested_by: actorEmail,
+          metadata: { source: "admin_console" },
+        }
+      );
+      invalidatePortalContext(auth0UserId);
+      return res.status(200).json({
+        ok: true,
+        pending: true,
+        requiresManualInvoice: true,
+        changeType: "upgrade",
+        message: `Manual ${toPlanKey} commitment created. Confirm payment after the external invoice is paid.`,
+        manualCommitment,
+      });
+    } catch (err) {
+      console.error("Admin manual commitment failed", err);
+      return res.status(err.status || 400).json({
+        code: err.code || "manual_commitment_failed",
+        message: err.message || "The manual commitment could not be created.",
+      });
+    }
+  }
+
+  try {
+    // Same portal context the customer flow builds, fetched via the service
+    // token for the *target* customer.
+    const portalContext = await getSnApiPortalContext({ sub: auth0UserId });
+    const email = req.body?.email || portalContext.email;
+    if (!email) {
+      return res.status(422).json({
+        code: "email_unknown",
+        message: "Could not resolve the customer's email.",
+      });
+    }
+    const authUser = {
+      sub: auth0UserId,
+      email,
+      name: req.body?.name || email,
+    };
+
+    if (String(portalContext.current_plan_key || "").toLowerCase() === toPlanKey) {
+      return res.status(409).json({
+        code: "already_on_plan",
+        message: `Customer is already on ${toPlanKey}.`,
+      });
+    }
+
+    const planId = await getProductIdForPlanKey(toPlanKey);
+    const prepared = await prepareStripePlanChange(
+      email,
+      planId,
+      authUser,
+      portalContext
+    );
+
+    const scheduled = await createSnApiPlanChange(authUser, {
+      request_id: requestId,
+      stripe_customer_id: prepared.customer.id,
+      stripe_subscription_id: prepared.subscription?.id,
+      from_plan_key: prepared.fromPlanKey,
+      to_plan_key: prepared.toPlanKey,
+      target_product_id: prepared.targetProductId,
+      effective_at: new Date(prepared.effectiveAt * 1000).toISOString(),
+      commitment_ends_at: prepared.commitmentEndsAt
+        ? new Date(prepared.commitmentEndsAt * 1000).toISOString()
+        : null,
+      quoted_amount_gbp_pence: prepared.quotedAmountGbpPence,
+      currency: prepared.currency,
+      metadata: {
+        source: "admin_console",
+        actor_email: actorEmail,
+        change_type: prepared.changeType,
+        ...(prepared.creditExpiresAt
+          ? {
+              credit_expires_at: new Date(
+                prepared.creditExpiresAt * 1000
+              ).toISOString(),
+            }
+          : {}),
+      },
+    });
+
+    let persistedPlanChange = scheduled;
+    if (prepared.changeType === "downgrade") {
+      let stripeSchedule;
+      try {
+        stripeSchedule = await scheduleStripeDowngrade(scheduled);
+        persistedPlanChange = await updateSnApiPlanChange(scheduled.request_id, {
+          status: "scheduled",
+          stripe_schedule_id: stripeSchedule.id,
+        });
+      } catch (scheduleError) {
+        if (stripeSchedule?.id) {
+          await cancelStripeScheduledDowngrade(stripeSchedule.id).catch(
+            (releaseError) =>
+              console.error(
+                "Failed to release incomplete Stripe schedule",
+                releaseError
+              )
+          );
+        }
+        await updateSnApiPlanChange(scheduled.request_id, {
+          status: "failed",
+          failure_code:
+            scheduleError.code || "stripe_schedule_creation_failed",
+          failure_message: String(scheduleError.message || scheduleError).slice(
+            0,
+            2000
+          ),
+        }).catch((updateError) =>
+          console.error("Failed to record Stripe schedule failure", updateError)
+        );
+        throw scheduleError;
+      }
+    }
+
+    invalidatePortalContext(auth0UserId);
+    return res.status(200).json({
+      ok: true,
+      scheduled: true,
+      changeType: prepared.changeType,
+      requiresReview: prepared.changeType === "upgrade",
+      planChange: persistedPlanChange,
+    });
+  } catch (err) {
+    console.error("Admin plan change failed", err);
+    const status =
+      err.code === "no_active_subscription" ||
+      err.code === "stripe_customer_not_found" ||
+      err.code === "outstanding_payment" ||
+      err.code === "already_on_plan"
+        ? 409
+        : 400;
+    return res.status(status).json({
+      code: err.code || "plan_change_failed",
+      message: err.message || "The plan change could not be started.",
+    });
+  }
+});
+
+app.post(
+  "/admin/manual-commitments/:requestId/confirm-payment",
+  jsonParser,
+  async (req, res) => {
+    const expected = process.env.ADMIN_PLAN_CHANGE_TOKEN;
+    const provided = req.headers["x-admin-service-token"];
+    if (!expected) {
+      return res.status(503).json({
+        code: "admin_plan_change_not_configured",
+        message: "Admin plan change is not configured on this service.",
+      });
+    }
+    if (!serviceTokenMatches(provided, expected)) {
+      return res
+        .status(401)
+        .json({ code: "unauthorized", message: "Invalid admin service token." });
+    }
+
+    const invoiceReference = String(
+      req.body?.external_invoice_reference || ""
+    ).trim();
+    const actorEmail = String(req.body?.actor_email || "admin").trim();
+    const planKey = String(req.body?.plan_key || "").trim().toLowerCase();
+    if (!invoiceReference || !["growth", "enterprise"].includes(planKey)) {
+      return res.status(400).json({
+        code: "invalid_request",
+        message: "external_invoice_reference and a commitment plan are required.",
+      });
+    }
+
+    let commitment;
+    let balanceCreditAttempted = false;
+    try {
+      commitment = await confirmSnApiManualCommitmentPayment(
+        req.params.requestId,
+        {
+          external_invoice_reference: invoiceReference,
+          confirmed_by: actorEmail,
+          invoice_issued_at: req.body?.invoice_issued_at || undefined,
+          invoice_due_at: req.body?.invoice_due_at || undefined,
+          paid_at: req.body?.paid_at || undefined,
+        }
+      );
+      if (commitment.to_plan_key !== planKey) {
+        throw Object.assign(new Error("Commitment plan does not match the request."), {
+          code: "manual_commitment_plan_mismatch",
+          status: 409,
+        });
+      }
+      if (commitment.moesif_sync_status !== "synced") {
+        throw Object.assign(
+          new Error(
+            commitment.moesif_sync_error ||
+              "SN API recorded the payment but did not synchronize the subscription to Moesif."
+          ),
+          { code: "manual_moesif_subscription_sync_failed", status: 502 }
+        );
+      }
+      balanceCreditAttempted = true;
+      await createMoesifBalanceTransaction({
+        companyId: commitment.moesif_company_id,
+        subscriptionId: commitment.subscription_id,
+        amountGbp: commitment.amount_gbp_pence / 100,
+        transactionId: `manual_invoice:${invoiceReference}`,
+        description: `${planKey} commitment invoice ${invoiceReference}`,
+      });
+      invalidatePortalContext(commitment.auth0_user_id);
+      return res.json({
+        ok: true,
+        message: `${planKey} access activated and prepaid credit applied.`,
+        manualCommitment: commitment,
+      });
+    } catch (error) {
+      console.error("Manual commitment payment confirmation failed", error);
+      const balanceFailed = balanceCreditAttempted;
+      return res.status(error.status || 502).json({
+        code: error.code || "manual_commitment_activation_failed",
+        message:
+          error.code === "moesif_management_scope_missing"
+            ? "The subscription is synchronized, but the Moesif Management token cannot create its prepaid credit. Add the required billing write scopes, then retry this confirmation without issuing another invoice."
+            : balanceFailed
+            ? "The subscription is synchronized, but its prepaid credit could not be applied. Retry this confirmation without issuing another invoice."
+            : commitment?.status === "paid"
+            ? "Payment was recorded, but Moesif synchronization failed. Retry this confirmation without issuing another invoice."
+            : error.message || "The payment confirmation could not be completed.",
+      });
+    }
+  }
+);
+
 // The plan catalogue rarely changes, and Moesif's catalogue API can be slow
 // or intermittently fail. Cache it briefly and serve the last good copy on
 // error so the plans page loads fast and does not flash an error.
@@ -771,6 +1123,32 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
   try {
     const entitlement = await ensureRequestEntitlement(req);
     if (!entitlement.active) return res.status(200).json([]);
+    if (entitlement.billingProvider === "manual") {
+      const [commitment, balance] = await Promise.all([
+        getSnApiCurrentManualCommitment(req.user),
+        getMoesifSubscriptionBalance({
+          companyId: req.portalContext.moesif_company_id,
+          subscriptionId: entitlement.subscriptionId,
+        }),
+      ]);
+      return res.status(200).json([
+        {
+          ...balance.subscription,
+          subscription_id: entitlement.subscriptionId,
+          plan_key: entitlement.planKey,
+          status: "active",
+          billing_provider: "manual",
+          billing_model: "prepaid_commitment",
+          external_invoice_reference:
+            commitment?.external_invoice_reference || null,
+          balance: {
+            current_balance: balance.current,
+            pending_activity: balance.pending,
+            available_balance: balance.available,
+          },
+        },
+      ]);
+    }
     if (entitlement.planKey === "basic" && !entitlement.subscription) {
       const prepaid = await getMoesifPrepaidBalance({
         companyId: req.portalContext.moesif_company_id,
@@ -803,6 +1181,35 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
 
 app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
   try {
+    if (
+      ["growth", "enterprise"].includes(
+        String(req.portalContext?.current_plan_key || "").toLowerCase()
+      ) &&
+      String(req.portalContext?.current_subscription_id || "").startsWith(
+        "manual_"
+      )
+    ) {
+      const commitment = await getSnApiCurrentManualCommitment(req.user);
+      if (!commitment || commitment.status !== "paid") {
+        return res.status(200).json({ hasSubscription: false });
+      }
+      const summary = await getManualPrepaidUsageSummary(
+        {
+          userId: req.portalContext.moesif_user_id,
+          companyId: req.portalContext.moesif_company_id,
+          subscriptionId: commitment.subscription_id,
+          planKey: commitment.to_plan_key,
+          commitmentAmountPence: commitment.commitment_total_gbp_pence,
+        },
+        {
+          getMoesifSubscriptionBalance,
+          getMoesifBillingReports,
+          getMoesifUsageMetrics,
+          getPlansFromMoesif,
+        }
+      );
+      return res.status(200).json(summary);
+    }
     if (
       req.portalContext?.current_plan_key === "basic" &&
       !req.portalContext?.current_subscription_id

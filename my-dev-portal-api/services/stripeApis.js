@@ -486,6 +486,28 @@ async function getPlanKeyForProduct(productId) {
   throw new Error(`Product ${productId} is missing plan_key metadata`);
 }
 
+// Reverse of getPlanKeyForProduct: resolve a plan key (basic/growth/enterprise)
+// to its active Stripe product id. Stripe product metadata.plan_key is the
+// source of truth (same field getPlanKeyForProduct reads).
+async function getProductIdForPlanKey(planKey) {
+  const normalized = String(planKey || "").trim().toLowerCase();
+  if (!["basic", "growth", "enterprise"].includes(normalized)) {
+    throw stripeLookupError("unknown_plan_key", `Unknown plan key ${planKey}`);
+  }
+  const products = await stripe.products.list({ active: true, limit: 100 });
+  const match = products.data.find(
+    (product) =>
+      String(product.metadata?.plan_key || "").trim().toLowerCase() === normalized
+  );
+  if (!match) {
+    throw stripeLookupError(
+      "plan_product_not_found",
+      `No active Stripe product found for plan ${normalized}`
+    );
+  }
+  return match.id;
+}
+
 function subscriptionProductIds(subscription) {
   const productIds = new Set();
   if (subscription?.metadata?.plan_id) {
@@ -1989,6 +2011,7 @@ module.exports = {
   listStripeSubscriptions,
   getActiveStripeSubscription,
   getPlanKeyForProduct,
+  getProductIdForPlanKey,
   getStripeProduct,
   getPlanPrices,
   ensureSubscriptionMeteredPrices,

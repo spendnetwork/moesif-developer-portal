@@ -36,6 +36,18 @@ Below are the currently supported solutions in the developer portal. They may be
 
 - Stripe
 
+For the Open Opportunities deployment, Stripe is used only for Basic card
+payments and top-ups. Growth and Enterprise are invoiced outside Stripe. An
+administrator creates a commitment request, confirms the external invoice after
+payment, and the portal then creates or updates a custom Moesif subscription and
+credits its balance. SN API remains the access authority and blocks those plans
+when their local prepaid ledger reaches zero.
+
+The manual flow requires `ADMIN_PLAN_CHANGE_TOKEN`. SN API owns the custom
+Moesif subscription mapping and requires the Growth and Enterprise custom plan
+IDs in its own environment. The developer-portal backend applies the prepaid
+Moesif balance after SN API confirms that subscription synchronization.
+
 ### APIM / Key provisioning service
 
 - Auth0 Machine2Machine
@@ -73,6 +85,11 @@ In order for new customers to purchase paid plans with a credit card, you must c
 - [Configure a custom billing provider](https://www.moesif.com/docs/developer-portal/set-up-custom-billing-provider/)
 
 #### Subscription enforcement (important)
+
+The Stripe webhook path below remains relevant to legacy Stripe subscriptions.
+Basic credit is purchased through Stripe but enforced from its prepaid balance;
+externally invoiced Growth and Enterprise access is enforced from SN API's
+manual subscription and credit-ledger records.
 
 When a subscription ends, the customer's API keys must stop working. Two things
 have to be in place, and **neither is sufficient on its own**.

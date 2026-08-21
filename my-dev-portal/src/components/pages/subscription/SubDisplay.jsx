@@ -58,6 +58,7 @@ function SubDisplay({ sub, plans, onManage }) {
   const status = String(sub.status || "active").toLowerCase();
   const tone = STATUS_TONE[status] || STATUS_TONE.active;
   const isPurePrepaid = sub.billing_model === "prepaid_credit";
+  const isManualCommitment = sub.billing_model === "prepaid_commitment";
   const period = isPurePrepaid
     ? "Prepaid credit — no fixed billing period"
     : `Billing period ${formatIsoTimestamp(
@@ -102,9 +103,13 @@ function SubDisplay({ sub, plans, onManage }) {
           type="button"
           onClick={onManage}
           disabled={!onManage}
-          style={isPurePrepaid ? styles.outlineBtn : styles.primaryBtn}
+          style={isPurePrepaid || isManualCommitment ? styles.outlineBtn : styles.primaryBtn}
         >
-          {isPurePrepaid ? "Add credit" : "Manage billing"}
+          {isPurePrepaid
+            ? "Add credit"
+            : isManualCommitment
+              ? "Contact billing"
+              : "Manage billing"}
         </button>
       </div>
 

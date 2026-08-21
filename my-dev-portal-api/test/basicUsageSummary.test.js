@@ -116,6 +116,36 @@ test("Basic summary prices identity-scoped event quantities", () => {
   assert.equal(summary.analytics.status, "ready");
 });
 
+test("archived or duplicate catalogue prices never double-count one metric", () => {
+  const duplicateCatalogue = structuredClone(catalogue);
+  duplicateCatalogue.hits[0].prices.push(
+    {
+      id: "price_api_old",
+      nickname: "Basic - API Call",
+      unit_amount: 26,
+      created: 1,
+      metadata: { usage_metric: "api_call" },
+    },
+    {
+      id: "price_records_old",
+      nickname: "Basic - Record Returned",
+      unit_amount: 13,
+      created: 1,
+      metadata: { usage_metric: "records_returned" },
+    }
+  );
+  const summary = buildBasicUsageSummary({
+    balance: balance(),
+    totalPurchasedPence: 50000,
+    reports,
+    planCatalogue: duplicateCatalogue,
+    eventMetrics,
+  });
+
+  assert.equal(summary.lines.length, 4);
+  assert.equal(summary.accrued, 806);
+});
+
 test("adding another Basic top-up increases purchased credit without resetting usage", () => {
   const summary = buildBasicUsageSummary({
     balance: balance({ current: 700, available: 670 }),
@@ -219,4 +249,48 @@ test("a failed refresh preserves last confirmed analytics for the same period", 
   assert.deepEqual(preserved.lines, previous.lines);
   assert.equal(preserved.credit.remaining, 49194);
   assert.equal(preserved.analytics.stale, true);
+});
+
+test("manual Growth commitments use custom catalogue rates and their annual boundary", () => {
+  const growthCatalogue = structuredClone(catalogue);
+  growthCatalogue.hits[0].id = "plan_growth";
+  growthCatalogue.hits[0].metadata.plan_key = "growth";
+  growthCatalogue.hits[0].prices = growthCatalogue.hits[0].prices.map(
+    (price, index) => ({
+      ...price,
+      id: `growth_price_${index}`,
+      unit_amount: [20, 10, 35, 50][index],
+    })
+  );
+  const summary = buildBasicUsageSummary({
+    balance: balance({
+      current: 5000,
+      pending: 0,
+      available: 5000,
+      subscription: {
+        current_period_start: "2026-08-01T00:00:00.000Z",
+        current_period_end: "2027-08-01T00:00:00.000Z",
+      },
+    }),
+    totalPurchasedPence: 500000,
+    reports: [],
+    planCatalogue: growthCatalogue,
+    eventMetrics: {
+      api_call: 2,
+      records_returned: 3,
+      aggregate_call: 1,
+      attachment: 1,
+    },
+    planKey: "growth",
+    billingModel: "prepaid_commitment",
+  });
+
+  assert.equal(summary.billingModel, "prepaid_commitment");
+  assert.equal(summary.credit.granted, 500000);
+  assert.equal(summary.accrued, 155);
+  assert.deepEqual(
+    summary.lines.map((line) => line.rate),
+    [20, 10, 35, 50]
+  );
+  assert.equal(summary.period.end, 1817078400);
 });

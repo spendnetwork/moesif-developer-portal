@@ -27,6 +27,7 @@ const C = {
 
 const PLAN_KEY_ORDER = ["basic", "growth", "enterprise"];
 const CONTACT_LED_PLAN_KEYS = new Set(["growth", "enterprise"]);
+// Fallback only; the real value comes from REACT_APP_SALES_CONTACT_EMAIL (.env).
 const DEFAULT_SALES_CONTACT_EMAIL = "contact@spendnetwork.com";
 
 const TIERS = [

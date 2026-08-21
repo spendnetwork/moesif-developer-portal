@@ -85,6 +85,14 @@ function Subscription() {
         );
       }
     : undefined;
+  const contactBilling = () => {
+    const email =
+      import.meta.env.REACT_APP_SALES_CONTACT_EMAIL ||
+      "contact@spendnetwork.com";
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(
+      "Open Opportunities API billing"
+    )}`;
+  };
 
   const hasSubs = subscriptions?.length > 0;
 
@@ -165,6 +173,8 @@ function Subscription() {
               onManage={
                 sub.billing_model === "prepaid_credit"
                   ? startBasicTopUp
+                  : sub.billing_model === "prepaid_commitment"
+                    ? contactBilling
                   : openStripeManagement
               }
             />
@@ -172,7 +182,11 @@ function Subscription() {
           <p style={{ margin: "4px 0 0", fontSize: 12.5, color: C.muted }}>
             {subscriptions.some((sub) => sub.billing_model === "prepaid_credit")
               ? "Basic payments are collected by Stripe and the available credit balance is verified with Moesif."
-              : "Subscription status is verified directly with Stripe."}
+              : subscriptions.some(
+                    (sub) => sub.billing_model === "prepaid_commitment"
+                  )
+                ? "Growth and Enterprise commitments are invoiced outside Stripe. Usage and available credit are metered in Moesif."
+                : "Subscription status is verified directly with Stripe."}
           </p>
         </div>
       )}
