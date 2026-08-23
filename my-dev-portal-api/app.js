@@ -81,6 +81,7 @@ const {
   getInfoForEmbeddedWorkspaces,
   getPlansFromMoesif,
   sendPrepaidSubscriptionToMoesif,
+  waitForMoesifSubscription,
   createMoesifBalanceTransaction,
   getMoesifUsageMetrics,
   getMoesifBillingReports,
@@ -938,11 +939,17 @@ app.post(
         );
       }
       balanceCreditAttempted = true;
+      await waitForMoesifSubscription({
+        companyId: commitment.moesif_company_id,
+        subscriptionId: commitment.subscription_id,
+      });
       await createMoesifBalanceTransaction({
         companyId: commitment.moesif_company_id,
         subscriptionId: commitment.subscription_id,
         amountGbp: commitment.amount_gbp_pence / 100,
-        transactionId: `manual_invoice:${invoiceReference}`,
+        // Moesif expects a 36-character UUID and deduplicates retries by it.
+        // The commitment request ID is stable across payment confirmations.
+        transactionId: req.params.requestId,
         description: `${planKey} commitment invoice ${invoiceReference}`,
       });
       invalidatePortalContext(commitment.auth0_user_id);

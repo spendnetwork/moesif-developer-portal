@@ -10,7 +10,59 @@ const {
   latestEndingBalance,
   normalizedBalance,
   readMoesifResponse,
+  waitForMoesifSubscription,
+  isMoesifSubscriptionPropagationError,
 } = require("../services/moesifApis");
+
+test("manual subscription readiness waits until Moesif exposes the subscription", async () => {
+  let requests = 0;
+  const sleeps = [];
+  await waitForMoesifSubscription({
+    companyId: 15,
+    subscriptionId: "manual_subscription",
+    delaysMs: [1, 2],
+    sleep: async (delayMs) => sleeps.push(delayMs),
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(
+        JSON.stringify({
+          subscriptions:
+            requests === 3
+              ? [{ subscription_id: "manual_subscription" }]
+              : [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    },
+  });
+
+  assert.equal(requests, 3);
+  assert.deepEqual(sleeps, [1, 2]);
+});
+
+test("only subscription propagation validation errors are retryable", () => {
+  assert.equal(
+    isMoesifSubscriptionPropagationError({
+      status: 400,
+      detail: { message: "Subscription does not exist yet" },
+    }),
+    true
+  );
+  assert.equal(
+    isMoesifSubscriptionPropagationError({
+      status: 400,
+      detail: { message: "Amount must be positive" },
+    }),
+    false
+  );
+  assert.equal(
+    isMoesifSubscriptionPropagationError({
+      status: 401,
+      detail: { message: "Subscription not found" },
+    }),
+    false
+  );
+});
 
 test("Moesif billing-scope failures have a stable operational code", async () => {
   const response = new Response(

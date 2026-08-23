@@ -208,6 +208,60 @@ async function sendManualSubscriptionToMoesif({
   return subscriptionId;
 }
 
+const manualSubscriptionReadinessDelaysMs = [250, 500, 1000, 2000, 4000];
+
+async function waitForMoesifSubscription({
+  companyId,
+  subscriptionId,
+  delaysMs = manualSubscriptionReadinessDelaysMs,
+  fetchImpl = fetch,
+  sleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+}) {
+  const url = `${moesifApiEndpoint}/v1/search/~/companies/${encodeURIComponent(
+    companyId
+  )}/subscriptions`;
+
+  for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
+    const response = await fetchImpl(url, {
+      headers: { Authorization: `Bearer ${moesifManagementToken}` },
+    });
+    const body = await readMoesifResponse(
+      response,
+      "Moesif manual subscription readiness lookup"
+    );
+    const subscriptions = normalizeMoesifCollection(body, ["data", "subscriptions"]);
+    if (
+      subscriptions.some(
+        (subscription) =>
+          subscription.subscription_id === subscriptionId ||
+          subscription.external_id === subscriptionId
+      )
+    ) {
+      return;
+    }
+    if (attempt < delaysMs.length) await sleep(delaysMs[attempt]);
+  }
+
+  const error = new Error(
+    "Moesif has not finished making the synchronized subscription available"
+  );
+  error.code = "moesif_subscription_propagation_delayed";
+  error.status = 503;
+  throw error;
+}
+
+function isMoesifSubscriptionPropagationError(error) {
+  if (error?.status !== 400) return false;
+  const detail = JSON.stringify(error.detail || error.message || "").toLowerCase();
+  return (
+    detail.includes("subscription") &&
+    (detail.includes("not found") ||
+      detail.includes("does not exist") ||
+      detail.includes("invalid") ||
+      detail.includes("not available"))
+  );
+}
+
 async function createMoesifBalanceTransaction({
   companyId,
   subscriptionId,
@@ -225,7 +279,8 @@ async function createMoesifBalanceTransaction({
     description: description || "Open Opportunities Basic credit top-up",
   };
   let lastError;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  const delaysMs = [500, 1000, 2000, 4000];
+  for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
     try {
       const response = await fetch(
         `${moesifApiEndpoint}/~/billing/reports/balance_transactions`,
@@ -245,11 +300,10 @@ async function createMoesifBalanceTransaction({
       const retryable =
         !error.status ||
         error.status === 429 ||
-        error.status >= 500;
-      if (!retryable || attempt === 3) throw error;
-      await new Promise((resolve) =>
-        setTimeout(resolve, 250 * 2 ** (attempt - 1))
-      );
+        error.status >= 500 ||
+        isMoesifSubscriptionPropagationError(error);
+      if (!retryable || attempt === delaysMs.length) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
     }
   }
   throw lastError;
@@ -518,6 +572,7 @@ module.exports = {
   getInfoForEmbeddedWorkspaces,
   sendPrepaidSubscriptionToMoesif,
   sendManualSubscriptionToMoesif,
+  waitForMoesifSubscription,
   createMoesifBalanceTransaction,
   getMoesifUsageMetrics,
   getMoesifBillingReports,
@@ -528,4 +583,5 @@ module.exports = {
   latestEndingBalance,
   normalizedBalance,
   readMoesifResponse,
+  isMoesifSubscriptionPropagationError,
 };
