@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URI%/*}"
+      - COMMIT_SHA="$(printf '%s' "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c 1-12)"
+      - IMAGE_TAG="${IMAGE_TAG_PREFIX}-${COMMIT_SHA}"
+  build:
+    commands:
+      - docker build --file distribution/docker/Dockerfile-dev-portal-api --tag "$ECR_REPOSITORY_URI:$IMAGE_TAG" --tag "$ECR_REPOSITORY_URI:${IMAGE_TAG_PREFIX}-latest" .
+  post_build:
+    commands:
+      - docker push "$ECR_REPOSITORY_URI:$IMAGE_TAG"
+      - docker push "$ECR_REPOSITORY_URI:${IMAGE_TAG_PREFIX}-latest"
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$CONTAINER_NAME" "$ECR_REPOSITORY_URI:$IMAGE_TAG" > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json

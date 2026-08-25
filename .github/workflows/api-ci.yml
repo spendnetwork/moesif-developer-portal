@@ -1,0 +1,48 @@
+name: Developer portal API CI
+
+on:
+  pull_request:
+    branches: [develop, staging, main]
+    paths:
+      - "my-dev-portal-api/**"
+      - "distribution/docker/Dockerfile-dev-portal-api"
+      - ".github/workflows/api-ci.yml"
+      - "buildspec-api.yml"
+  push:
+    branches: [develop, staging, main]
+    paths:
+      - "my-dev-portal-api/**"
+      - "distribution/docker/Dockerfile-dev-portal-api"
+      - ".github/workflows/api-ci.yml"
+      - "buildspec-api.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: developer-portal-api-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: API tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: my-dev-portal-api
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: my-dev-portal-api/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  container:
+    name: API container packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build --file distribution/docker/Dockerfile-dev-portal-api --tag moesif-developer-portal-api:ci .

@@ -1,72 +1,21 @@
-# Developer Portal GitHub Actions
+# Developer Portal Delivery
 
-The frontend and backend deploy differently:
+GitHub Actions performs CI only:
 
-- Frontend (`my-dev-portal`) is hosted by AWS Amplify and deploys through the Amplify GitHub App connection.
-- Backend (`my-dev-portal-api`) is built as a Docker image, pushed to ECR, and deployed to ECS.
+- `frontend-ci.yml` installs, lints, and builds `my-dev-portal`.
+- `api-ci.yml` runs the API test suite and verifies its Docker image builds.
 
-## GitHub environments
+Neither workflow has AWS credentials or deploy permissions.
 
-Create these GitHub Environments if they do not exist:
+AWS owns deployment:
 
-- `development`
-- `staging`
-- `production`
+- Amplify continues to build and deploy the frontend from its connected GitHub branch.
+- CodePipeline watches `develop`, `staging`, and `main` through AWS CodeConnections.
+- CodeBuild uses `buildspec-api.yml` to build and push the API image to ECR.
+- CodePipeline deploys the generated image definition to the matching ECS service.
 
-The backend deploy workflow resolves environments like this:
-
-- `develop` branch -> `development`
-- `staging` branch -> `staging`
-- `main` branch -> `production`
-- manual runs can choose any of the three environments
-
-## Required environment variables
-
-Set these as GitHub Environment variables for each environment:
-
-| Variable | Description |
-| --- | --- |
-| `AWS_REGION` | AWS region, for example `eu-central-1`. |
-| `AWS_ROLE_ARN` | IAM role assumed by GitHub Actions through OIDC. |
-| `ECR_REPOSITORY` | ECR repository name for the backend API image. |
-| `ECS_CLUSTER` | ECS cluster name. Use `moesif-developer-portal`. |
-| `ECS_SERVICE` | ECS service name for that environment. |
-| `ECS_TASK_DEFINITION_FAMILY` | ECS task definition family for that environment. |
-| `ECS_CONTAINER_NAME` | Container name in the task definition. Use `portal-api`. |
-
-## Current Terraform-backed values
-
-### Staging
-
-```text
-AWS_REGION=eu-central-1
-ECR_REPOSITORY=moesif-developer-portal-staging
-ECS_CLUSTER=moesif-developer-portal
-ECS_SERVICE=moesif-developer-portal-staging
-ECS_TASK_DEFINITION_FAMILY=moesif-developer-portal-staging
-ECS_CONTAINER_NAME=portal-api
-```
-
-### Production
-
-```text
-AWS_REGION=eu-central-1
-ECR_REPOSITORY=moesif-developer-portal-prod
-ECS_CLUSTER=moesif-developer-portal
-ECS_SERVICE=moesif-developer-portal-prod
-ECS_TASK_DEFINITION_FAMILY=moesif-developer-portal-prod
-ECS_CONTAINER_NAME=portal-api
-```
-
-Development values should be added once its Terraform environment exists.
-
-## Required AWS role permissions
-
-The GitHub Actions role needs enough access to:
-
-- push images to the configured ECR repository
-- read and register ECS task definitions
-- update the ECS service
-- pass the ECS task roles used by the task definition
-
-Use OIDC rather than long-lived AWS access keys.
+| Branch | Environment | API service |
+| --- | --- | --- |
+| `develop` | dev | `moesif-developer-portal-dev` |
+| `staging` | staging | `moesif-developer-portal-staging` |
+| `main` | production | `moesif-developer-portal-prod` |
