@@ -91,15 +91,13 @@ button {
   }
 }
 
-.button__purp,
-.button__login,
-.button__logout {
+.button__purp {
   min-width: 8.4rem;
 
-  border: 0.1rem solid var(--accent);
+  border: unset;
   color: var(--white);
   background: var(--accent);
-  width: auto;
+  width: 100%;
   font-size: 1.6rem;
 
   margin-right: 1.6rem;
@@ -118,43 +116,42 @@ button {
   transition: filter 0.3s ease-out;
 }
 
-.button__logout:hover {
-  filter: brightness(110%);
-}
-
-.button__purp {
-  background: var(--accent);
-  color: var(--white);
-  width: 100%;
-  border: unset;
-}
-
 .button__purp:hover {
   background: var(--highlight);
   color: var(--highlight-dark);
 }
 
+.button__login,
+.button__logout,
 .button__sign-up {
-  min-width: 8.4rem;
-
-  border: 0.1rem solid var(--button-outline);
-  color: var(--body-text-color);
-  background-color: var(--surface);
-  /* width: 50%; */
-  font-size: 1.4rem;
-
-  margin-right: 1.6rem;
-
+  border: 1px solid var(--accent);
+  color: var(--white);
+  background: var(--accent);
+  font-family: var(--font-primary);
   font-style: normal;
   font-weight: 500;
-  line-height: 1.6rem;
-  padding: 0.8rem 0;
-  border-radius: 0.6rem;
+  font-size: 13px;
+  line-height: 1;
+  padding: 8px 14px;
+  border-radius: var(--radius-control);
   text-align: center;
-
   cursor: pointer;
   user-select: none;
-  transition: background 0.1s ease-out, color 0.3s ease-out;
+  transition: background 0.12s ease-out, border-color 0.12s ease-out,
+    color 0.12s ease-out, filter 0.12s ease-out;
+}
+
+.button__logout:hover {
+  filter: brightness(110%);
+}
+
+/* A lighter chip than login/logout, safe on both the dark desktop bar and
+   the light-surface mobile menu -- unlike a transparent/white-text treatment,
+   which would vanish against the mobile menu's light background. */
+.button__sign-up {
+  border-color: var(--button-outline);
+  color: var(--body-text-color);
+  background: var(--surface);
 }
 
 .button__sign-up:hover {
@@ -163,21 +160,18 @@ button {
   background: var(--accent-soft);
 }
 
-.button__login:last-child,
-.button__logout:last-child,
-.button__sign-up:last-child {
-  margin-right: 0;
+/* On the dark desktop bar the light chip reads as a proper ghost button;
+   on the mobile menu's light surface it stays the safer default above. */
+.nav-bar__buttons .button__sign-up {
+  border-color: rgba(255, 255, 255, 0.28);
+  color: var(--white);
+  background: transparent;
 }
 
-@media only screen and (min-width: 641px) {
-  .button__login,
-  .button__logout,
-  .button__sign-up {
-    padding: 0.8rem 1.2rem;
-
-    font-size: 1.4rem;
-    line-height: 1.6rem;
-  }
+.nav-bar__buttons .button__sign-up:hover {
+  border-color: var(--highlight);
+  background: var(--highlight);
+  color: var(--highlight-dark);
 }
 
 .button__link {

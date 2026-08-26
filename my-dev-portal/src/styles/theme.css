@@ -88,7 +88,14 @@
   --moesif-black: #17221f;
 
   --overall-bg: #f5f7f4;
-  --nav-bg: #17221f;
+  /* Matches the admin console's top bar exactly, so both internal tools
+     read as one product family. */
+  --nav-bg: #23383a;
+  --nav-border: #3a5052;
+  --nav-muted: #8fa5a0;
+  --nav-tab-hover-bg: rgba(255, 255, 255, 0.06);
+  --nav-tab-active-bg: rgba(169, 255, 155, 0.14);
+  --nav-tab-active-border: rgba(169, 255, 155, 0.32);
   --focus-bg: #ffffff;
   --button-outline: #d3ddd6;
   --heading-color: #23383a;
