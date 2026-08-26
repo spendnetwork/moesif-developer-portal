@@ -219,4 +219,3 @@ Depends on how you deploy the `my-dev-portal-api`, weather you decides to use AP
 APIs are protected so that they can only be called by `my-dev-portal` UI.
 
 With all parts of the ecosystem working properly, the Moesif Developer Portal can be released to your users!
-
