@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { moesifIdentifyUserFrontEndIfPossible } from "../common/utils";
 import { notifySessionExpired } from "../lib/session-expiry";
+import { apiRequest } from "../lib/portal-api";
 
 // Auth0 errors that mean the underlying session is gone, so a silent token
 // refresh can never succeed. Without treating these as an expiry the app sits
@@ -17,6 +18,21 @@ const AUTH0_SESSION_DEAD = [
 
 function isSessionDeadError(err) {
   return AUTH0_SESSION_DEAD.includes(err?.error);
+}
+
+// This hook mounts once per page (11+ call sites), so a per-component effect
+// would ping /sign-in on every in-app navigation, not just once per visit.
+// A module-level flag makes it fire exactly once per full page load, however
+// many pages/components mount the hook afterwards.
+let signInPinged = false;
+
+function pingPortalSignIn(idToken) {
+  if (signInPinged) return;
+  signInPinged = true;
+  apiRequest("/sign-in", idToken, { method: "POST" }).catch((err) => {
+    // Best-effort activity tracking only; never surface this to the user.
+    console.error("Portal sign-in ping failed", err);
+  });
 }
 
 // Single place to read the current user, the raw idToken sent to the portal
@@ -75,6 +91,7 @@ export default function useAuthCombined() {
           // https://github.com/auth0/auth0-react/issues/262
           setIdToken(idToken);
           moesifIdentifyUserFrontEndIfPossible(idToken);
+          pingPortalSignIn(idToken);
         })
         .catch((err) => {
           console.error("failed to load id token", err);

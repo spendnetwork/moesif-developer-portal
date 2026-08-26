@@ -48,6 +48,7 @@ const {
   provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
+  recordSnApiPortalSignIn,
   registerSnApiPortalAccount,
   listSnApiKeys,
   createSnApiKey,
@@ -881,6 +882,88 @@ app.post("/admin/plan-change", jsonParser, async (req, res) => {
 });
 
 app.post(
+  "/admin/test-credit-top-up",
+  jsonParser,
+  async (req, res) => {
+    const expected = process.env.ADMIN_PLAN_CHANGE_TOKEN;
+    const provided = req.headers["x-admin-service-token"];
+    if (!expected) {
+      return res.status(503).json({
+        code: "admin_plan_change_not_configured",
+        message: "Admin billing operations are not configured on this service.",
+      });
+    }
+    if (!serviceTokenMatches(provided, expected)) {
+      return res
+        .status(401)
+        .json({ code: "unauthorized", message: "Invalid admin service token." });
+    }
+
+    const auth0UserId = String(req.body?.auth0_user_id || "").trim();
+    const amountGbp = Number(req.body?.amount_gbp);
+    const transactionId = String(req.body?.transaction_id || "").trim();
+    const reason = String(req.body?.reason || "").trim();
+    if (
+      !auth0UserId ||
+      !Number.isFinite(amountGbp) ||
+      amountGbp <= 0 ||
+      amountGbp > 10000 ||
+      !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(transactionId) ||
+      reason.length < 3
+    ) {
+      return res.status(400).json({
+        code: "invalid_test_top_up",
+        message:
+          "A customer, a positive amount up to GBP 10,000, a transaction UUID, and a reason are required.",
+      });
+    }
+
+    try {
+      const commitment = await getSnApiCurrentManualCommitment({
+        sub: auth0UserId,
+      });
+      const isActiveTestCommitment =
+        commitment?.to_plan_key === "test" &&
+        commitment?.status === "paid" &&
+        commitment?.moesif_sync_status === "synced" &&
+        String(commitment?.subscription_id || "").startsWith("manual_");
+      if (!isActiveTestCommitment) {
+        return res.status(409).json({
+          code: "test_subscription_not_active",
+          message:
+            "Test credit can only be added to an active, synchronized Test subscription.",
+        });
+      }
+
+      await waitForMoesifSubscription({
+        companyId: commitment.moesif_company_id,
+        subscriptionId: commitment.subscription_id,
+      });
+      await createMoesifBalanceTransaction({
+        companyId: commitment.moesif_company_id,
+        subscriptionId: commitment.subscription_id,
+        amountGbp: Math.round(amountGbp * 100) / 100,
+        transactionId,
+        description: `Test credit top-up: ${reason.slice(0, 160)}`,
+      });
+      invalidatePortalContext(auth0UserId);
+      return res.json({
+        ok: true,
+        transactionId,
+        amountGbp: Math.round(amountGbp * 100) / 100,
+        message: "Test credit was added successfully.",
+      });
+    } catch (error) {
+      console.error("Admin Test credit top-up failed", error);
+      return res.status(error.status || 502).json({
+        code: error.code || "test_credit_top_up_failed",
+        message: error.message || "Test credit could not be added.",
+      });
+    }
+  }
+);
+
+app.post(
   "/admin/manual-commitments/:requestId/confirm-payment",
   jsonParser,
   async (req, res) => {
@@ -1417,6 +1500,20 @@ app.get("/portal-context", portalAuthMiddleware, function (req, res) {
     });
   }
   return res.status(200).json(req.portalContext);
+});
+
+// Called once per browser session, right after Auth0 confirms the user, so
+// "last signed in" reflects an actual human opening the portal -- not the
+// unattended plan-change reconciliation job, which also calls /provision.
+app.post("/sign-in", authMiddleware, async function (req, res) {
+  try {
+    await recordSnApiPortalSignIn(req.user);
+  } catch (error) {
+    if (error.status !== 404) {
+      console.error("Portal sign-in tracking failed:", error);
+    }
+  }
+  return res.status(204).end();
 });
 
 function sendKeyManagementError(res, error) {

@@ -234,6 +234,19 @@ async function getSnApiPortalContext(authUser) {
   );
 }
 
+// Records a genuine sign-in. Distinct from provisioning, which also runs
+// unattended from the plan-change reconciliation job and must not be
+// mistaken for evidence that a human is actually using the portal.
+async function recordSnApiPortalSignIn(authUser) {
+  if (!authUser?.sub) {
+    throw new Error("Authenticated Auth0 user id is required");
+  }
+  return snApiKeyRequest("/api/v3/developer-portal/sign-in", {
+    method: "POST",
+    body: { auth0_user_id: authUser.sub },
+  });
+}
+
 function listSnApiKeys(authUser) {
   return snApiKeyRequest(
     `/api/v3/developer-portal/portal-api-keys?auth0_user_id=${encodeURIComponent(
@@ -409,6 +422,7 @@ module.exports = {
   provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
+  recordSnApiPortalSignIn,
   registerSnApiPortalAccount,
   listSnApiKeys,
   createSnApiKey,
