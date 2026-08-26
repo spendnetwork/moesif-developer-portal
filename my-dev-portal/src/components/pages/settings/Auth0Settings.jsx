@@ -126,6 +126,7 @@ function Auth0Settings(props) {
                 type="button"
                 disabled={!user.email}
                 onClick={() => openStripeManagement(user.email)}
+                className="btn-outline"
                 style={{
                   ...styles.outlineBtn,
                   opacity: user.email ? 1 : 0.55,
@@ -228,9 +229,6 @@ const styles = {
   },
   billingBody: { margin: 0, fontSize: 13.5, color: C.muted },
   outlineBtn: {
-    background: "transparent",
-    border: "1px solid #C9D6CF",
-    color: C.head,
     fontSize: 14,
     fontWeight: 500,
     padding: "10px 16px",

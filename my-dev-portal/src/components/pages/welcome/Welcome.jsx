@@ -10,7 +10,6 @@ const API_DOCS_URL =
 
 const C = {
   green: "#034737",
-  mint: "#A9FF9B",
   head: "#23383A",
   body: "#23302C",
   muted: "#647873",
@@ -76,6 +75,7 @@ function Welcome() {
                   href={step.href}
                   target="_blank"
                   rel="noopener noreferrer"
+                  className="btn-text-link"
                   style={styles.link}
                 >
                   {step.linkLabel}
@@ -84,6 +84,7 @@ function Welcome() {
                 <button
                   type="button"
                   onClick={() => navigate(step.to)}
+                  className="btn-text-link"
                   style={{ ...styles.link, background: "none", cursor: "pointer" }}
                 >
                   {step.linkLabel}
@@ -97,6 +98,7 @@ function Welcome() {
           <button
             type="button"
             onClick={() => navigate("/plans")}
+            className="btn-solid"
             style={styles.primaryBtn}
           >
             Choose a plan
@@ -104,6 +106,7 @@ function Welcome() {
           <button
             type="button"
             onClick={() => navigate("/dashboard")}
+            className="btn-outline"
             style={styles.outlineBtn}
           >
             Go to my dashboard
@@ -178,18 +181,12 @@ const styles = {
   link: {
     display: "inline-block",
     fontSize: 13.5,
-    color: C.green,
-    borderBottom: `1px solid ${C.mint}`,
     paddingBottom: 1,
-    border: "none",
     borderRadius: 0,
     padding: 0,
     textDecoration: "none",
   },
   primaryBtn: {
-    background: C.green,
-    border: `1px solid ${C.green}`,
-    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: 500,
     padding: "11px 20px",
@@ -197,9 +194,6 @@ const styles = {
     cursor: "pointer",
   },
   outlineBtn: {
-    background: "transparent",
-    border: "1px solid #C9D6CF",
-    color: C.head,
     fontSize: 14,
     fontWeight: 500,
     padding: "11px 20px",

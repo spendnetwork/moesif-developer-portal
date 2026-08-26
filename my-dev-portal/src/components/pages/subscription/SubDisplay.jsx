@@ -2,7 +2,6 @@ import React from "react";
 import { formatIsoTimestamp, formatPrice } from "../../../common/utils";
 
 const C = {
-  green: "#034737",
   head: "#23383A",
   body: "#23302C",
   muted: "#647873",
@@ -103,6 +102,7 @@ function SubDisplay({ sub, plans, onManage }) {
           type="button"
           onClick={onManage}
           disabled={!onManage}
+          className={isPurePrepaid || isManualCommitment ? "btn-outline" : "btn-solid"}
           style={isPurePrepaid || isManualCommitment ? styles.outlineBtn : styles.primaryBtn}
         >
           {isPurePrepaid
@@ -160,9 +160,6 @@ const styles = {
     fontVariantNumeric: "tabular-nums",
   },
   primaryBtn: {
-    background: C.green,
-    border: `1px solid ${C.green}`,
-    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: 500,
     padding: "10px 16px",
@@ -171,9 +168,6 @@ const styles = {
     cursor: "pointer",
   },
   outlineBtn: {
-    background: "transparent",
-    border: "1px solid #C9D6CF",
-    color: C.head,
     fontSize: 14,
     fontWeight: 500,
     padding: "10px 16px",

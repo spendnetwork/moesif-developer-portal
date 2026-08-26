@@ -1,0 +1,90 @@
+/* Hover-enabled colour variants for the plain inline-styled buttons on
+   Keys, Subscription, Welcome and Settings (the Plans/Checkout/Dashboard
+   pages already get hover for free from .button/.button--primary etc. in
+   button.css). Only colour-related properties live here -- each page keeps
+   its own inline size/padding/radius -- because an inline `style` always
+   wins over a stylesheet rule for the same property, hover or not, so the
+   colour properties have to move out of the inline style object entirely
+   for a :hover rule to have any effect. */
+
+.btn-solid {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--white);
+  transition: background 0.12s ease-out, border-color 0.12s ease-out,
+    color 0.12s ease-out, transform 0.12s ease-out;
+}
+
+.btn-solid:hover:not(:disabled) {
+  background: var(--highlight);
+  border-color: var(--highlight);
+  color: var(--highlight-dark);
+  transform: translateY(-1px);
+}
+
+.btn-solid:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--button-outline);
+  color: var(--heading-color);
+  transition: background 0.12s ease-out, border-color 0.12s ease-out,
+    color 0.12s ease-out;
+}
+
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.btn-chip {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--muted-text-color);
+  transition: background 0.12s ease-out, border-color 0.12s ease-out,
+    color 0.12s ease-out;
+}
+
+.btn-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.btn-danger-outline {
+  background: transparent;
+  border: 1px solid var(--danger-border);
+  color: var(--danger-ink);
+  transition: background 0.12s ease-out, border-color 0.12s ease-out;
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger-ink);
+}
+
+.btn-danger-solid {
+  background: var(--danger-ink);
+  border: 1px solid var(--danger-ink);
+  color: var(--white);
+  transition: filter 0.12s ease-out;
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  filter: brightness(90%);
+}
+
+.btn-text-link {
+  border: 0;
+  border-bottom: 1px solid var(--highlight);
+  color: var(--link-text-color);
+  transition: color 0.12s ease-out, border-color 0.12s ease-out;
+}
+
+.btn-text-link:hover {
+  color: var(--link-hover-color);
+  border-bottom-color: var(--accent);
+}

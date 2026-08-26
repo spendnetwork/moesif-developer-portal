@@ -10,7 +10,6 @@ import SubDisplay from "./SubDisplay";
 import { isSessionExpiredError } from "../../../lib/session-expiry";
 
 const C = {
-  green: "#034737",
   head: "#23383A",
   muted: "#647873",
   line: "#DDE5E0",
@@ -156,6 +155,7 @@ function Subscription() {
           <button
             type="button"
             onClick={() => navigate("/plans")}
+            className="btn-solid"
             style={styles.primaryBtn}
           >
             View plans
@@ -250,9 +250,6 @@ const styles = {
     maxWidth: 360,
   },
   primaryBtn: {
-    background: C.green,
-    border: `1px solid ${C.green}`,
-    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: 500,
     padding: "11px 20px",

@@ -19,7 +19,6 @@ const C = {
   lineSoft: "#EEF2EF",
   page: "#F5F7F4",
   danger: "#8B2C21",
-  dangerBorder: "#E2ABA3",
 };
 
 const modalStyles = {
@@ -109,6 +108,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
             <button
               type="button"
               onClick={() => onCopyPrefix(apiKey)}
+              className="btn-chip"
               style={styles.copyBtn}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -156,6 +156,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
           <button
             type="button"
             onClick={() => onRotate(apiKey)}
+            className={showWarning ? "btn-solid" : "btn-outline"}
             style={showWarning ? styles.rotateStrong : styles.rotateOutline}
           >
             Rotate
@@ -163,6 +164,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
           <button
             type="button"
             onClick={() => onRevoke(apiKey)}
+            className="btn-danger-outline"
             style={styles.revokeBtn}
           >
             Revoke
@@ -331,6 +333,7 @@ function Keys() {
             type="button"
             onClick={openCreateModal}
             disabled={atLimit}
+            className="btn-solid"
             style={{
               ...styles.primaryBtn,
               opacity: atLimit ? 0.5 : 1,
@@ -350,7 +353,7 @@ function Keys() {
           <p style={{ margin: "0 0 16px", fontSize: 14, color: C.muted }}>
             {listError || "Please try again shortly."}
           </p>
-          <button type="button" onClick={() => mutateKeys()} style={styles.primaryBtn}>
+          <button type="button" onClick={() => mutateKeys()} className="btn-solid" style={styles.primaryBtn}>
             Try again
           </button>
         </div>
@@ -371,7 +374,7 @@ function Keys() {
             Choose a plan to start issuing keys. Every new company receives a
             one-time £50 development credit with its first plan.
           </p>
-          <button type="button" onClick={() => navigate("/plans")} style={styles.primaryBtn}>
+          <button type="button" onClick={() => navigate("/plans")} className="btn-solid" style={styles.primaryBtn}>
             View plans
           </button>
         </div>
@@ -396,7 +399,7 @@ function Keys() {
               <p style={styles.lockedBody}>
                 Create a key to authenticate requests to the API.
               </p>
-              <button type="button" onClick={openCreateModal} style={styles.primaryBtn}>
+              <button type="button" onClick={openCreateModal} className="btn-solid" style={styles.primaryBtn}>
                 Create API key
               </button>
             </div>
@@ -465,12 +468,13 @@ function Keys() {
               </div>
             </div>
             <div style={styles.modalActions}>
-              <button type="button" onClick={closeModal} style={styles.outlineBtn}>
+              <button type="button" onClick={closeModal} className="btn-outline" style={styles.outlineBtn}>
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={busy || !name.trim()}
+                className="btn-solid"
                 style={{ ...styles.primaryBtn, opacity: busy || !name.trim() ? 0.55 : 1 }}
               >
                 {busy ? "Creating…" : "Create key"}
@@ -491,13 +495,13 @@ function Keys() {
               <label style={styles.label}>Your API key</label>
               <div style={styles.revealRow}>
                 <code style={styles.revealCode}>{revealedKey}</code>
-                <button type="button" onClick={copyRevealedKey} style={styles.copyBtn}>
+                <button type="button" onClick={copyRevealedKey} className="btn-chip" style={styles.copyBtn}>
                   {isCopied ? "Copied" : "Copy"}
                 </button>
               </div>
             </div>
             <div style={styles.modalActions}>
-              <button type="button" onClick={closeModal} style={styles.primaryBtn}>
+              <button type="button" onClick={closeModal} className="btn-solid" style={styles.primaryBtn}>
                 Done
               </button>
             </div>
@@ -518,13 +522,14 @@ function Keys() {
               </p>
             </div>
             <div style={styles.modalActions}>
-              <button type="button" onClick={closeModal} style={styles.outlineBtn}>
+              <button type="button" onClick={closeModal} className="btn-outline" style={styles.outlineBtn}>
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={rotateKey}
                 disabled={busy}
+                className="btn-solid"
                 style={{ ...styles.primaryBtn, opacity: busy ? 0.55 : 1 }}
               >
                 {busy ? "Rotating…" : "Rotate key"}
@@ -546,13 +551,14 @@ function Keys() {
               </p>
             </div>
             <div style={styles.modalActions}>
-              <button type="button" onClick={closeModal} style={styles.outlineBtn}>
+              <button type="button" onClick={closeModal} className="btn-outline" style={styles.outlineBtn}>
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={revokeKey}
                 disabled={busy}
+                className="btn-danger-solid"
                 style={{ ...styles.dangerBtn, opacity: busy ? 0.55 : 1 }}
               >
                 {busy ? "Revoking…" : "Revoke key"}
@@ -620,9 +626,6 @@ const styles = {
     gap: 6,
     flex: "none",
     whiteSpace: "nowrap",
-    background: "transparent",
-    border: `1px solid ${C.line}`,
-    color: C.muted,
     fontSize: 12.5,
     padding: "6px 10px",
     borderRadius: 8,
@@ -654,9 +657,6 @@ const styles = {
   },
   metaValue: { fontSize: 13.5, color: C.body },
   rotateOutline: {
-    background: "transparent",
-    border: "1px solid #C9D6CF",
-    color: C.head,
     fontSize: 13,
     fontWeight: 500,
     padding: "9px 14px",
@@ -664,9 +664,6 @@ const styles = {
     cursor: "pointer",
   },
   rotateStrong: {
-    background: C.green,
-    border: `1px solid ${C.green}`,
-    color: "#FFFFFF",
     fontSize: 13,
     fontWeight: 500,
     padding: "9px 14px",
@@ -674,9 +671,6 @@ const styles = {
     cursor: "pointer",
   },
   revokeBtn: {
-    background: "transparent",
-    border: `1px solid ${C.dangerBorder}`,
-    color: C.danger,
     fontSize: 13,
     fontWeight: 500,
     padding: "9px 14px",
@@ -684,9 +678,6 @@ const styles = {
     cursor: "pointer",
   },
   primaryBtn: {
-    background: C.green,
-    border: `1px solid ${C.green}`,
-    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: 500,
     padding: "11px 18px",
@@ -695,9 +686,6 @@ const styles = {
     cursor: "pointer",
   },
   outlineBtn: {
-    background: "transparent",
-    border: "1px solid #C9D6CF",
-    color: C.head,
     fontSize: 14,
     fontWeight: 500,
     padding: "11px 18px",
@@ -705,9 +693,6 @@ const styles = {
     cursor: "pointer",
   },
   dangerBtn: {
-    background: C.danger,
-    border: `1px solid ${C.danger}`,
-    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: 500,
     padding: "11px 18px",

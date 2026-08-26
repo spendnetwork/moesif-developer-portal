@@ -109,6 +109,10 @@
   --accent: #034737;
   --accent-dark: #022e24;
   --accent-soft: #e3f1ea;
+  /* Matches the admin console's danger palette. */
+  --danger-ink: #8b2c21;
+  --danger-bg: #fde8e5;
+  --danger-border: #f5cfc9;
   /* Bright mint used for button highlight + focus, matching openopps.com */
   --highlight: #a9ff9b;
   --highlight-dark: #22281e;
