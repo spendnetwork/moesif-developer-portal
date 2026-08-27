@@ -1,4 +1,4 @@
-const DEFAULT_SALES_CONTACT_EMAIL = "contact@spendnetwork.com";
+const DEFAULT_SALES_CONTACT_EMAIL = "welcome@openopps.com";
 const CONTACT_LED_PLAN_KEYS = new Set(["growth", "enterprise"]);
 
 function normalizedSalesContactEmail(configuredEmail) {

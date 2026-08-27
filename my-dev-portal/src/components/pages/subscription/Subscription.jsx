@@ -87,7 +87,7 @@ function Subscription() {
   const contactBilling = () => {
     const email =
       import.meta.env.REACT_APP_SALES_CONTACT_EMAIL ||
-      "contact@spendnetwork.com";
+      "welcome@openopps.com";
     window.location.href = `mailto:${email}?subject=${encodeURIComponent(
       "Open Opportunities API billing"
     )}`;
