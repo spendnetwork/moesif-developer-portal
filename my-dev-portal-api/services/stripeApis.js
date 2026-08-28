@@ -1720,7 +1720,6 @@ async function getStripeUsageContext(cacheKey, email, authUser) {
 // Aggregate current-period spend + credit balance for the usage dashboard.
 async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
   const {
-    userId,
     companyId,
     getMoesifBillingReports,
     getMoesifUsageMetrics,
@@ -1737,7 +1736,7 @@ async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
   const canUseMoesif =
     Boolean(companyId) && typeof getMoesifBillingReports === "function";
   const canUseEventMetrics =
-    Boolean(userId && companyId && subscription.id) &&
+    Boolean(companyId && subscription.id) &&
     typeof getMoesifUsageMetrics === "function";
   const from = periodStartSec
     ? new Date(periodStartSec * 1000).toISOString()
@@ -1745,7 +1744,6 @@ async function computeUsageSummary(cacheKey, email, authUser, options = {}) {
   const [eventMetrics, moesifReports] = await Promise.all([
     canUseEventMetrics
       ? getMoesifUsageMetrics({
-          userId,
           companyId,
           subscriptionId: subscription.id,
           from,

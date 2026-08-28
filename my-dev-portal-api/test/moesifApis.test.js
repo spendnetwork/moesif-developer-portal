@@ -169,7 +169,7 @@ test("event metric parser combines attachment list and download units", () => {
   );
 });
 
-test("usage metrics query is constrained by user, company, and subscription", async () => {
+test("usage metrics query covers the billed company and subscription", async () => {
   const originalFetch = global.fetch;
   let request;
   global.fetch = async (url, options) => {
@@ -190,7 +190,6 @@ test("usage metrics query is constrained by user, company, and subscription", as
 
   try {
     const result = await getMoesifUsageMetrics({
-      userId: 10,
       companyId: 11,
       subscriptionId: "sub_basic",
       from: "2026-08-01T00:00:00.000Z",
@@ -204,7 +203,6 @@ test("usage metrics query is constrained by user, company, and subscription", as
     });
     assert.match(request.url, /search\/events/);
     assert.deepEqual(request.body.query.bool.filter, [
-      { term: { "user_id.raw": "10" } },
       { term: { "company_id.raw": "11" } },
       { term: { "subscription_id.raw": "sub_basic" } },
     ]);

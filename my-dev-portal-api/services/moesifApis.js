@@ -447,15 +447,14 @@ function eventUsageMetricValues(body) {
 }
 
 async function getMoesifUsageMetrics({
-  userId,
   companyId,
   subscriptionId,
   from,
   to,
 }) {
-  if (!userId || !companyId || !subscriptionId) {
+  if (!companyId || !subscriptionId) {
     const error = new Error(
-      "Moesif usage metrics require user, company, and subscription IDs"
+      "Moesif usage metrics require company and subscription IDs"
     );
     error.code = "moesif_usage_identity_incomplete";
     throw error;
@@ -476,7 +475,6 @@ async function getMoesifUsageMetrics({
         query: {
           bool: {
             filter: [
-              { term: { "user_id.raw": String(userId) } },
               { term: { "company_id.raw": String(companyId) } },
               { term: { "subscription_id.raw": String(subscriptionId) } },
             ],
