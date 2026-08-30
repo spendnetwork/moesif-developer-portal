@@ -24,6 +24,10 @@ function formatMoney(minorUnits, currency) {
   }).format(value);
 }
 
+function formatUsageMoney(minorUnits, currency) {
+  return Number.isFinite(minorUnits) ? formatMoney(minorUnits, currency) : "--";
+}
+
 function formatDate(unixSeconds, withYear = false) {
   if (!unixSeconds) return "";
   return new Intl.DateTimeFormat(undefined, {
@@ -83,29 +87,22 @@ export default function UsageView({
   const loading = usageLoading && !usage;
   const currency = usage?.currency || "GBP";
   const credit = usage?.credit || null;
-  const isPrepaidBasic = usage?.billingModel === "prepaid_credit";
-  const hasCurrentEstimate =
-    !isPrepaidBasic && Number.isFinite(credit?.projectedRemaining);
-  const displayedRemaining = hasCurrentEstimate
+  const hasCalculatedRemaining = Number.isFinite(credit?.projectedRemaining);
+  const displayedRemaining = hasCalculatedRemaining
     ? credit.projectedRemaining
     : credit?.remaining;
   const displayedUsed =
-    hasCurrentEstimate && Number.isFinite(credit?.granted)
+    hasCalculatedRemaining && Number.isFinite(credit?.granted)
       ? Math.max(0, credit.granted - credit.projectedRemaining)
       : credit?.used;
 
   const usedPct =
     credit && credit.granted > 0
-      ? Math.min(100, Math.round(((credit.used || 0) / credit.granted) * 100))
+      ? Math.min(100, Math.round(((displayedUsed || 0) / credit.granted) * 100))
       : 0;
-  const projectedPct =
+  const remainingPct =
     credit && credit.granted > 0
-      ? Math.min(
-          100,
-          Math.round(
-            ((credit.granted - credit.projectedRemaining) / credit.granted) * 100
-          )
-        )
+      ? Math.max(0, 100 - usedPct)
       : 0;
   const analytics = usage?.analytics;
   const analyticsWarning = usageError
@@ -161,7 +158,7 @@ export default function UsageView({
             <div style={styles.metricCard}>
               <div style={styles.metricLabel}>Usage this period</div>
               <div style={styles.metricValue}>
-                {formatMoney(usage?.accrued || 0, currency)}
+                {formatUsageMoney(usage?.accrued, currency)}
               </div>
               <div style={styles.metricSub}>
                 {usage?.period?.start && usage?.period?.end
@@ -175,18 +172,13 @@ export default function UsageView({
 
             {credit && (
               <div style={styles.metricCard}>
-                <div style={styles.metricLabel}>
-                  {hasCurrentEstimate
-                    ? "Estimated credit remaining"
-                    : "Credit remaining"}
-                </div>
+                <div style={styles.metricLabel}>Credit remaining</div>
                 <div style={styles.metricValue}>
                   {formatMoney(displayedRemaining, currency)}
                 </div>
                 <div style={{ ...styles.metricSub, marginBottom: 14 }}>
                   {formatMoney(displayedUsed, currency)} of{" "}
-                  {formatMoney(credit.granted, currency)}{" "}
-                  {hasCurrentEstimate ? "estimated used" : "used"}
+                  {formatMoney(credit.granted, currency)} used
                 </div>
                 <div
                   role="progressbar"
@@ -195,34 +187,12 @@ export default function UsageView({
                   aria-valuemax={100}
                   style={styles.bar}
                 >
-                  <div style={{ ...styles.barProjected, width: `${projectedPct}%` }} />
                   <div style={{ ...styles.barFill, width: `${usedPct}%` }} />
                 </div>
-                {hasCurrentEstimate && (
-                  <div style={styles.projRow}>
-                    <span
-                      style={{
-                        fontSize: 12.5,
-                        fontStyle: "italic",
-                        color: C.muted,
-                      }}
-                    >
-                      Stripe posted balance:{" "}
-                      {formatMoney(credit.remaining, currency)}
-                    </span>
-                    <span style={styles.legend}>
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: 999,
-                          background: C.mint,
-                        }}
-                      />
-                      estimated
-                    </span>
-                  </div>
-                )}
+                <div style={styles.progressMeta}>
+                  <span>{formatMoney(displayedUsed, currency)} used</span>
+                  <span>{remainingPct}% remaining</span>
+                </div>
               </div>
             )}
           </div>
@@ -320,13 +290,13 @@ const styles = {
   metricCard: {
     background: "#FFFFFF",
     border: `1px solid ${C.line}`,
-    borderRadius: 12,
-    padding: 24,
+    borderRadius: 8,
+    padding: 20,
     boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
   },
   metricLabel: { fontSize: 13, color: C.muted, marginBottom: 14 },
   metricValue: {
-    fontSize: 38,
+    fontSize: 34,
     lineHeight: 1,
     fontWeight: 500,
     letterSpacing: "-0.03em",
@@ -341,23 +311,17 @@ const styles = {
     background: C.track,
     overflow: "hidden",
   },
-  barProjected: { position: "absolute", inset: 0, background: C.mint },
   barFill: {
     position: "absolute",
     inset: 0,
     background: C.green,
     borderRadius: "999px 0 0 999px",
   },
-  projRow: {
+  progressMeta: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 12,
-  },
-  legend: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
+    marginTop: 10,
     fontSize: 12,
     color: C.muted,
   },
@@ -384,7 +348,7 @@ const styles = {
   chartCard: {
     background: "#FFFFFF",
     border: `1px solid ${C.line}`,
-    borderRadius: 12,
+    borderRadius: 8,
     overflow: "hidden",
     boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
   },

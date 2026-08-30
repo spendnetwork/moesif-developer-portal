@@ -189,6 +189,7 @@ test("a temporary analytics failure still returns the authoritative balance", ()
   assert.equal(summary.credit.granted, null);
   assert.equal(summary.credit.used, null);
   assert.equal(summary.analytics.status, "unavailable");
+  assert.ok(summary.analytics.errors.includes("moesif_plan_prices_missing"));
 });
 
 test("missing Moesif balance data is never presented as zero credit", () => {
@@ -293,4 +294,52 @@ test("manual Growth commitments use custom catalogue rates and their annual boun
     [20, 10, 35, 50]
   );
   assert.equal(summary.period.end, 1817078400);
+});
+
+test("manual commitments prefer the exact subscribed plan over duplicate catalogue plans", () => {
+  const growthCatalogue = {
+    hits: [
+      {
+        id: "legacy_growth",
+        metadata: { plan_key: "growth" },
+        prices: [],
+      },
+      {
+        id: "subscribed_growth",
+        metadata: { plan_key: "growth" },
+        prices: catalogue.hits[0].prices.map((price, index) => ({
+          ...price,
+          id: `subscribed_growth_price_${index}`,
+          unit_amount: [20, 10, 35, 50][index],
+        })),
+      },
+    ],
+  };
+  const summary = buildBasicUsageSummary({
+    balance: balance({
+      subscription: {
+        current_period_start: "2026-08-27T00:00:00.000Z",
+        current_period_end: "2027-08-27T00:00:00.000Z",
+        items: [{ plan_id: "subscribed_growth" }],
+      },
+    }),
+    totalPurchasedPence: 500000,
+    reports: [],
+    planCatalogue: growthCatalogue,
+    eventMetrics: {
+      api_call: 2,
+      records_returned: 3,
+      aggregate_call: 1,
+      attachment: 1,
+    },
+    planKey: "growth",
+    billingModel: "prepaid_commitment",
+  });
+
+  assert.equal(summary.accrued, 155);
+  assert.equal(summary.lines.length, 4);
+  assert.deepEqual(
+    summary.lines.map((line) => line.rate),
+    [20, 10, 35, 50]
+  );
 });

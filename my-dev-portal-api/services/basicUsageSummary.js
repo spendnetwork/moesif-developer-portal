@@ -52,16 +52,46 @@ function subscriptionPriceIds(subscription) {
   );
 }
 
+function subscriptionPlanIds(subscription) {
+  const items = normalizeCollection(subscription?.items, ["data", "items"]);
+  return new Set(
+    items
+      .map((item) =>
+        typeof item?.plan === "string"
+          ? item.plan
+          : item?.plan_id || item?.plan?.id
+      )
+      .filter(Boolean)
+  );
+}
+
 function basicPriceDefinitions(
   planCatalogue,
   allowedPriceIds = null,
-  requestedPlanKey = "basic"
+  requestedPlanKey = "basic",
+  allowedPlanIds = null
 ) {
   const plans = normalizeCollection(planCatalogue, ["hits", "data", "plans"]);
-  const basicPlan = plans.find((plan) => {
-    const key = planKey(plan);
-    return key === requestedPlanKey || key.includes(requestedPlanKey);
-  });
+  const requested = String(requestedPlanKey || "").toLowerCase();
+  const basicPlan = plans
+    .filter((plan) => {
+      const key = planKey(plan);
+      return key === requested || key.includes(requested);
+    })
+    .map((plan) => ({
+      plan,
+      exactSubscriptionMatch: allowedPlanIds?.has(plan?.id) ? 1 : 0,
+      meteredPriceCount: normalizeCollection(plan?.prices, ["data", "prices"])
+        .filter(
+          (price) =>
+            price?.active !== false && priceUnitAmountPence(price) != null
+        ).length,
+    }))
+    .sort(
+      (left, right) =>
+        right.exactSubscriptionMatch - left.exactSubscriptionMatch ||
+        right.meteredPriceCount - left.meteredPriceCount
+    )[0]?.plan;
   const prices = normalizeCollection(basicPlan?.prices, ["data", "prices"]);
   const definitions = new Map();
   const seenMetrics = new Set();
@@ -173,19 +203,25 @@ function buildBasicUsageSummary({
   const priceDefinitions = basicPriceDefinitions(
     planCatalogue,
     subscriptionPriceIds(balance.subscription),
-    requestedPlanKey
+    requestedPlanKey,
+    subscriptionPlanIds(balance.subscription)
   );
+  const hasPriceDefinitions = priceDefinitions.size > 0;
   const reportLines = analyticsAvailable
     ? summarizeMeterReports(reports, priceDefinitions)
     : [];
-  const lines = eventMetricsAvailable
+  const lines = eventMetricsAvailable && hasPriceDefinitions
     ? summarizeEventUsage(eventMetrics, priceDefinitions)
     : reportLines.map(({ reported: _reported, ...line }) => line);
-  const accruedPence = lines.reduce((total, line) => total + line.amount, 0);
+  const accruedPence = hasPriceDefinitions
+    ? lines.reduce((total, line) => total + line.amount, 0)
+    : null;
   // Reconstruct total granted credit from the live Moesif balance plus usage.
   // This includes promotional credit without pretending it was purchased.
   const balanceBackedGrantedPence =
-    hasBalance && (paidPurchasedPence != null || eventMetricsAvailable)
+    hasBalance &&
+    Number.isFinite(accruedPence) &&
+    (paidPurchasedPence != null || eventMetricsAvailable)
       ? remainingPence + accruedPence
       : null;
   const grantedPence =
@@ -194,9 +230,10 @@ function buildBasicUsageSummary({
       : [paidPurchasedPence, balanceBackedGrantedPence]
           .filter(Number.isFinite)
           .reduce((highest, value) => Math.max(highest, value), null);
-  const usedPence = grantedPence != null ? accruedPence : null;
+  const usedPence =
+    grantedPence != null && Number.isFinite(accruedPence) ? accruedPence : null;
   const projectedRemainingPence =
-    grantedPence != null
+    grantedPence != null && Number.isFinite(accruedPence)
       ? Math.max(0, grantedPence - accruedPence)
       : remainingPence;
   const periodStart = unixSeconds(
@@ -213,7 +250,7 @@ function buildBasicUsageSummary({
         Math.floor(now / 1000);
   const reportsAvailable =
     analyticsAvailable && reportLines.some((line) => line.reported);
-  const analyticsStatus = eventMetricsAvailable
+  const analyticsStatus = eventMetricsAvailable && hasPriceDefinitions
     ? "ready"
     : reportsAvailable
       ? "partial"
@@ -250,7 +287,14 @@ function buildBasicUsageSummary({
         billingReports: reportsAvailable ? "ready" : "unavailable",
         events: eventMetricsAvailable ? "ready" : "unavailable",
       },
-      errors: [...new Set(analyticsErrors.filter(Boolean))],
+      errors: [
+        ...new Set(
+          [
+            ...analyticsErrors,
+            hasPriceDefinitions ? null : "moesif_plan_prices_missing",
+          ].filter(Boolean)
+        ),
+      ],
     },
   };
 }
