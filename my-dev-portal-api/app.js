@@ -737,22 +737,45 @@ app.post("/admin/plan-change", jsonParser, async (req, res) => {
   // administrator confirms the external invoice payment.
   if (["test", "growth", "enterprise"].includes(toPlanKey)) {
     try {
-      const manualCommitment = await createSnApiManualCommitment(
-        { sub: auth0UserId },
-        {
-          request_id: requestId,
-          to_plan_key: toPlanKey,
-          requested_by: actorEmail,
-          metadata: { source: "admin_console" },
-        }
-      );
+      let manualCommitment;
+      try {
+        manualCommitment = await createSnApiManualCommitment(
+          { sub: auth0UserId },
+          {
+            request_id: requestId,
+            to_plan_key: toPlanKey,
+            requested_by: actorEmail,
+            metadata: { source: "admin_console" },
+          }
+        );
+      } catch (createError) {
+        const ambiguousCreate =
+          !createError.status ||
+          createError.status === 409 ||
+          createError.status >= 500;
+        if (!ambiguousCreate) throw createError;
+
+        const existing = await getSnApiCurrentManualCommitment({
+          sub: auth0UserId,
+        }).catch(() => null);
+        const reusable =
+          existing?.to_plan_key === toPlanKey &&
+          ["awaiting_invoice", "awaiting_payment"].includes(existing?.status);
+        if (!reusable) throw createError;
+
+        console.info("Reusing an existing open manual commitment", {
+          requestId: existing.request_id,
+          planKey: toPlanKey,
+        });
+        manualCommitment = existing;
+      }
       invalidatePortalContext(auth0UserId);
       return res.status(200).json({
         ok: true,
         pending: true,
         requiresManualInvoice: true,
         changeType: "upgrade",
-        message: `Manual ${toPlanKey} commitment created. Confirm payment after the external invoice is paid.`,
+        message: `Manual ${toPlanKey} commitment is ready. Confirm payment after the external invoice is paid.`,
         manualCommitment,
       });
     } catch (err) {
@@ -1021,11 +1044,12 @@ app.post(
           { code: "manual_moesif_subscription_sync_failed", status: 502 }
         );
       }
-      balanceCreditAttempted = true;
       await waitForMoesifSubscription({
         companyId: commitment.moesif_company_id,
         subscriptionId: commitment.subscription_id,
+        delaysMs: [250, 500, 1000],
       });
+      balanceCreditAttempted = true;
       await createMoesifBalanceTransaction({
         companyId: commitment.moesif_company_id,
         subscriptionId: commitment.subscription_id,
@@ -1042,6 +1066,21 @@ app.post(
         manualCommitment: commitment,
       });
     } catch (error) {
+      if (error.code === "moesif_subscription_propagation_delayed") {
+        console.info("Manual commitment subscription is still propagating", {
+          requestId: req.params.requestId,
+          subscriptionId: commitment?.subscription_id,
+        });
+        return res.status(202).json({
+          ok: true,
+          pending: true,
+          state: "subscription_syncing",
+          retryAfterMs: 3000,
+          message:
+            "Payment is recorded. Moesif is synchronizing the subscription before prepaid credit is applied.",
+          manualCommitment: commitment,
+        });
+      }
       console.error("Manual commitment payment confirmation failed", error);
       const balanceFailed = balanceCreditAttempted;
       return res.status(error.status || 502).json({
