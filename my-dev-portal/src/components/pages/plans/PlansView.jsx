@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import Modal from "react-modal";
 
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
@@ -9,65 +10,71 @@ import usePlans from "../../../hooks/usePlans";
 import useSubscriptions from "../../../hooks/useSubscriptions";
 import usePlanChange from "../../../hooks/usePlanChange";
 import { apiRequest } from "../../../lib/portal-api";
+import "../../../styles/components/plan-options.css";
 
 // Design tokens (from the OpenOpps developer portal design).
 const C = {
   green: "#034737",
-  mint: "#A9FF9B",
   head: "#23383A",
   body: "#23302C",
   muted: "#647873",
   line: "#DDE5E0",
-  lineSoft: "#EEF2EF",
   successText: "#17633C",
   successBg: "#E3F5E9",
   successLine: "#C4E7D2",
-  pillBg: "#E9F5EE",
 };
 
 const PLAN_KEY_ORDER = ["basic", "growth", "enterprise"];
-const CONTACT_LED_PLAN_KEYS = new Set(["growth", "enterprise"]);
+const CONTACT_LED_PLAN_KEYS = new Set(["development", "growth", "enterprise"]);
 // Fallback only; the real value comes from REACT_APP_SALES_CONTACT_EMAIL (.env).
 const DEFAULT_SALES_CONTACT_EMAIL = "welcome@openopps.com";
 
 const TIERS = [
   {
+    key: "development",
+    name: "Development",
+    commitment: "Allowance by arrangement",
+    rates: [["API access", "Core endpoints"], ["Usage rates", "Basic"]],
+  },
+  {
     key: "basic",
     name: "Basic",
-    commitment: "£0 commitment · pay as you go",
+    commitment: "Prepaid from £100 per purchase",
+    note: "Purchase £100 or more in prepaid credit by card. No recurring fee or overage; access pauses when your credit runs out.",
     rates: [
       ["Records / docs", "£0.13"],
       ["API calls", "£0.26"],
-      ["Aggregate calls", "£0.46"],
+      ["Aggregate calls", "Not included"],
       ["Attachments", "£0.65"],
     ],
-    note: "Prepay any amount from the minimum top-up. Credit draws down at Basic rates and access pauses when the balance reaches zero.",
   },
   {
     key: "growth",
     name: "Growth",
     commitment: "£5,000 / yr prepaid",
+    note: "Prepaid API credit for a 12-month commitment, invoiced by our team. Includes core endpoints and aggregations. Your credit draws down as you use the API.",
     rates: [
       ["Records / docs", "£0.10"],
       ["API calls", "£0.20"],
       ["Aggregate calls", "£0.35"],
       ["Attachments", "£0.50"],
     ],
-    note: "Prepaid credit draws down as you use the API. Overage is billed monthly in arrears. Credit re-grants on renewal.",
   },
   {
     key: "enterprise",
     name: "Enterprise",
     commitment: "£12,000 / yr prepaid",
+    note: "Our lowest unit rates, with prepaid API credit for a 12-month commitment. Includes core endpoints and aggregations. Contact our team to arrange your invoice.",
     rates: [
       ["Records / docs", "£0.07"],
       ["API calls", "£0.14"],
       ["Aggregate calls", "£0.25"],
       ["Attachments", "£0.35"],
     ],
-    note: "Our lowest unit rates, with prepaid credit and monthly overage. Includes onboarding support and a shared Slack channel.",
   },
 ];
+
+const PAID_TIERS = PLAN_KEY_ORDER.map((key) => TIERS.find((tier) => tier.key === key));
 
 function catalogPlanKey(plan) {
   const configured = plan?.metadata?.plan_key;
@@ -104,6 +111,11 @@ export default function PlansView() {
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
 
+  // React Modal handles focus trapping, Escape, and restoring focus to the action.
+  useEffect(() => {
+    Modal.setAppElement("#root");
+  }, []);
+
   // Lock background scroll while the confirm dialog is open.
   useEffect(() => {
     if (!pending) return undefined;
@@ -131,6 +143,7 @@ export default function PlansView() {
   }, [subscriptions]);
 
   const hasActive = Boolean(currentPlan);
+  const hasCommitment = hasActive && !["basic", "development"].includes(currentPlan);
   const contactEmail =
     import.meta.env.REACT_APP_SALES_CONTACT_EMAIL ||
     DEFAULT_SALES_CONTACT_EMAIL;
@@ -165,7 +178,7 @@ export default function PlansView() {
     }
 
     // No active subscription yet -> take them through checkout to subscribe.
-    if (!hasActive) {
+    if (!hasCommitment) {
       setPending(null);
       navigate(checkoutPath(productId, tierKey));
       return;
@@ -219,17 +232,43 @@ export default function PlansView() {
     ].join("\n"),
   });
   const contactHref = `mailto:${contactEmail}?${contactParams.toString()}`;
+
+  const renderPlanAction = (tier) => {
+    const isCurrent = currentPlan === tier.key;
+    const requiresContact = CONTACT_LED_PLAN_KEYS.has(tier.key);
+    if (isCurrent && tier.key !== "basic") {
+      return <button className="plan-choice-button" disabled>Current plan</button>;
+    }
+    return (
+      <button
+        className={`plan-choice-button${pending === tier.key ? " plan-choice-button--selected" : ""}`}
+        disabled={busy || (!isCurrent && Boolean(planChange) && !requiresContact)}
+        onClick={() => {
+          if (isCurrent && tier.key === "basic") {
+            if (!productByKey.basic) {
+              setError("Basic credit purchases are not available right now. Please try again shortly.");
+              return;
+            }
+            navigate(basicTopUpPath(productByKey.basic));
+            return;
+          }
+          setPending(tier.key);
+        }}
+      >
+        {isCurrent ? "Add credit" : requiresContact ? "Contact us" : hasCommitment ? `Schedule ${tier.name}` : `Choose ${tier.name}`}
+      </button>
+    );
+  };
+
   return (
     <PageLayout>
-      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ marginBottom: 28 }}>
-          <div style={styles.eyebrow}>Pricing</div>
-          <h1 style={styles.h1}>Open Opportunities API plans</h1>
-          <p style={styles.lead}>
-            Basic is self-service. Growth and Enterprise are arranged with our
-            team and invoiced against the annual commitment.
-          </p>
-        </div>
+      <div className="plans-page">
+        <header className="plans-page__heading">
+          <div>
+            <h1>Open Opportunities API plans</h1>
+            <p>Prepaid access, with lower unit rates on annual commitments.</p>
+          </div>
+        </header>
 
         {error && (
           <div style={styles.errorAlert} role="alert">
@@ -262,109 +301,72 @@ export default function PlansView() {
           </div>
         )}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 16,
-            alignItems: "stretch",
-          }}
-        >
-          {TIERS.map((tier) => {
-            const isCurrent = currentPlan === tier.key;
-            const requiresContact = CONTACT_LED_PLAN_KEYS.has(tier.key);
-            return (
-              <div
-                key={tier.key}
-                style={{
-                  ...styles.card,
-                  border: isCurrent
-                    ? `1.5px solid ${C.green}`
-                    : `1px solid ${C.line}`,
-                }}
-              >
-                <div style={styles.cardHead}>
-                  <div style={styles.tierName}>{tier.name}</div>
-                  {isCurrent && <span style={styles.currentPill}>Current plan</span>}
-                </div>
-                <div style={styles.commitment}>{tier.commitment}</div>
-                <div style={styles.rateList}>
-                  {tier.rates.map(([label, value]) => (
-                    <div key={label} style={styles.rateRow}>
-                      <span style={{ color: C.muted }}>{label}</span>
-                      <span style={{ color: C.head, fontVariantNumeric: "tabular-nums" }}>
-                        {value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <p style={styles.note}>{tier.note}</p>
-
-                {isCurrent ? (
-                  tier.key === "basic" ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <button style={styles.btnDisabled} disabled>
-                        Current plan
-                      </button>
-                      <button
-                        style={styles.btnOutline}
-                        onClick={() => {
-                          const productId = productByKey.basic;
-                          if (!productId) {
-                            setError(
-                              "Basic credit purchases are not available right now. Please try again shortly."
-                            );
-                            return;
-                          }
-                          navigate(basicTopUpPath(productId));
-                        }}
-                      >
-                        Add credit
-                      </button>
-                    </div>
-                  ) : (
-                    <button style={styles.btnDisabled} disabled>
-                      Current plan
-                    </button>
-                  )
-                ) : (
-                  <button
-                    className={`plan-choice-button${
-                      pending === tier.key ? " plan-choice-button--selected" : ""
-                    }`}
-                    disabled={busy || (Boolean(planChange) && !requiresContact)}
-                    onClick={() => setPending(tier.key)}
-                  >
-                    {requiresContact
-                      ? "Contact us"
-                      : hasActive
-                        ? `Schedule ${tier.name}`
-                        : `Choose ${tier.name}`}
-                  </button>
-                )}
+        <div id="plan-options" className="plan-options">
+          {PAID_TIERS.map((tier) => (
+            <section
+              key={tier.key}
+              className={`plan-option${currentPlan === tier.key ? " plan-option--current" : ""}`}
+              aria-labelledby={`plan-${tier.key}`}
+            >
+              <div className="plan-option__heading">
+                <h2 id={`plan-${tier.key}`}>{tier.name}</h2>
+                {currentPlan === tier.key && <span className="plan-option__badge">Current plan</span>}
               </div>
-            );
-          })}
+              <p className="plan-option__commitment">{tier.commitment}</p>
+              <dl className="plan-option__rates" aria-label="Usage rates per unit">
+                {tier.rates.map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="plan-option__note">{tier.note}</p>
+              {renderPlanAction(tier)}
+            </section>
+          ))}
         </div>
+
+        <section className="development-banner" aria-labelledby="development-access-heading">
+          <div>
+            <p className="development-banner__label">Development access{currentPlan === "development" ? " · Current plan" : ""}</p>
+            <h2 id="development-access-heading">Testing the API?</h2>
+            <p>Speak to our team about development credits.</p>
+          </div>
+          <button
+            className="plan-choice-button"
+            disabled={busy}
+            onClick={() => setPending("development")}
+          >Request access</button>
+        </section>
       </div>
 
-      {pendingTier &&
-        createPortal(
-          <div style={styles.backdrop} onClick={() => !busy && setPending(null)}>
-            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalTitle}>
+      {pendingTier && (
+          <Modal
+            isOpen
+            className="plans-dialog"
+            overlayClassName="plans-dialog-overlay"
+            onRequestClose={() => !busy && setPending(null)}
+            shouldCloseOnEsc={!busy}
+            shouldCloseOnOverlayClick={!busy}
+            style={{ overlay: styles.backdrop, content: styles.modal }}
+            aria={{ labelledby: "plan-dialog-title", describedby: "plan-dialog-description" }}
+          >
+              <h2 id="plan-dialog-title" style={styles.modalTitle}>
                 {pendingRequiresContact
                   ? `Talk to us about ${pendingTier.name}`
-                  : hasActive
+                  : hasCommitment
                   ? `Switch to ${pendingTier.name}?`
-                  : `Subscribe to ${pendingTier.name}`}
-              </div>
-              <p style={styles.modalLead}>
+                  : `Start ${pendingTier.name}`}
+              </h2>
+              <p id="plan-dialog-description" style={styles.modalLead}>
                 {pendingRequiresContact
-                  ? `${pendingTier.name} is arranged directly with our team. We will confirm the commercial terms and provide an invoice for the annual commitment.`
-                  : hasActive
+                  ? pendingTier.key === "development"
+                    ? "Tell us what you are building. Contact us for credit to build and test your integration, at Basic rates. No payment required."
+                    : `${pendingTier.name} is arranged directly with our team. We will confirm the commercial terms and provide an invoice for the annual commitment.`
+                  : hasCommitment
                     ? "The downgrade will take effect at the end of your current commitment period. Nothing changes today."
-                  : `You'll continue to secure checkout to start your ${pendingTier.name} subscription.`}
+                  : "Continue to secure Stripe checkout for a one-off purchase of at least £100. No recurring charges or overage."}
               </p>
               <div style={styles.modalSummary}>
                 <div style={styles.summaryRow}>
@@ -387,7 +389,11 @@ export default function PlansView() {
                   . Your current access will remain unchanged while we arrange
                   the plan.
                 </p>
-              ) : hasActive ? (
+              ) : currentPlan === "development" ? (
+                <p style={styles.modalFine}>
+                  Your development allowance is not carried into Basic or reset by this purchase.
+                </p>
+              ) : hasCommitment ? (
                 <p style={styles.modalFine}>
                   Existing credit remains on the account. New rates apply only
                   after the plan change is activated.
@@ -399,7 +405,7 @@ export default function PlansView() {
                   onClick={() => setPending(null)}
                   disabled={busy}
                 >
-                  {hasActive && !pendingRequiresContact
+                  {hasCommitment && !pendingRequiresContact
                     ? "Keep current plan"
                     : "Cancel"}
                 </button>
@@ -419,24 +425,17 @@ export default function PlansView() {
                     ? "Email our team"
                     : busy
                       ? "Working…"
-                      : hasActive
+                      : hasCommitment
                         ? "Schedule downgrade"
                         : "Continue to checkout"}
                 </button>
               </div>
-            </div>
-          </div>,
-          document.body
+          </Modal>
         )}
 
       {toast &&
         createPortal(
-          <div style={styles.toast}>
-            <span style={styles.toastDot}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.successText} strokeWidth="2">
-                <path d="M6 12.5l4 4 8-9" />
-              </svg>
-            </span>
+          <div style={styles.toast} role="status">
             <span style={{ fontSize: 13.5, color: C.body }}>{toast}</span>
           </div>,
           document.body
@@ -446,96 +445,6 @@ export default function PlansView() {
 }
 
 const styles = {
-  eyebrow: {
-    fontSize: 12,
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-    color: C.muted,
-    marginBottom: 10,
-  },
-  h1: {
-    margin: "0 0 8px",
-    fontSize: 32,
-    lineHeight: 1.15,
-    fontWeight: 500,
-    letterSpacing: "-0.02em",
-    color: C.head,
-  },
-  lead: { margin: 0, fontSize: 15, color: C.muted },
-  card: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    boxSizing: "border-box",
-    background: "#FFFFFF",
-    borderRadius: 12,
-    padding: 24,
-    boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
-  },
-  cardHead: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  tierName: { fontSize: 19, fontWeight: 500, color: C.head },
-  currentPill: {
-    fontSize: 11.5,
-    color: C.green,
-    background: C.pillBg,
-    border: `1px solid ${C.successLine}`,
-    padding: "4px 10px",
-    borderRadius: 999,
-  },
-  commitment: { fontSize: 13.5, color: C.muted, marginBottom: 20 },
-  rateList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 11,
-    paddingBottom: 20,
-    borderBottom: `1px solid ${C.lineSoft}`,
-  },
-  rateRow: { display: "flex", justifyContent: "space-between", fontSize: 13.5 },
-  note: {
-    flexGrow: 1,
-    margin: "18px 0 22px",
-    fontSize: 13,
-    lineHeight: 1.55,
-    color: C.muted,
-  },
-  btnPrimary: {
-    width: "100%",
-    background: C.green,
-    border: `1px solid ${C.green}`,
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: 500,
-    padding: "11px 18px",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  btnOutline: {
-    width: "100%",
-    background: "transparent",
-    border: `1px solid #C9D6CF`,
-    color: C.head,
-    fontSize: 14,
-    fontWeight: 500,
-    padding: "11px 18px",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  btnDisabled: {
-    width: "100%",
-    background: "#F1F4F1",
-    border: `1px solid ${C.line}`,
-    color: "#8A9A94",
-    fontSize: 14,
-    fontWeight: 500,
-    padding: "11px 18px",
-    borderRadius: 8,
-    cursor: "default",
-  },
   btnPrimaryAuto: {
     background: C.green,
     border: `1px solid ${C.green}`,
@@ -559,6 +468,7 @@ const styles = {
   scheduledBanner: {
     display: "flex",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 12,
     background: C.successBg,
     border: `1px solid ${C.successLine}`,
@@ -595,30 +505,33 @@ const styles = {
     padding: 24,
   },
   modal: {
+    position: "relative",
+    inset: "auto",
     width: "100%",
     maxWidth: 470,
+    maxHeight: "calc(100dvh - 48px)",
+    overflowY: "auto",
     background: "#FFFFFF",
     border: `1px solid ${C.line}`,
-    borderRadius: 12,
+    borderRadius: 8,
     boxShadow: "0 24px 60px rgba(35,56,58,0.24)",
     padding: 26,
   },
-  modalTitle: { fontSize: 19, fontWeight: 500, color: C.head, marginBottom: 8 },
+  modalTitle: { fontSize: 19, fontWeight: 500, color: C.head, margin: "0 0 8px" },
   modalLead: { margin: "0 0 18px", fontSize: 14, lineHeight: 1.6, color: C.muted },
   modalSummary: {
-    background: "#F5F7F4",
-    border: `1px solid ${C.line}`,
-    borderRadius: 10,
-    padding: 16,
+    borderTop: `1px solid ${C.line}`,
+    borderBottom: `1px solid ${C.line}`,
+    padding: "16px 0",
     marginBottom: 18,
     display: "flex",
     flexDirection: "column",
     gap: 10,
   },
-  summaryRow: { display: "flex", justifyContent: "space-between", fontSize: 13.5 },
+  summaryRow: { display: "grid", gridTemplateColumns: "minmax(84px, 1fr) minmax(0, 1.4fr)", gap: 12, fontSize: 13.5 },
   modalFine: { margin: "0 0 20px", fontSize: 12.5, lineHeight: 1.55, color: C.muted },
   emailLink: { color: C.green, fontWeight: 500 },
-  modalActions: { display: "flex", justifyContent: "flex-end", gap: 10 },
+  modalActions: { display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 10 },
   toast: {
     position: "fixed",
     right: 24,
@@ -632,15 +545,5 @@ const styles = {
     borderRadius: 10,
     padding: "13px 16px",
     boxShadow: "0 10px 28px rgba(35,56,58,0.14)",
-  },
-  toastDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 999,
-    background: C.successBg,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "none",
   },
 };
