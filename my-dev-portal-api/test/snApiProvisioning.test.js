@@ -3,6 +3,9 @@ const assert = require("node:assert/strict");
 
 const {
   registerSnApiPortalAccount,
+  provisionSnApiLocalPrepaidCustomer,
+  registerSnApiPaidCredit,
+  getSnApiUsageSummary,
 } = require("../services/snApiProvisioning");
 
 test("registers an Auth0 account with SN API before billing", async (t) => {
@@ -60,4 +63,35 @@ test("registers an Auth0 account with SN API before billing", async (t) => {
     full_name: "New User",
     organization_name: "example.com",
   });
+});
+
+test("local prepaid transport keeps stable API payloads and structured conflict codes", async (t) => {
+  const originalFetch = global.fetch;
+  const originalEnv = { base: process.env.SN_API_BASE_URL, token: process.env.SN_API_PROVISIONING_TOKEN };
+  process.env.SN_API_BASE_URL = "https://api.example.test";
+  process.env.SN_API_PROVISIONING_TOKEN = "fixture-token";
+  t.after(() => {
+    global.fetch = originalFetch;
+    for (const [key, value] of [["SN_API_BASE_URL", originalEnv.base], ["SN_API_PROVISIONING_TOKEN", originalEnv.token]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  const requests = [];
+  global.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ debit_owner: "api" }) };
+  };
+  const provision = { request_id: "basic-fixture", auth0_user_id: "auth0|buyer", plan_key: "basic", expected_current_plan_key: "development", requested_by: "stripe_checkout", stripe_customer_id: "cus_buyer" };
+  const payment = { auth0_user_id: "auth0|buyer", subscription_id: "prepaid_basic", stripe_customer_id: "cus_buyer", stripe_payment_intent_id: "pi_payment", amount_gbp_pence: 10000, currency: "GBP" };
+  await provisionSnApiLocalPrepaidCustomer(provision);
+  await registerSnApiPaidCredit(payment);
+  await getSnApiUsageSummary({ sub: "auth0|buyer" });
+  assert.equal(requests[0].url, "https://api.example.test/api/v3/developer-portal/prepaid/provision");
+  assert.deepEqual(JSON.parse(requests[0].options.body), provision);
+  assert.equal(requests[1].url, "https://api.example.test/api/v3/developer-portal/paid-credits");
+  assert.deepEqual(JSON.parse(requests[1].options.body), payment);
+  assert.equal(requests[2].url, "https://api.example.test/api/v3/developer-portal/usage-summary?auth0_user_id=auth0%7Cbuyer");
+  assert.equal(requests[2].options.headers["X-Developer-Portal-Token"], "fixture-token");
+  global.fetch = async () => ({ ok: false, status: 409, json: async () => ({ detail: { code: "credit_subscription_conflict" } }) });
+  await assert.rejects(registerSnApiPaidCredit(payment), { status: 409, code: "credit_subscription_conflict" });
 });

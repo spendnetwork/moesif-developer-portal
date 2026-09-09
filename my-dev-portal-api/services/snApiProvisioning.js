@@ -214,10 +214,14 @@ async function snApiKeyRequest(path, { method = "GET", body } = {}) {
   const responseBody =
     response.status === 204 ? null : await response.json().catch(() => ({}));
   if (!response.ok) {
+    const detail = responseBody?.detail;
     const error = new Error(
-      responseBody?.detail || responseBody?.message || "SN API key request failed"
+      (typeof detail === "string" ? detail : detail?.message || detail?.code) ||
+        responseBody?.message || "SN API request failed"
     );
     error.status = response.status;
+    error.code = detail?.code || responseBody?.code;
+    error.detail = detail;
     throw error;
   }
   return responseBody;
@@ -253,6 +257,33 @@ function listSnApiKeys(authUser) {
       authUser.sub
     )}`
   );
+}
+
+function getSnApiUsageSummary(authUser) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/usage-summary?auth0_user_id=${encodeURIComponent(authUser.sub)}`
+  );
+}
+
+function provisionSnApiLocalPrepaidCustomer(request) {
+  return snApiKeyRequest("/api/v3/developer-portal/prepaid/provision", {
+    method: "POST",
+    body: request,
+  });
+}
+
+function registerSnApiPaidCredit(request) {
+  return snApiKeyRequest("/api/v3/developer-portal/paid-credits", {
+    method: "POST",
+    body: request,
+  });
+}
+
+function grantSnApiDevelopmentCredit(request) {
+  return snApiKeyRequest("/api/v3/developer-portal/development-credits", {
+    method: "POST",
+    body: request,
+  });
 }
 
 function createSnApiKey(authUser, { name, description }) {
@@ -422,6 +453,10 @@ module.exports = {
   provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
+  getSnApiUsageSummary,
+  provisionSnApiLocalPrepaidCustomer,
+  registerSnApiPaidCredit,
+  grantSnApiDevelopmentCredit,
   recordSnApiPortalSignIn,
   registerSnApiPortalAccount,
   listSnApiKeys,

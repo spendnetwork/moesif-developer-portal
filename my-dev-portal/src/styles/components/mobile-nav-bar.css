@@ -1,5 +1,7 @@
 .mobile-nav-bar__container {
   position: fixed;
+  top: 0;
+  left: 0;
   display: none;
 
   justify-content: center;
@@ -84,10 +86,21 @@
 }
 
 .mobile-nav-bar__toggle {
-  margin-left: 2.4rem;
+  margin-left: 12px;
   color: var(--white);
-  font-size: 3.6rem;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  flex: none;
   cursor: pointer;
+}
+
+.mobile-nav-bar__toggle img {
+  filter: brightness(0) invert(1);
 }
 
 .mobile-nav-bar__tabs {

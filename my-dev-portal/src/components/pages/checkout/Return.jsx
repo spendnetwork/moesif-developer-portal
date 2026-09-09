@@ -79,26 +79,20 @@ function Return() {
     return (
       <PageLayout>
         <h1>
-          {isBasicTopUp
-            ? "Payment complete"
-            : isBasicActivation
-              ? "Basic plan active"
+          {isBasicTopUp || isBasicActivation
+            ? "Payment confirmed"
               : "Subscription active"}
         </h1>
         <NoticeBox
           iconSrc={noPriceIcon}
           title={
-            isBasicTopUp
-              ? "Credit added"
-              : isBasicActivation
-                ? "Basic activated"
+            isBasicTopUp || isBasicActivation
+              ? "Credit purchase recorded"
                 : "Access ready"
           }
           description={
-            isBasicTopUp
-              ? `Your Basic API credit is ready to use. A receipt will be sent to ${result.customer_email}.`
-              : isBasicActivation
-                ? `Basic is active and your initial API credit is ready. A receipt will be sent to ${result.customer_email}.`
+            isBasicTopUp || isBasicActivation
+              ? "Your Basic credit purchase has been recorded. Your account shows your current plan and available credit."
               : `Your subscription and API access are ready. A confirmation will be sent to ${result.customer_email}.`
           }
           actions={

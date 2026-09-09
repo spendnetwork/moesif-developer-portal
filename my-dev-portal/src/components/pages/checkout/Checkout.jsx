@@ -50,13 +50,13 @@ function Checkout() {
       ? "Add API credit"
       : "Subscribe";
   const subtitle = isBasicActivation
-    ? "Choose your initial prepaid credit amount to confirm and activate Basic."
+    ? "Prepay £100 or more to start using the API."
     : isBasicTopUp
-      ? "Choose how much prepaid credit to add to your Basic account."
+      ? "Add £100 or more to your Basic credit."
       : "Payment is handled by Stripe. We never see or store your card details.";
   const cardTitle = isBasicPurchase ? "Add prepaid credit" : "Complete your subscription";
   const cardHint = isBasicPurchase
-    ? "Credit is available immediately after payment"
+    ? "One-off payment. No overage."
     : "Access activates as soon as payment succeeds";
 
   return (
@@ -104,7 +104,7 @@ function Checkout() {
 const styles = {
   eyebrow: {
     fontSize: 12,
-    letterSpacing: "0.1em",
+    letterSpacing: 0,
     textTransform: "uppercase",
     color: C.muted,
     marginBottom: 10,
@@ -114,7 +114,7 @@ const styles = {
     fontSize: 32,
     lineHeight: 1.15,
     fontWeight: 500,
-    letterSpacing: "-0.02em",
+    letterSpacing: 0,
     color: C.head,
   },
   card: {

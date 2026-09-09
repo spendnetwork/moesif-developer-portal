@@ -121,9 +121,6 @@ async function reconcileActiveSubscription(
     subscriptionId: subscription.id,
   });
 
-  await deps.ensureDevelopmentCreditGrant(customer.id, {
-    currency: price?.currency || "gbp",
-  });
   if (subscription.latest_invoice?.status === "paid") {
     await deps.grantCommitmentFromInvoice(subscription.latest_invoice);
   }
@@ -186,6 +183,19 @@ async function reconcileCheckoutSession(sessionOrId, authUser, deps) {
 }
 
 async function resolveAuthenticatedEntitlement(authUser, portalContext, deps) {
+  // Development is an admin-managed SN API entitlement, never a Stripe plan.
+  // Portal visibility survives exhaustion; the API enforces the local balance.
+  if (portalContext?.current_plan_key === "development") {
+    return {
+      active: portalContext.billing_status === "active",
+      source: "development_context",
+      planKey: "development",
+      subscription: null,
+      billingProvider: "development",
+      reconciled: false,
+    };
+  }
+
   // Pure-prepaid Basic accounts intentionally have no recurring Stripe
   // subscription. The SN API context can only be written through its shared
   // provisioning secret, while Moesif governance enforces the live balance.
@@ -306,6 +316,24 @@ async function processSubscriptionLifecycle(subscription, deps) {
     subscription.metadata?.openopps_plan_change_activated !== "true"
   ) {
     return { status: "awaiting_plan_change_payment" };
+  }
+
+  // Delayed events must not recreate a retired Stripe plan or revoke local keys.
+  if (deps.getSnApiPortalContext) {
+    const customer = await deps.getStripeCustomerById(customerId);
+    const auth0UserId = customer.metadata?.authUserId;
+    if (auth0UserId) {
+      let context;
+      try {
+        context = await deps.getSnApiPortalContext({ sub: auth0UserId });
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+      if (context?.debit_owner === "api" && context.current_subscription_id &&
+          context.current_subscription_id !== subscription.id) {
+        return { status: "replaced_by_api_prepaid" };
+      }
+    }
   }
 
   let statusWasKnown = true;

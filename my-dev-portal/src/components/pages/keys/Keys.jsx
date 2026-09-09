@@ -78,7 +78,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
 
   return (
     <div style={styles.card}>
-      <div style={{ display: "flex", gap: 18 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
         <div style={styles.keyIcon}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.green} strokeWidth="1.5">
             <circle cx="8.5" cy="15.5" r="3.5" />
@@ -86,7 +86,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
           </svg>
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <span style={{ fontSize: 16, fontWeight: 500, color: C.head }}>
               {apiKey.name}
             </span>
@@ -156,6 +156,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
           <button
             type="button"
             onClick={() => onRotate(apiKey)}
+            disabled={!onRotate}
             className={showWarning ? "btn-solid" : "btn-outline"}
             style={showWarning ? styles.rotateStrong : styles.rotateOutline}
           >
@@ -322,7 +323,7 @@ function Keys() {
         <div>
           <div style={styles.eyebrow}>Access</div>
           <h1 style={styles.h1}>
-            API keys{!locked && !hardError ? ` (${keys.length})` : ""}
+            API keys{!hardError ? ` (${keys.length})` : ""}
           </h1>
           <p style={{ margin: 0, fontSize: 15, color: C.muted }}>
             Keys authenticate every request. Maximum two active keys.
@@ -368,11 +369,13 @@ function Keys() {
             </svg>
           </div>
           <div style={{ fontSize: 19, fontWeight: 500, color: C.head, marginBottom: 8 }}>
-            Subscribe to unlock API keys
+            Arrange API access
           </div>
           <p style={styles.lockedBody}>
-            Choose a plan to start issuing keys. Every new company receives a
-            one-time £50 development credit with its first plan.
+            Contact <a href="mailto:welcome@openopps.com">welcome@openopps.com</a>{" "}
+            for credit to build and test your integration, or discuss a Growth or
+            Enterprise commitment, or choose Basic prepaid from £100.
+            Existing keys and usage remain available.
           </p>
           <button type="button" onClick={() => navigate("/plans")} className="btn-solid" style={styles.primaryBtn}>
             View plans
@@ -380,7 +383,7 @@ function Keys() {
         </div>
       )}
 
-      {!hardError && !locked && (
+      {!hardError && (!locked || keys.length > 0) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {error && (
             <div style={styles.inlineError} role="alert">{error}</div>
@@ -409,7 +412,7 @@ function Keys() {
                 <KeyCard
                   key={apiKey.id}
                   apiKey={apiKey}
-                  onRotate={(k) => openAction("rotate", k)}
+                  onRotate={locked ? undefined : (k) => openAction("rotate", k)}
                   onRevoke={(k) => openAction("revoke", k)}
                   onCopyPrefix={copyPrefix}
                   copiedId={copiedId}
@@ -581,7 +584,7 @@ const styles = {
   },
   eyebrow: {
     fontSize: 12,
-    letterSpacing: "0.1em",
+    letterSpacing: 0,
     textTransform: "uppercase",
     color: C.muted,
     marginBottom: 10,
@@ -591,7 +594,7 @@ const styles = {
     fontSize: 32,
     lineHeight: 1.15,
     fontWeight: 500,
-    letterSpacing: "-0.02em",
+    letterSpacing: 0,
     color: C.head,
   },
   card: {
@@ -651,7 +654,7 @@ const styles = {
   metaItem: { display: "flex", flexDirection: "column", gap: 5 },
   metaLabel: {
     fontSize: 11,
-    letterSpacing: "0.06em",
+    letterSpacing: 0,
     textTransform: "uppercase",
     color: C.muted,
   },

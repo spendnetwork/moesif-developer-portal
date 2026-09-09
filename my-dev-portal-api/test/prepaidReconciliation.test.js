@@ -1,277 +1,164 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { reconcileBasicCreditPurchase, prepaidSubscriptionPeriodEnd } = require("../services/prepaidReconciliation");
 
-const {
-  prepaidSubscriptionPeriodEnd,
-  reconcileBasicCreditPurchase,
-} = require("../services/prepaidReconciliation");
-
-function checkoutSession(overrides = {}) {
+const identity = { sub: "auth0|123", email: "buyer@example.com" };
+function session(overrides = {}) {
   return {
-    id: "cs_top_up",
-    status: "complete",
-    payment_status: "paid",
-    amount_total: 50000,
-    currency: "gbp",
-    customer: {
-      id: "cus_123",
-      email: "buyer@example.com",
-      metadata: { authUserId: "auth0|123" },
-    },
-    payment_intent: { id: "pi_123" },
-    client_reference_id: "auth0|123",
-    metadata: {
-      purchase_type: "basic_activation",
-      plan_id: "prod_basic",
-      plan_key: "basic",
-      amount_gbp_pence: "50000",
-      auth0_user_id: "auth0|123",
-    },
+    id: "cs_paid", mode: "payment", status: "complete", payment_status: "paid",
+    amount_total: 10000, currency: "gbp", client_reference_id: identity.sub,
+    customer: { id: "cus_123", email: identity.email, metadata: { authUserId: identity.sub } },
+    metadata: { purchase_type: "basic_activation", plan_id: "prod_basic",
+      amount_gbp_pence: "10000", auth0_user_id: identity.sub, expected_current_plan_key: "development" },
+    payment_intent: { id: "pi_123", status: "succeeded", amount_received: 10000, currency: "gbp", customer: "cus_123" },
+    line_items: { has_more: false, data: [{ quantity: 1, amount_total: 10000, price: { product: "prod_basic" } }] },
     ...overrides,
   };
 }
 
-function dependencies(overrides = {}) {
+// Emulates the API's persistent immutable receipts, not a portal memory lock.
+function dependencies(paidSession = session()) {
+  const operations = new Map();
+  const credits = new Map();
+  const calls = [];
+  const state = { plan: "development", subscription: "prepaid_dev" };
   return {
-    verifyStripeSession: async () => checkoutSession(),
-    getStripeCustomerById: async () => checkoutSession().customer,
-    getStripeProduct: async () => ({
-      id: "prod_basic",
-      metadata: { plan_key: "basic" },
-    }),
+    calls, state, credits,
+    verifyStripeSession: async (id) => { assert.equal(id, paidSession.id); calls.push("verify"); return paidSession; },
     getPlanKeyForProduct: async () => "basic",
-    getPlanPrices: async () => ({
-      commitmentPrices: [],
-      meteredPrices: [
-        { id: "price_api", recurring: { meter: "meter_api" } },
-        { id: "price_records", recurring: { meter: "meter_records" } },
-        { id: "price_aggregate", recurring: { meter: "meter_aggregate" } },
-        { id: "price_attachment", recurring: { meter: "meter_attachment" } },
-      ],
-    }),
-    provisionSnApiPrepaidCustomer: async () => ({
-      user_id: 7,
-      organization_id: 9,
-      moesif_company_id: "9",
-    }),
-    updateStripeCustomerIdentity: async () => {},
-    syncToMoesif: async () => {},
-    sendPrepaidSubscriptionToMoesif: async () =>
-      "openopps_basic_prepaid_cus_123",
-    createMoesifBalanceTransaction: async () => {},
-    markBasicTopUpReconciled: async () => {},
-    ...overrides,
+    provisionSnApiLocalPrepaidCustomer: async (payload) => {
+      calls.push(["provision", payload]);
+      const previous = operations.get(payload.request_id);
+      if (previous) { assert.deepEqual(previous.payload, payload); return previous.result; }
+      if (state.plan !== payload.expected_current_plan_key) {
+        throw Object.assign(new Error("Current plan changed"), { code: "current_plan_conflict" });
+      }
+      state.plan = "basic";
+      state.subscription = "prepaid_basic";
+      const result = { plan_key: "basic", debit_owner: "api", subscription_id: "prepaid_basic", user_id: 7, organization_id: 9 };
+      operations.set(payload.request_id, { payload, result });
+      return result;
+    },
+    registerSnApiPaidCredit: async (payload) => {
+      calls.push(["credit", payload]);
+      const previous = credits.get(payload.stripe_payment_intent_id);
+      if (previous) { assert.deepEqual(previous.payload, payload); return previous.result; }
+      if (state.plan !== "basic" || state.subscription !== payload.subscription_id) {
+        throw Object.assign(new Error("Current subscription changed"), { code: "credit_subscription_conflict" });
+      }
+      const result = { subscription_id: payload.subscription_id, amount_gbp_pence: payload.amount_gbp_pence,
+        source_reference: `stripe_payment_intent:${payload.stripe_payment_intent_id}` };
+      credits.set(payload.stripe_payment_intent_id, { payload, result });
+      return result;
+    },
+    createMoesifBalanceTransaction: () => assert.fail("No Moesif credit or promotional grant is allowed"),
+    provisionSnApiPrepaidCustomer: () => assert.fail("Legacy provisioning must not run"),
   };
 }
 
-test("paid Basic Checkout provisions access and credits Moesif idempotently", async () => {
-  let subscriptionInput;
-  const creditInputs = [];
-  let reconciliationMarker;
-  const provisioningStatuses = [];
-  const result = await reconcileBasicCreditPurchase(
-    "cs_top_up",
-    { sub: "auth0|123", email: "buyer@example.com" },
-    dependencies({
-      sendPrepaidSubscriptionToMoesif: async (input) => {
-        subscriptionInput = input;
-        return "openopps_basic_prepaid_cus_123";
-      },
-      createMoesifBalanceTransaction: async (input) => {
-        creditInputs.push(input);
-      },
-      markBasicTopUpReconciled: async (paymentIntentId, input) => {
-        reconciliationMarker = { paymentIntentId, ...input };
-      },
-      provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
-        provisioningStatuses.push(subscriptionStatus);
-        return { user_id: 7, organization_id: 9, moesif_company_id: "9" };
-      },
-    })
-  );
+test("verified Basic payment provisions the API ledger and registers only the paid amount", async () => {
+  const deps = dependencies();
+  const result = await reconcileBasicCreditPurchase("cs_paid", identity, deps);
+  assert.equal(result.amountPence, 10000);
+  assert.equal(deps.calls[0], "verify");
+  const provision = deps.calls[1][1];
+  assert.equal(provision.expected_current_plan_key, "development");
+  assert.equal(provision.requested_by, "stripe_checkout");
+  assert.ok(provision.request_id.length <= 64);
+  assert.deepEqual(deps.calls[2][1], { auth0_user_id: identity.sub, subscription_id: "prepaid_basic",
+    stripe_customer_id: "cus_123", stripe_payment_intent_id: "pi_123", amount_gbp_pence: 10000, currency: "GBP" });
+});
 
-  assert.equal(result.planKey, "basic");
-  assert.equal(result.amountPence, 50000);
-  assert.deepEqual(subscriptionInput.priceIds, [
-    "price_api",
-    "price_records",
-    "price_aggregate",
-    "price_attachment",
-  ]);
-  const periodEnd = new Date(subscriptionInput.currentPeriodEnd);
-  const latestAllowedEnd = new Date();
-  latestAllowedEnd.setUTCFullYear(latestAllowedEnd.getUTCFullYear() + 50);
-  assert.ok(periodEnd < latestAllowedEnd);
-  assert.deepEqual(creditInputs[0], {
-    companyId: "9",
-    subscriptionId: "openopps_basic_prepaid_cus_123",
-    amountGbp: 50,
-    transactionId: "oo_development_credit_v1_9",
-    type: "promotion",
-    description: "One-time Open Opportunities development credit",
+test("concurrent webhook and redirect callbacks credit the stable PaymentIntent once", async () => {
+  const deps = dependencies();
+  await Promise.all(Array.from({ length: 8 }, (_, i) => reconcileBasicCreditPurchase(session(), i % 2 ? identity : null, deps)));
+  assert.equal(deps.credits.size, 1);
+  assert.equal(new Set(deps.calls.filter(c => c[0] === "provision").map(c => c[1].request_id)).size, 1);
+});
+
+test("an already applied payment replay never replaces a later active plan", async () => {
+  const deps = dependencies();
+  await reconcileBasicCreditPurchase("cs_paid", identity, deps);
+  deps.state.plan = "enterprise";
+  deps.state.subscription = "manual_enterprise";
+  await reconcileBasicCreditPurchase("cs_paid", null, deps);
+  assert.equal(deps.state.plan, "enterprise");
+  assert.equal(deps.state.subscription, "manual_enterprise");
+  assert.equal(deps.credits.size, 1);
+});
+
+test("a stale unapplied payment cannot downgrade a later commitment", async () => {
+  const deps = dependencies();
+  deps.state.plan = "growth";
+  await assert.rejects(reconcileBasicCreditPurchase("cs_paid", identity, deps), { code: "current_plan_conflict" });
+  assert.equal(deps.state.plan, "growth");
+  assert.equal(deps.credits.size, 0);
+});
+
+test("plan switch between provisioning and credit registration fails closed", async () => {
+  const deps = dependencies();
+  const provision = deps.provisionSnApiLocalPrepaidCustomer;
+  deps.provisionSnApiLocalPrepaidCustomer = async (payload) => {
+    const result = await provision(payload);
+    deps.state.plan = "growth";
+    deps.state.subscription = "manual_growth";
+    return result;
+  };
+  await assert.rejects(reconcileBasicCreditPurchase("cs_paid", identity, deps), { code: "credit_subscription_conflict" });
+  assert.equal(deps.credits.size, 0);
+  assert.equal(deps.state.plan, "growth");
+});
+
+test("a failed credit write is retryable with unchanged operation and payment IDs", async () => {
+  const deps = dependencies();
+  const register = deps.registerSnApiPaidCredit;
+  deps.registerSnApiPaidCredit = async () => { throw new Error("Storage unavailable"); };
+  await assert.rejects(reconcileBasicCreditPurchase("cs_paid", identity, deps), /Storage unavailable/);
+  deps.registerSnApiPaidCredit = register;
+  await reconcileBasicCreditPurchase("cs_paid", identity, deps);
+  assert.equal(deps.credits.size, 1);
+});
+
+test("verified legacy paid purchases below GBP 100 still reconcile", async () => {
+  const paid = session();
+  paid.amount_total = 100;
+  paid.metadata.amount_gbp_pence = "100";
+  delete paid.metadata.expected_current_plan_key;
+  paid.payment_intent.amount_received = 100;
+  paid.line_items.data[0].amount_total = 100;
+  const deps = dependencies(paid);
+  deps.state.plan = null;
+  await reconcileBasicCreditPurchase("cs_paid", identity, deps);
+  assert.equal(deps.credits.get("pi_123").payload.amount_gbp_pence, 100);
+});
+
+for (const [name, change, code] of [
+  ["unpaid session", s => { s.payment_status = "unpaid"; }, "checkout_payment_pending"],
+  ["incomplete session", s => { s.status = "open"; }, "checkout_incomplete"],
+  ["subscription checkout", s => { s.mode = "subscription"; }, "invalid_basic_checkout_mode"],
+  ["forged amount", s => { s.metadata.amount_gbp_pence = "10000x"; }, "top_up_amount_mismatch"],
+  ["wrong currency", s => { s.currency = "usd"; }, "top_up_amount_mismatch"],
+  ["missing PaymentIntent", s => { s.payment_intent = null; }, "basic_payment_verification_failed"],
+  ["pending PaymentIntent", s => { s.payment_intent.status = "processing"; }, "basic_payment_verification_failed"],
+  ["different paid amount", s => { s.payment_intent.amount_received = 9999; }, "basic_payment_verification_failed"],
+  ["different line product", s => { s.line_items.data[0].price.product = "prod_growth"; }, "basic_payment_verification_failed"],
+  ["different Stripe identity", s => { s.customer.metadata.authUserId = "auth0|other"; }, "stripe_customer_identity_mismatch"],
+]) {
+  test(`${name} cannot create any credit or provision access`, async () => {
+    const paid = session(); change(paid);
+    const deps = dependencies(paid);
+    await assert.rejects(reconcileBasicCreditPurchase(paid, identity, deps), { code });
+    assert.equal(deps.credits.size, 0);
+    assert.equal(deps.state.plan, "development");
   });
-  assert.equal(creditInputs[1].amountGbp, 500);
-  assert.equal(creditInputs[1].transactionId, "pi_123");
-  assert.equal(creditInputs[1].companyId, "9");
-  assert.deepEqual(reconciliationMarker, {
-    paymentIntentId: "pi_123",
-    companyId: "9",
-    subscriptionId: "openopps_basic_prepaid_cus_123",
-  });
-  assert.deepEqual(provisioningStatuses, ["provisioning", "active"]);
+}
+
+test("unverified webhook/redirect objects are ignored in favour of Stripe retrieval", async () => {
+  const deps = dependencies(session({ payment_status: "unpaid" }));
+  await assert.rejects(reconcileBasicCreditPurchase(session(), identity, deps), { code: "checkout_payment_pending" });
+  await assert.rejects(reconcileBasicCreditPurchase({ payment_status: "paid" }, identity, deps), { code: "checkout_session_required" });
 });
 
-test("a new Basic account stays blocked when Moesif credit creation fails", async () => {
-  const provisioningStatuses = [];
-  await assert.rejects(
-    reconcileBasicCreditPurchase(
-      checkoutSession(),
-      { sub: "auth0|123", email: "buyer@example.com" },
-      dependencies({
-        provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
-          provisioningStatuses.push(subscriptionStatus);
-          return { user_id: 7, organization_id: 9, moesif_company_id: "9" };
-        },
-        createMoesifBalanceTransaction: async () => {
-          const error = new Error("Missing Moesif scope");
-          error.code = "moesif_management_scope_missing";
-          throw error;
-        },
-      })
-    ),
-    (error) => error.code === "moesif_management_scope_missing"
-  );
-  assert.deepEqual(provisioningStatuses, ["provisioning"]);
-});
-
-test("adding credit does not suspend an existing active Basic account", async () => {
-  const provisioningStatuses = [];
-  const creditInputs = [];
-  const topUpSession = checkoutSession({
-    metadata: {
-      ...checkoutSession().metadata,
-      purchase_type: "basic_credit_top_up",
-    },
-  });
-  await reconcileBasicCreditPurchase(
-    topUpSession,
-    { sub: "auth0|123", email: "buyer@example.com" },
-    dependencies({
-      verifyStripeSession: async () => topUpSession,
-      getSnApiPortalContext: async () => ({
-        current_plan_key: "basic",
-        billing_status: "active",
-      }),
-      provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
-        provisioningStatuses.push(subscriptionStatus);
-        return { user_id: 7, organization_id: 9, moesif_company_id: "9" };
-      },
-      createMoesifBalanceTransaction: async (input) => {
-        creditInputs.push(input);
-      },
-    })
-  );
-  assert.deepEqual(provisioningStatuses, ["active", "active"]);
-  assert.equal(creditInputs.length, 1);
-  assert.equal(creditInputs[0].transactionId, "pi_123");
-});
-
-test("top-up checkout cannot establish a new Basic plan", async () => {
-  let provisionCalls = 0;
-  const topUpSession = checkoutSession({
-    metadata: {
-      ...checkoutSession().metadata,
-      purchase_type: "basic_credit_top_up",
-    },
-  });
-
-  await assert.rejects(
-    reconcileBasicCreditPurchase(
-      topUpSession,
-      { sub: "auth0|123", email: "buyer@example.com" },
-      dependencies({
-        verifyStripeSession: async () => topUpSession,
-        getSnApiPortalContext: async () => null,
-        provisionSnApiPrepaidCustomer: async () => {
-          provisionCalls += 1;
-        },
-      })
-    ),
-    (error) => error.code === "basic_plan_required"
-  );
-  assert.equal(provisionCalls, 0);
-});
-
-test("Basic activation cannot replace an active Growth plan", async () => {
-  let provisionCalls = 0;
-  await assert.rejects(
-    reconcileBasicCreditPurchase(
-      checkoutSession(),
-      { sub: "auth0|123", email: "buyer@example.com" },
-      dependencies({
-        getSnApiPortalContext: async () => ({
-          current_plan_key: "growth",
-          billing_status: "active",
-        }),
-        provisionSnApiPrepaidCustomer: async () => {
-          provisionCalls += 1;
-        },
-      })
-    ),
-    (error) => error.code === "basic_plan_conflict"
-  );
-  assert.equal(provisionCalls, 0);
-});
-
-test("the prepaid period end stays inside Moesif's 50-year limit", () => {
-  const now = new Date("2026-07-30T12:00:00.000Z");
-  assert.equal(
-    prepaidSubscriptionPeriodEnd(now),
-    "2075-07-30T12:00:00.000Z"
-  );
-});
-
-test("a forged top-up amount never provisions or credits access", async () => {
-  let provisionCalls = 0;
-  await assert.rejects(
-    reconcileBasicCreditPurchase(
-      checkoutSession({ amount_total: 100 }),
-      { sub: "auth0|123", email: "buyer@example.com" },
-      dependencies({
-        verifyStripeSession: async () =>
-          checkoutSession({ amount_total: 100 }),
-        provisionSnApiPrepaidCustomer: async () => {
-          provisionCalls += 1;
-        },
-      })
-    ),
-    (error) => error.code === "top_up_amount_mismatch"
-  );
-  assert.equal(provisionCalls, 0);
-});
-
-test("a Basic top-up is rejected when its four meters are not configured", async () => {
-  let creditCalls = 0;
-  await assert.rejects(
-    reconcileBasicCreditPurchase(
-      checkoutSession(),
-      { sub: "auth0|123", email: "buyer@example.com" },
-      dependencies({
-        getPlanPrices: async () => ({
-          commitmentPrices: [],
-          meteredPrices: [
-            { id: "price_api", recurring: { meter: "meter_shared" } },
-            { id: "price_records", recurring: { meter: "meter_shared" } },
-            { id: "price_aggregate", recurring: { meter: "meter_aggregate" } },
-            { id: "price_attachment", recurring: { meter: "meter_attachment" } },
-          ],
-        }),
-        createMoesifBalanceTransaction: async () => {
-          creditCalls += 1;
-        },
-      })
-    ),
-    (error) => error.code === "basic_price_configuration_invalid"
-  );
-  assert.equal(creditCalls, 0);
+test("legacy prepaid period helper remains within Moesif's 50-year limit", () => {
+  assert.equal(prepaidSubscriptionPeriodEnd(new Date("2026-07-30T12:00:00Z")), "2075-07-30T12:00:00.000Z");
 });

@@ -1,21 +1,15 @@
 import { PageLayout } from "../../page-layout";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import useSWR from "swr";
 import { PageLoader } from "../../page-loader";
-import SVG from "react-inlinesvg";
-import dashIcon from "../../../images/icons/bar-chart.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { welcomeStorageKey } from "../../../common/constants";
 import fetchEmbedChartUrls from "./fetchEmbedChartUrls";
 import UsageView from "./UsageView";
 
-const isNotProvisionedError = (error) =>
-  error?.status === 400 || error?.status === 404;
-
 const Dashboard = () => {
   const { user, isLoading, idToken } = useAuthCombined();
-  const navigate = useNavigate();
 
   useEffect(() => {
     window?.moesif?.track("viewed-dashboard");
@@ -27,6 +21,7 @@ const Dashboard = () => {
   const {
     data: embedTemplateUrls,
     error,
+    isLoading: embedLoading,
   } = useSWR(
     embedKey,
     () => fetchEmbedChartUrls({ idToken }),
@@ -38,7 +33,7 @@ const Dashboard = () => {
     }
   );
 
-  if (isLoading || !idToken || (!error && !embedTemplateUrls)) {
+  if (isLoading || !idToken) {
     return (
       <PageLayout>
         <PageLoader />
@@ -52,29 +47,12 @@ const Dashboard = () => {
 
   return (
     <PageLayout>
-      {error && isNotProvisionedError(error) && (
-        <div className="empty-state">
-          <SVG src={dashIcon} aria-hidden="true" />
-          <h2>Subscribe to unlock your dashboards</h2>
-          <p>
-            Usage analytics appear here once you have an active plan. Choose
-            one to activate your API access.
-          </p>
-          <button
-            className="button button--primary"
-            onClick={() => navigate("/plans")}
-          >
-            View plans
-          </button>
-        </div>
-      )}
-      {(!error || !isNotProvisionedError(error)) && (
-        <UsageView
-          idToken={idToken}
-          embedTemplateUrls={embedTemplateUrls || []}
-          embedError={error}
-        />
-      )}
+      <UsageView
+        idToken={idToken}
+        embedTemplateUrls={embedTemplateUrls || []}
+        embedError={error}
+        embedLoading={embedLoading}
+      />
     </PageLayout>
   );
 };

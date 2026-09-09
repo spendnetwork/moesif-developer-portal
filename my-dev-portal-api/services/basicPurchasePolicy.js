@@ -16,6 +16,26 @@ function isBasicCreditSession(session) {
   return isBasicPurchaseType(session?.metadata?.purchase_type);
 }
 
+function assertBasicCreditCheckoutReady(summary, context, entitlement) {
+  if (summary?.prepaid_enabled !== true) {
+    const error = basicPurchaseError(
+      "prepaid_checkout_unavailable",
+      "Basic credit purchases are temporarily unavailable. No payment has been taken. Please try again later or contact welcome@openopps.com."
+    );
+    error.status = 503;
+    throw error;
+  }
+  const currentPlan = summary?.plan_key || context?.current_plan_key || entitlement?.planKey;
+  if (currentPlan !== "basic") return;
+  if (summary?.plan_key === "basic" && summary.debit_owner === "api" && summary.subscription_id) return;
+  const error = basicPurchaseError(
+    "legacy_basic_migration_required",
+    "Your existing Basic credit needs a balance review before you can add more. Contact welcome@openopps.com. Your current credit has not been changed."
+  );
+  error.status = 409;
+  throw error;
+}
+
 function assertBasicPurchaseAllowed(
   purchaseType,
   entitlement,
@@ -32,6 +52,7 @@ function assertBasicPurchaseAllowed(
   const planKey = entitlement?.planKey || null;
 
   if (purchaseType === BASIC_ACTIVATION) {
+    if (planKey === "development") return;
     if (!active && (!planKey || planKey === "basic")) return;
     if (planKey === "basic" && allowIdempotentActivation) return;
     if (planKey === "basic") {
@@ -66,6 +87,7 @@ module.exports = {
   BASIC_ACTIVATION,
   BASIC_CREDIT_TOP_UP,
   BASIC_PURCHASE_TYPES,
+  assertBasicCreditCheckoutReady,
   assertBasicPurchaseAllowed,
   basicPurchaseError,
   isBasicCreditSession,

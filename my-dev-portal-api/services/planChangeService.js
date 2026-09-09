@@ -1,3 +1,5 @@
+const crypto = require("crypto");
+
 function stripeId(value) {
   return typeof value === "string" ? value : value?.id;
 }
@@ -79,62 +81,29 @@ async function completeBasicDowngrade(planChange, deps) {
   if (!auth0UserId || !customer.email) {
     throw new Error("Stripe customer is missing Auth0 identity metadata");
   }
-  const product = await deps.getStripeProduct(planChange.target_product_id);
-  const prices = await deps.getPlanPrices(planChange.target_product_id);
-  const meteredPrices = deps.validateBasicMeteredPrices(prices);
-  const authUser = {
-    sub: auth0UserId,
-    email: customer.email,
-    name: customer.name || customer.email,
-  };
-  const pending = await deps.provisionSnApiPrepaidCustomer({
-    authUser,
-    customer,
-    product,
-    subscriptionStatus: "provisioning",
+  // Only the API can authorize this persisted boundary transition. No balances
+  // are copied and no credits are created: paid Checkout must fund Basic later.
+  const provisioned = await deps.provisionSnApiLocalPrepaidCustomer({
+    request_id: `downgrade-${crypto.createHash("sha256").update(planChange.request_id).digest("hex").slice(0, 48)}`,
+    auth0_user_id: auth0UserId,
+    plan_key: "basic",
+    expected_current_plan_key: planChange.from_plan_key,
+    requested_by: "scheduled_plan_change",
+    stripe_customer_id: customer.id,
+    plan_change_request_id: planChange.request_id,
   });
-  const companyId = String(
-    pending.moesif_company_id || pending.organization_id
-  );
-  await deps.syncToMoesif({
-    companyId,
-    userId: String(pending.user_id),
-    email: customer.email,
-    auth0UserId,
-    stripeCustomerId: customer.id,
-    planKey: "basic",
-  });
-  const moesifSubscriptionId = await deps.sendPrepaidSubscriptionToMoesif({
-    companyId,
-    stripeCustomerId: customer.id,
-    planId: product.id,
-    priceIds: meteredPrices.map((price) => price.id),
-    currentPeriodStart: new Date().toISOString(),
-    currentPeriodEnd: deps.prepaidSubscriptionPeriodEnd(),
-  });
+  if (provisioned?.debit_owner !== "api" || provisioned.plan_key !== "basic" || !provisioned.subscription_id) {
+    throw new Error("The API did not confirm an unfunded Basic boundary transition");
+  }
   await deps.endStripeSubscriptionForBasicDowngrade(planChange);
-  const provisioned = await deps.provisionSnApiPrepaidCustomer({
-    authUser,
-    customer,
-    product,
-    subscriptionStatus: "inactive",
-  });
-  await deps.updateStripeCustomerIdentity(customer.id, {
-    moesifUserId: provisioned.user_id,
-    moesifCompanyId:
-      provisioned.moesif_company_id || provisioned.organization_id,
-    auth0UserId,
-    subscriptionId: null,
-  });
-  await deps.updateSnApiPlanChange(planChange.request_id, {
-    status: "activating",
-  });
+  // Provisioning atomically marks this boundary activating. Do not rewrite
+  // customer-wide Stripe metadata: a retry may follow a newer subscription.
   await deps.updateSnApiPlanChange(planChange.request_id, { status: "active" });
   return {
     status: "active",
     planChange,
     provisioned,
-    moesifSubscriptionId,
+    subscriptionId: provisioned.subscription_id,
   };
 }
 
@@ -238,7 +207,8 @@ async function processPaidInvoice(invoice, deps) {
   }
 
   if (
-    planChange.status === "scheduled" &&
+    (planChange.status === "scheduled" ||
+      (planChange.status === "activating" && planChange.to_plan_key === "basic")) &&
     planChange.change_type === "downgrade"
   ) {
     return processScheduledDowngrade(planChange, deps);
@@ -394,7 +364,8 @@ async function reconcileDuePlanChanges(deps) {
         continue;
       }
       if (
-        planChange.status === "scheduled" &&
+        (planChange.status === "scheduled" ||
+          (planChange.status === "activating" && planChange.to_plan_key === "basic")) &&
         planChange.change_type === "downgrade"
       ) {
         const result = await processScheduledDowngrade(planChange, deps);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { loadStripe } from "@stripe/stripe-js";
+import { loadStripe } from "@stripe/stripe-js/pure";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -7,10 +7,6 @@ import {
   EmbeddedCheckout,
 } from "@stripe/react-stripe-js";
 import { apiRequest } from "../../../lib/portal-api";
-
-const stripePromise = loadStripe(
-  import.meta.env.REACT_APP_STRIPE_PUBLISHABLE_KEY
-);
 
 // used on embedded checkout example code:
 // https://docs.stripe.com/checkout/embedded/quickstart
@@ -24,6 +20,7 @@ function StripeCheckoutForm({
   const navigate = useNavigate();
   const checkoutRequestId = useRef(crypto.randomUUID());
   const [clientSecret, setClientSecret] = useState("");
+  const [stripe, setStripe] = useState(null);
   const [checkoutError, setCheckoutError] = useState("");
 
   useEffect(() => {
@@ -50,11 +47,14 @@ function StripeCheckoutForm({
         if (!data.clientSecret) throw new Error("Unable to start checkout");
         return data;
       })
-      .then((data) => {
+      .then(async (data) => {
         if (data.updated || data.scheduled) {
           navigate("/dashboard", { replace: true });
           return;
         }
+        const stripeClient = await loadStripe(import.meta.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
+        if (!stripeClient) throw new Error("Payment form unavailable. Please try again.");
+        setStripe(stripeClient);
         setCheckoutError("");
         setClientSecret(data.clientSecret);
       })
@@ -71,9 +71,9 @@ function StripeCheckoutForm({
           {checkoutError}
         </div>
       )}
-      {clientSecret && (
+      {clientSecret && stripe && (
         <EmbeddedCheckoutProvider
-          stripe={stripePromise}
+          stripe={stripe}
           options={{ clientSecret }}
         >
           <EmbeddedCheckout />

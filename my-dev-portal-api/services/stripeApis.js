@@ -13,10 +13,6 @@ const {
   BASIC_CREDIT_TOP_UP,
   isBasicPurchaseType,
 } = require("./basicPurchasePolicy");
-const {
-  DEVELOPMENT_CREDIT_MARKER,
-  DEVELOPMENT_CREDIT_PENCE,
-} = require("./developmentCredit");
 const { summarizeMeterReports } = require("./basicUsageSummary");
 const stripe = StripeSDK(process.env.STRIPE_API_KEY);
 
@@ -36,7 +32,7 @@ const STRIPE_PREVIEW_CACHE_TTL_MS = 3 * 60 * 1000;
 const stripePreviewCache = new Map();
 const stripePreviewInflight = new Map();
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
-const BASIC_TOP_UP_MIN_AMOUNT_GBP = 1;
+const BASIC_TOP_UP_MIN_AMOUNT_GBP = 100;
 const PLAN_RANK = { basic: 0, growth: 1, enterprise: 2 };
 const PLAN_CHANGE_INVOICE_DAYS = Number.parseInt(
   process.env.PLAN_CHANGE_INVOICE_DAYS || "14",
@@ -52,7 +48,7 @@ function getFrontendUrl(pathname) {
 
 function normalizeBasicTopUpAmount(amountGbp) {
   const amount = Number(amountGbp);
-  if (!Number.isFinite(amount) || amount <= 0) {
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(Math.round(amount * 100)) || Math.round(amount * 100) > 2147483647) {
     throw stripeLookupError(
       "invalid_top_up_amount",
       "Enter a valid Basic credit amount"
@@ -684,7 +680,8 @@ async function createBasicCreditCheckoutSession(
   amountGbp,
   purchaseType,
   authUser,
-  requestId
+  requestId,
+  portalContext
 ) {
   const planKey = await getPlanKeyForProduct(planId);
   if (planKey !== "basic") {
@@ -718,6 +715,8 @@ async function createBasicCreditCheckoutSession(
     plan_key: "basic",
     amount_gbp_pence: String(amountPence),
     auth0_user_id: authUser?.sub || "",
+    expected_current_plan_key: portalContext?.current_plan_key || "none",
+    expected_current_subscription_id: portalContext?.current_subscription_id || "none",
   };
   const session = await stripe.checkout.sessions.create(
     {
@@ -1598,20 +1597,6 @@ async function createCreditGrantOnce(customerId, opts) {
   });
 }
 
-async function ensureDevelopmentCreditGrant(
-  customerId,
-  { currency = "gbp" } = {}
-) {
-  return createCreditGrantOnce(customerId, {
-    value: DEVELOPMENT_CREDIT_PENCE,
-    currency,
-    category: "promotional",
-    name: "Open Opportunities development credit",
-    marker: DEVELOPMENT_CREDIT_MARKER,
-    planKey: "development",
-  });
-}
-
 // Per-metric definitions (price id -> key/label/unit rate) taken from the
 // subscription's own metered prices, in the shape summarizeMeterReports expects.
 function commitmentMeterDefinitions(subscription) {
@@ -1980,7 +1965,6 @@ module.exports = {
   verifyStripeSession,
   constructStripeEvent,
   grantCommitmentFromInvoice,
-  ensureDevelopmentCreditGrant,
   getUsageSummary,
   invalidateUsageSummary,
   cancelStripeSubscription,

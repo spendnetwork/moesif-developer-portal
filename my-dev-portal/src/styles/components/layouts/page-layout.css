@@ -51,6 +51,7 @@
 
 @media only screen and (max-width: 640px) {
   .page-layout__content {
-    margin-top: 6.4rem;
+    margin-top: 0;
+    padding-top: calc(6.4rem + 24px);
   }
 }

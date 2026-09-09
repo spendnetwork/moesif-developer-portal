@@ -96,10 +96,7 @@ test("initial Growth checkout provisions Gold-plan entitlement without the brows
   assert.equal(result.planKey, "growth");
   assert.equal(provisioned.authUser.sub, "auth0|123");
   assert.equal(provisioned.subscription.id, "sub_growth");
-  assert.deepEqual(developmentCredit, {
-    customerId: "cus_123",
-    currency: "gbp",
-  });
+  assert.equal(developmentCredit, null);
 });
 
 test("completed but unpaid checkout never provisions API access", async () => {
@@ -428,4 +425,14 @@ test("late cancellation reconciles the sole live replacement without revoking ke
 
   assert.equal(result.skipped, "other_live_subscription");
   assert.equal(replacementProvisionCalls, 1);
+});
+test("late Stripe lifecycle events cannot overwrite local Basic or revoke its keys", async () => {
+  for (const status of ["active", "canceled"]) {
+    const result = await processSubscriptionLifecycle(subscription({ status }), dependencies({
+      getSnApiPortalContext: async () => ({ debit_owner: "api", current_plan_key: "basic", current_subscription_id: "prepaid_basic" }),
+      updateSnApiSubscriptionStatus: () => assert.fail("Retired subscription must not mutate entitlement"),
+      handleSubscriptionEnded: () => assert.fail("Local Basic keys must not be revoked"),
+    }));
+    assert.equal(result.status, "replaced_by_api_prepaid");
+  }
 });

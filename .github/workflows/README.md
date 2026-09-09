@@ -2,7 +2,7 @@
 
 GitHub Actions performs CI only:
 
-- `frontend-ci.yml` installs, lints, and builds `my-dev-portal`.
+- `frontend-ci.yml` installs, lints, unit-tests, and builds `my-dev-portal`.
 - `api-ci.yml` runs the API test suite and verifies its Docker image builds.
 
 Neither workflow has AWS credentials or deploy permissions.

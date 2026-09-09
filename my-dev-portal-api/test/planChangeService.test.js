@@ -361,7 +361,7 @@ test("reconciliation fails a reviewed change when its invoice is void", async ()
   assert.equal(updates[0].failure_code, "invoice_void");
 });
 
-test("downgrade to Basic ends recurring billing and creates prepaid access", async () => {
+test("authorized downgrade to Basic ends recurring billing and creates unfunded API-owned access", async () => {
   const calls = [];
   const change = baseChange({
     status: "scheduled",
@@ -387,9 +387,12 @@ test("downgrade to Basic ends recurring billing and creates prepaid access", asy
       ],
     }),
     validateBasicMeteredPrices: (prices) => prices.meteredPrices,
-    provisionSnApiPrepaidCustomer: async ({ subscriptionStatus }) => {
-      calls.push(`provision:${subscriptionStatus}`);
-      return { user_id: 7, organization_id: 9 };
+    provisionSnApiLocalPrepaidCustomer: async (payload) => {
+      assert.equal(payload.plan_change_request_id, change.request_id);
+      assert.equal(payload.expected_current_plan_key, "growth");
+      assert.equal(payload.amount_gbp_pence, undefined);
+      calls.push("provision:api_unfunded");
+      return { user_id: 7, organization_id: 9, debit_owner: "api", plan_key: "basic", subscription_id: "prepaid_basic" };
     },
     syncToMoesif: async () => calls.push("sync_moesif"),
     sendPrepaidSubscriptionToMoesif: async () => {
@@ -411,13 +414,48 @@ test("downgrade to Basic ends recurring billing and creates prepaid access", asy
 
   assert.equal(result.status, "active");
   assert.deepEqual(calls, [
-    "provision:provisioning",
-    "sync_moesif",
-    "prepaid_subscription",
+    "provision:api_unfunded",
     "cancel_recurring",
-    "provision:inactive",
-    "update_identity",
-    "change:activating",
     "change:active",
   ]);
+});
+
+test("Basic boundary refusal cannot cancel billing, mutate identity, create credits or complete the change", async () => {
+  const calls = [];
+  const change = baseChange({ change_type: "downgrade", from_plan_key: "growth", to_plan_key: "basic" });
+  await assert.rejects(() => completeBasicDowngrade(change, {
+    getStripeCustomerById: async () => ({ id: "cus_123", email: "buyer@example.com", metadata: { authUserId: "auth0|123" } }),
+    provisionSnApiLocalPrepaidCustomer: async payload => {
+      calls.push("api-authorize");
+      assert.equal(payload.legacy_basic_bootstrap, undefined);
+      throw Object.assign(new Error("Boundary is not authorized"), { code: "commercial_transition_required" });
+    },
+    endStripeSubscriptionForBasicDowngrade: async () => calls.push("cancel"),
+    updateStripeCustomerIdentity: async () => calls.push("identity"),
+    updateSnApiPlanChange: async () => calls.push("complete"),
+  }), { code: "commercial_transition_required" });
+  assert.deepEqual(calls, ["api-authorize"]);
+});
+
+test("Basic boundary retry in activating state reuses the same unfunded operation", async () => {
+  const requests = [];
+  const change = baseChange({ change_type: "downgrade", from_plan_key: "enterprise", to_plan_key: "basic" });
+  const deps = {
+    getScheduledDowngradeState: async () => ({ transitioned: true }),
+    getStripeCustomerById: async () => ({ id: "cus_123", email: "buyer@example.com", metadata: { authUserId: "auth0|123" } }),
+    provisionSnApiLocalPrepaidCustomer: async payload => {
+      requests.push(payload);
+      return { debit_owner: "api", plan_key: "basic", subscription_id: "prepaid_basic" };
+    },
+    endStripeSubscriptionForBasicDowngrade: async () => {},
+    updateStripeCustomerIdentity: async () => {},
+    updateSnApiPlanChange: async () => {},
+  };
+  for (const status of ["scheduled", "activating"]) {
+    const result = await reconcileDuePlanChanges({ ...deps, claimSnApiDuePlanChanges: async () => [{ ...change, status }] });
+    assert.equal(result[0].status, "active");
+  }
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0], requests[1]);
+  assert.equal(requests[0].plan_change_request_id, change.request_id);
 });

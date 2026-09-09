@@ -20,9 +20,9 @@ const C = {
 const STEPS = [
   {
     n: 1,
-    title: "Choose a plan",
-    body: "Pay as you go on Basic, or prepay for lower unit rates.",
-    linkLabel: "View plans",
+    title: "Discuss your access",
+    body: "Contact us for credit to build and test your integration, or discuss a Growth or Enterprise plan.",
+    linkLabel: "Explore access options",
     to: "/plans",
   },
   {
@@ -94,14 +94,14 @@ function Welcome() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
           <button
             type="button"
             onClick={() => navigate("/plans")}
             className="btn-solid"
             style={styles.primaryBtn}
           >
-            Choose a plan
+            Explore access options
           </button>
           <button
             type="button"
@@ -120,7 +120,7 @@ function Welcome() {
 const styles = {
   eyebrow: {
     fontSize: 12,
-    letterSpacing: "0.1em",
+    letterSpacing: 0,
     textTransform: "uppercase",
     color: C.muted,
     marginBottom: 12,
@@ -130,7 +130,7 @@ const styles = {
     fontSize: 38,
     lineHeight: 1.15,
     fontWeight: 500,
-    letterSpacing: "-0.02em",
+    letterSpacing: 0,
     color: C.head,
   },
   lead: {

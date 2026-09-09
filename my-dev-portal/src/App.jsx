@@ -13,12 +13,14 @@ import Subscription from "./components/pages/subscription/Subscription";
 import Welcome from "./components/pages/welcome/Welcome";
 import { PageFooter } from "./components/page-footer";
 import SessionTimeout from "./components/session-timeout";
+import RouteScrollReset from "./components/route-scroll-reset";
 
 function App() {
   return (
     <div>
       <div>
         <BrowserRouter>
+          <RouteScrollReset />
           <Auth0ProviderWithNavigate>
             <SessionTimeout />
             <Routes>

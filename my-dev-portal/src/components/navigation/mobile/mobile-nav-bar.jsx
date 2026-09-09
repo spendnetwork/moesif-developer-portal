@@ -56,7 +56,7 @@ export const MobileNavBar = () => {
         />
 
         {isMobileMenuOpen() && (
-          <div className="mobile-nav-bar__menu">
+          <div className="mobile-nav-bar__menu" id="mobile-navigation-menu">
             <MobileNavBarTabs handleClick={closeMobileMenu} />
             <MobileNavBarButtons />
           </div>

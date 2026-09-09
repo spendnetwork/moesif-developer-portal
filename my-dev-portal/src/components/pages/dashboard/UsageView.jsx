@@ -46,7 +46,7 @@ function Skeleton({ w, h, style }) {
   );
 }
 
-function ChartCard({ title, url }) {
+function ChartCard({ title, url, loading }) {
   return (
     <div style={styles.chartCard}>
       <div style={styles.chartHead}>
@@ -69,7 +69,7 @@ function ChartCard({ title, url }) {
           />
         ) : (
           <div style={{ padding: "48px 0", textAlign: "center", color: C.muted, fontSize: 13 }}>
-            Chart unavailable
+            {loading ? "Loading chart..." : "Chart unavailable"}
           </div>
         )}
       </div>
@@ -81,6 +81,7 @@ export default function UsageView({
   idToken,
   embedTemplateUrls = [],
   embedError = null,
+  embedLoading = false,
 }) {
   const { usage, usageLoading, usageError } = useUsageSummary({ idToken });
 
@@ -102,7 +103,7 @@ export default function UsageView({
       : 0;
   const remainingPct =
     credit && credit.granted > 0
-      ? Math.max(0, 100 - usedPct)
+      ? Math.min(100, Math.max(0, Math.round(((displayedRemaining || 0) / credit.granted) * 100)))
       : 0;
   const analytics = usage?.analytics;
   const analyticsWarning = usageError
@@ -119,8 +120,7 @@ export default function UsageView({
         <div style={styles.eyebrow}>Usage</div>
         <h1 style={styles.h1}>API activity</h1>
         <p style={styles.lead}>
-          What you have used this billing period, and how your credit is drawing
-          down.
+          Settled API usage and available credit across your organisation.
         </p>
       </div>
 
@@ -156,7 +156,7 @@ export default function UsageView({
         <div>
           <div style={styles.twoCol}>
             <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>Usage this period</div>
+              <div style={styles.metricLabel}>{usage.debitOwner === "api" ? "Settled usage" : "Usage this period"}</div>
               <div style={styles.metricValue}>
                 {formatUsageMoney(usage?.accrued, currency)}
               </div>
@@ -166,19 +166,19 @@ export default function UsageView({
                       usage.period.end,
                       true
                     )}`
-                  : "Current billing period"}
+                  : usage.debitOwner === "api" ? "Recorded API usage" : "Current billing period"}
               </div>
             </div>
 
             {credit && (
               <div style={styles.metricCard}>
-                <div style={styles.metricLabel}>Credit remaining</div>
+                <div style={styles.metricLabel}>{usage.planKey === "development" ? "Development allowance remaining" : "Credit remaining"}</div>
                 <div style={styles.metricValue}>
-                  {formatMoney(displayedRemaining, currency)}
+                  {formatUsageMoney(displayedRemaining, currency)}
                 </div>
                 <div style={{ ...styles.metricSub, marginBottom: 14 }}>
-                  {formatMoney(displayedUsed, currency)} of{" "}
-                  {formatMoney(credit.granted, currency)} used
+                  {formatUsageMoney(displayedUsed, currency)} of{" "}
+                  {formatUsageMoney(credit.granted, currency)} used
                 </div>
                 <div
                   role="progressbar"
@@ -193,6 +193,12 @@ export default function UsageView({
                   <span>{formatMoney(displayedUsed, currency)} used</span>
                   <span>{remainingPct}% remaining</span>
                 </div>
+                {credit.expired > 0 && (
+                  <p style={styles.metricSub}>{formatMoney(credit.expired, currency)} expired</p>
+                )}
+                {Number.isFinite(credit.spendable) && credit.spendable < credit.remaining && (
+                  <p style={styles.metricSub}>{formatMoney(credit.spendable, currency)} currently spendable</p>
+                )}
               </div>
             )}
           </div>
@@ -200,10 +206,10 @@ export default function UsageView({
           {usage?.lines && usage.lines.length > 0 && (
             <div style={{ ...styles.metricCard, marginTop: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 15, fontWeight: 500, color: C.head, marginBottom: 6 }}>
-                This period by metric
+                Usage by metric
               </div>
               <p style={{ margin: "0 0 8px", fontSize: 13, color: C.muted }}>
-                Each meter is priced at the unit rate for your plan.
+                Current rates for your plan. Historical costs use the rates at the time of each request.
               </p>
               {usage.lines.map((line, i) => (
                 <div key={`${line.label}-${i}`} style={styles.meterRow}>
@@ -212,23 +218,23 @@ export default function UsageView({
                     {line.quantity != null && (
                       <span style={styles.mono}>
                         {line.quantity.toLocaleString()} units
-                        {Number.isFinite(line.rate)
+                        {line.included === false ? " · Not included in your plan" : Number.isFinite(line.rate)
                           ? ` at ${formatMoney(line.rate, currency)} each`
                           : ""}
                       </span>
                     )}
                   </div>
                   <span style={{ fontSize: 15, color: C.head, fontVariantNumeric: "tabular-nums" }}>
-                    {formatMoney(line.amount, currency)}
+                    {formatUsageMoney(line.amount, currency)}
                   </span>
                 </div>
               ))}
               <div style={styles.totalRow}>
                 <span style={{ fontSize: 14, fontWeight: 500, color: C.head }}>
-                  Total this period
+                  Total settled usage
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 500, color: C.head, fontVariantNumeric: "tabular-nums" }}>
-                  {formatMoney(usage?.accrued || 0, currency)}
+                    {formatUsageMoney(usage?.accrued, currency)}
                 </span>
               </div>
             </div>
@@ -242,8 +248,8 @@ export default function UsageView({
                 workspaces reconnect.
               </div>
             )}
-            <ChartCard title="Recent API activity" url={embedTemplateUrls[0]} />
-            <ChartCard title="Usage over time" url={embedTemplateUrls[1]} />
+            <ChartCard title="Recent API activity" url={embedTemplateUrls[0]} loading={embedLoading} />
+            <ChartCard title="Usage over time" url={embedTemplateUrls[1]} loading={embedLoading} />
           </div>
           {analytics?.updatedAt && (
             <div style={styles.updatedAt}>
@@ -257,7 +263,7 @@ export default function UsageView({
             Usage data is temporarily unavailable
           </div>
           <p style={{ margin: "8px 0 0", fontSize: 13, color: C.muted }}>
-            Your subscription remains active. This page will retry automatically.
+            Your portal remains available. This page will retry automatically.
           </p>
         </div>
       )}
@@ -268,7 +274,7 @@ export default function UsageView({
 const styles = {
   eyebrow: {
     fontSize: 12,
-    letterSpacing: "0.1em",
+    letterSpacing: 0,
     textTransform: "uppercase",
     color: C.muted,
     marginBottom: 10,
@@ -278,13 +284,13 @@ const styles = {
     fontSize: 32,
     lineHeight: 1.15,
     fontWeight: 500,
-    letterSpacing: "-0.02em",
+    letterSpacing: 0,
     color: C.head,
   },
   lead: { margin: 0, fontSize: 15, color: C.muted },
   twoCol: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",
     gap: 16,
   },
   metricCard: {
@@ -299,7 +305,7 @@ const styles = {
     fontSize: 34,
     lineHeight: 1,
     fontWeight: 500,
-    letterSpacing: "-0.03em",
+    letterSpacing: 0,
     color: C.head,
     fontVariantNumeric: "tabular-nums",
   },

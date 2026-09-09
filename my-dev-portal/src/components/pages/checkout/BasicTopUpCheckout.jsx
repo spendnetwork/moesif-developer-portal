@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 import StripeCheckoutForm from "./StripeCheckoutForm";
+import { BASIC_MINIMUM_GBP, validateBasicAmount } from "../../../lib/basic-purchase";
 
 function BasicTopUpCheckout({ planId, idToken, purchaseType }) {
   const [amount, setAmount] = useState("");
@@ -10,12 +11,9 @@ function BasicTopUpCheckout({ planId, idToken, purchaseType }) {
   function continueToPayment(event) {
     event.preventDefault();
     const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount < 1) {
-      setError("Enter an amount of at least GBP 1.00.");
-      return;
-    }
-    if (Math.round(numericAmount * 100) / 100 !== numericAmount) {
-      setError("Enter no more than two decimal places.");
+    const validationError = validateBasicAmount(amount);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setError("");
@@ -63,10 +61,10 @@ function BasicTopUpCheckout({ planId, idToken, purchaseType }) {
             id="basic-top-up-amount"
             name="amount"
             type="number"
-            min="1"
+            min={BASIC_MINIMUM_GBP}
             step="0.01"
             inputMode="decimal"
-            placeholder="500.00"
+            placeholder="100.00"
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
             autoComplete="off"
@@ -74,11 +72,7 @@ function BasicTopUpCheckout({ planId, idToken, purchaseType }) {
           />
         </div>
         <p>
-          {purchaseType === "basic_activation"
-            ? "This payment confirms Basic and becomes your initial API credit. "
-            : "Your full payment becomes API credit. "}
-          Credit does not expire and API usage pauses automatically when the
-          balance reaches zero.
+          Minimum £100. No recurring fee; top up whenever you need more credit.
         </p>
       </div>
       {error && (

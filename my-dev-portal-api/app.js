@@ -10,7 +10,6 @@ const {
   cancelStripeSubscription,
   closeStripeInvoice,
   endStripeSubscriptionForBasicDowngrade,
-  ensureDevelopmentCreditGrant,
   getUsageSummary,
   invalidateUsageSummary,
   constructStripeEvent,
@@ -20,7 +19,6 @@ const {
   createStripePlanCheckoutSession,
   createBasicCreditCheckoutSession,
   getBasicTopUpTotalPence,
-  markBasicTopUpReconciled,
   prepareStripePlanChange,
   scheduleStripeDowngrade,
   cancelStripeScheduledDowngrade,
@@ -48,6 +46,10 @@ const {
   provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,
   getSnApiPortalContext,
+  getSnApiUsageSummary,
+  provisionSnApiLocalPrepaidCustomer,
+  registerSnApiPaidCredit,
+  grantSnApiDevelopmentCredit,
   recordSnApiPortalSignIn,
   registerSnApiPortalAccount,
   listSnApiKeys,
@@ -95,6 +97,7 @@ const {
   validateBasicMeteredPrices,
 } = require("./services/prepaidReconciliation");
 const {
+  assertBasicCreditCheckoutReady,
   assertBasicPurchaseAllowed,
   isBasicCreditSession,
 } = require("./services/basicPurchasePolicy");
@@ -108,12 +111,23 @@ const {
 } = require("./services/basicUsageSummary");
 
 const { authMiddleware } = require("./services/authPlugin");
+const { localUsageSummary, localSubscription } = require("./services/localUsageSummary");
+const { grantDevelopmentAllowance } = require("./services/adminDevelopmentCredit");
 
 const { getUnifiedCustomerIdCached } = require("./services/commonUtils");
 
 const app = express();
 app.disable("x-powered-by");
 const port = 3030;
+
+function safeBillingError(error, requestId) {
+  const safeLabel = value => typeof value === "string" && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(value) ? value : undefined;
+  return {
+    code: safeLabel(error?.code),
+    name: safeLabel(error?.name),
+    requestId: typeof requestId === "string" && /^(?:evt_|cs_)[A-Za-z0-9_]{1,100}$|^[0-9a-f-]{36}$/i.test(requestId) ? requestId : undefined,
+  };
+}
 
 // Keep the load-balancer health check independent of Moesif, Stripe, Auth0,
 // and the Spend Network API. Dependency failures should not make ECS replace
@@ -204,6 +218,7 @@ const planChangeDeps = {
   grantCommitmentFromInvoice,
   provisionSnApiCustomer,
   provisionSnApiPrepaidCustomer,
+  provisionSnApiLocalPrepaidCustomer,
   updateStripeCustomerIdentity,
   endStripeSubscriptionForBasicDowngrade,
   getStripeProduct,
@@ -217,6 +232,7 @@ const planChangeDeps = {
 };
 
 const subscriptionReconciliationDeps = {
+  getSnApiPortalContext,
   verifyStripeSession,
   getActiveStripeSubscription,
   getStripeSubscription,
@@ -226,7 +242,6 @@ const subscriptionReconciliationDeps = {
   ensureSubscriptionMeteredPrices,
   provisionSnApiCustomer,
   updateStripeCustomerIdentity,
-  ensureDevelopmentCreditGrant,
   grantCommitmentFromInvoice,
   syncToMoesif,
   liveStatuses: LIVE_SUBSCRIPTION_STATUSES,
@@ -243,14 +258,9 @@ const prepaidReconciliationDeps = {
   getStripeCustomerById,
   getStripeProduct,
   getPlanKeyForProduct,
-  getPlanPrices,
   getSnApiPortalContext,
-  provisionSnApiPrepaidCustomer,
-  updateStripeCustomerIdentity,
-  syncToMoesif,
-  sendPrepaidSubscriptionToMoesif,
-  createMoesifBalanceTransaction,
-  markBasicTopUpReconciled,
+  provisionSnApiLocalPrepaidCustomer,
+  registerSnApiPaidCredit,
 };
 
 const moesifMiddleware = moesif({
@@ -294,7 +304,7 @@ app.use(
   })
 );
 
-const PORTAL_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
+const PORTAL_CONTEXT_CACHE_TTL_MS = 15 * 1000;
 const portalContextCache = new Map();
 const portalRegistrationRequests = new Map();
 
@@ -361,8 +371,49 @@ async function attachSnApiPortalContext(req, _res, next) {
 
 const portalAuthMiddleware = [authMiddleware, attachSnApiPortalContext];
 
+async function requestLocalSummary(req) {
+  if (!req.portalContext) return null;
+  if (!req.localSummaryRequest) {
+    req.localSummaryRequest = (async () => {
+      try {
+        const summary = await getSnApiUsageSummary(req.user);
+        req.portalContext = {
+          ...req.portalContext,
+          current_plan_key: summary.plan_key,
+          current_subscription_id: summary.subscription_id,
+          debit_owner: summary.debit_owner,
+          access_block_reason: summary.access_block_reason,
+        };
+        return summary;
+      } catch (error) {
+        const local = req.portalContext.debit_owner === "api" ||
+          req.portalContext.current_plan_key === "development" ||
+          String(req.portalContext.current_subscription_id || "").startsWith("prepaid_");
+        // Rolling deployment compatibility is only for legacy accounts. Never
+        // substitute Stripe or Moesif balances for an API-owned ledger failure.
+        if (error.status === 404 && !local) return null;
+        throw error;
+      }
+    })();
+  }
+  return req.localSummaryRequest;
+}
+
 async function ensureRequestEntitlement(req) {
   if (req.entitlement) return req.entitlement;
+  const local = await requestLocalSummary(req);
+  if (local?.debit_owner === "api") {
+    req.entitlement = {
+      active: true,
+      planKey: local.plan_key,
+      subscription: null,
+      subscriptionId: local.subscription_id,
+      billingProvider: "prepaid",
+      apiAccessAllowed: !local.access_block_reason,
+      accessBlockReason: local.access_block_reason,
+    };
+    return req.entitlement;
+  }
   const contextPlan = String(
     req.portalContext?.current_plan_key || ""
   ).toLowerCase();
@@ -418,16 +469,15 @@ async function ensureRequestEntitlement(req) {
   return entitlement;
 }
 
-// API keys grant API access, so they may only be created or rotated while the
-// customer has a fully active entitlement. Stripe is authoritative for Basic;
-// SN API plus the Moesif sync state are authoritative for invoiced plans.
+// Exhausted local prepaid accounts remain manageable. SN API enforces API
+// request access separately and authorizes every key mutation itself.
 async function requireActiveSubscription(req, res, next) {
   try {
     const entitlement = await ensureRequestEntitlement(req);
     if (!entitlement.active) {
       return res.status(403).json({
         code: "no_active_subscription",
-        message: "An active subscription is required to manage API keys.",
+        message: "Arrange development access or a paid plan to create API keys.",
       });
     }
   } catch (error) {
@@ -501,13 +551,27 @@ app.post(
         return res.status(409).json(contactLedPlan);
       }
 
+      // Block legacy Basic before entitlement reconciliation or Stripe writes.
+      // Migration must verify and preserve old credit; checkout cannot assert it.
+      const checkoutSummary = selectedPlanKey === "basic"
+        ? await requestLocalSummary(req).catch(error => {
+            if (error.status === 404) return null;
+            throw error;
+          })
+        : null;
+      if (selectedPlanKey === "basic") {
+        assertBasicCreditCheckoutReady(checkoutSummary, req.portalContext);
+      }
       const entitlement =
         selectedPlanKey === "basic"
           ? await ensureRequestEntitlement(req)
           : null;
+      if (selectedPlanKey === "basic") {
+        assertBasicCreditCheckoutReady(checkoutSummary, req.portalContext, entitlement);
+      }
       const shouldPreparePlanChange =
         selectedPlanKey !== "basic" ||
-        (entitlement?.active && entitlement.planKey !== "basic");
+        (entitlement?.active && !["basic", "development"].includes(entitlement.planKey));
 
       if (shouldPreparePlanChange) {
         try {
@@ -608,7 +672,8 @@ app.post(
             topUpAmountGbp,
             purchaseType,
             req.user,
-            requestId
+            requestId,
+            req.portalContext
           )
         : await createStripePlanCheckoutSession(
             email,
@@ -620,15 +685,16 @@ app.post(
 
       res.send({ clientSecret: session.client_secret });
     } catch (err) {
-      console.error("Failed to create stripe checkout session", err);
+      console.error("Failed to create stripe checkout session", safeBillingError(err, requestId));
       const status =
         err.code === "multiple_active_subscriptions" ||
         err.code === "active_subscription_exists" ||
         err.code === "basic_already_active" ||
         err.code === "basic_plan_conflict" ||
-        err.code === "basic_plan_required"
+        err.code === "basic_plan_required" ||
+        err.code === "legacy_basic_migration_required"
           ? 409
-          : 400;
+          : err.status === 503 ? 503 : 400;
       res.status(status).json({
         code: err.code || "checkout_failed",
         message:
@@ -654,6 +720,28 @@ app.post(
 // commitment request and remain inactive until an administrator confirms the
 // externally issued invoice has been paid.
 // -------------------------------------------------------------------------
+app.post("/admin/development-credit", jsonParser, async (req, res) => {
+  const expected = process.env.ADMIN_PLAN_CHANGE_TOKEN;
+  if (!expected) return res.status(503).json({ code: "admin_not_configured", message: "Admin service is not configured." });
+  if (!serviceTokenMatches(req.headers["x-admin-service-token"], expected)) {
+    return res.status(401).json({ code: "unauthorized", message: "Invalid admin service token." });
+  }
+  try {
+    const result = await grantDevelopmentAllowance(req.body, req.headers["x-request-id"], {
+      getSnApiPortalContext,
+      provisionSnApiLocalPrepaidCustomer,
+      grantSnApiDevelopmentCredit,
+    });
+    invalidatePortalContext(req.body.auth0UserId);
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(error.status || 503).json({
+      code: error.code || "development_credit_failed",
+      message: error.message || "The allowance could not be confirmed. Retry with the same request ID.",
+    });
+  }
+});
+
 app.post("/admin/plan-change", jsonParser, async (req, res) => {
   const expected = process.env.ADMIN_PLAN_CHANGE_TOKEN;
   if (!expected) {
@@ -791,6 +879,20 @@ app.post("/admin/plan-change", jsonParser, async (req, res) => {
     // Same portal context the customer flow builds, fetched via the service
     // token for the *target* customer.
     const portalContext = await getSnApiPortalContext({ sub: auth0UserId });
+    if (toPlanKey === "basic" && [null, undefined, "", "development"].includes(portalContext.current_plan_key)) {
+      const basicProductId = await getProductIdForPlanKey("basic");
+      const params = new URLSearchParams({ plan_id_to_purchase: basicProductId, purchase_type: "basic_activation" });
+      return res.status(200).json({
+        ok: true,
+        pending: true,
+        paymentRequired: true,
+        requestId,
+        planKey: portalContext.current_plan_key || null,
+        toPlanKey: "basic",
+        paymentUrl: `${getFrontendOrigin()}/checkout?${params}`,
+        message: "The customer must sign in and purchase at least GBP 100 of Basic credit. Their current plan and development allowance remain unchanged until payment is verified.",
+      });
+    }
     const email = req.body?.email || portalContext.email;
     if (!email) {
       return res.status(422).json({
@@ -1143,7 +1245,7 @@ app.post(
         secret
       );
     } catch (err) {
-      console.error("Stripe webhook signature verification failed", err.message);
+      console.error("Stripe webhook signature verification failed", safeBillingError(err));
       return res.status(400).json({ message: "Invalid signature" });
     }
 
@@ -1172,7 +1274,7 @@ app.post(
         if (reconciliationError.code === "checkout_payment_pending") {
           return res.status(200).json({ received: true, payment_pending: true });
         }
-        console.error("Checkout webhook reconciliation failed", reconciliationError);
+        console.error("Checkout webhook reconciliation failed", safeBillingError(reconciliationError, event.id));
         return res.status(500).json({ message: "Checkout reconciliation failed" });
       }
     }
@@ -1294,6 +1396,8 @@ function stripeSubscriptionForPortal(entitlement) {
 
 app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => {
   try {
+    const local = localSubscription(await requestLocalSummary(req));
+    if (local) return res.status(200).json([local]);
     const entitlement = await ensureRequestEntitlement(req);
     if (!entitlement.active) return res.status(200).json([]);
     if (entitlement.billingProvider === "manual") {
@@ -1354,6 +1458,8 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
 
 app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
   try {
+    const local = localUsageSummary(await requestLocalSummary(req));
+    if (local) return res.status(200).json(local);
     if (
       ["test", "growth", "enterprise"].includes(
         String(req.portalContext?.current_plan_key || "").toLowerCase()
@@ -1432,7 +1538,7 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
     return res.status(503).json({
       code: error.code || "usage_summary_unavailable",
       message:
-        "Your subscription is active, but current usage data is temporarily unavailable.",
+        "Current usage data is temporarily unavailable. Your portal remains available; no balance has been inferred.",
     });
   }
 });
@@ -1494,7 +1600,7 @@ app.post(
         },
       });
     } catch (err) {
-      console.error("Error registering user", err);
+      console.error("Error registering user", safeBillingError(err, checkoutSessionId));
       const conflict =
         err.code === "stripe_customer_identity_mismatch" ||
         (err.status === 409 &&
@@ -1512,6 +1618,12 @@ app.post(
           code: "email_identity_conflict",
           message:
             "This email is already registered with a different sign-in method. Please log in using your original method.",
+        });
+      }
+      if (["current_plan_conflict", "credit_subscription_conflict", "commercial_transition_required", "legacy_basic_bootstrap_required", "idempotency_conflict"].includes(err.code)) {
+        return res.status(409).json({
+          code: err.code,
+          message: "This payment needs account review. Your current plan has not been replaced. Contact welcome@openopps.com and do not pay again.",
         });
       }
       if (err.code === "moesif_management_scope_missing") {
@@ -1570,7 +1682,14 @@ function sendKeyManagementError(res, error) {
 
 app.get("/api-keys", portalAuthMiddleware, async function (req, res) {
   try {
-    const entitlement = await ensureRequestEntitlement(req);
+    let entitlement;
+    let entitlementError;
+    try {
+      entitlement = await ensureRequestEntitlement(req);
+    } catch (error) {
+      entitlementError = error.code || "entitlement_verification_failed";
+      entitlement = { active: false, planKey: req.portalContext?.current_plan_key };
+    }
     let keyData = { keys: [], active_count: 0, max_active_keys: 2 };
     if (req.portalContext) {
       try {
@@ -1585,6 +1704,9 @@ app.get("/api-keys", portalAuthMiddleware, async function (req, res) {
     res.status(200).json({
       ...normalizedKeyData,
       has_active_subscription: entitlement.active,
+      api_access_allowed: entitlement.apiAccessAllowed,
+      access_block_reason: entitlement.accessBlockReason,
+      entitlement_error: entitlementError,
       current_plan_key: entitlement.planKey || null,
       subscription_status:
         entitlement.subscription?.status || req.portalContext?.billing_status || null,

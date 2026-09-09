@@ -51,15 +51,17 @@ function lineRate(price) {
 }
 
 function SubDisplay({ sub, plans, onManage }) {
-  const items = sub?.items;
-  if (!items || items.length === 0) return null;
+  const items = sub?.items || [];
 
   const status = String(sub.status || "active").toLowerCase();
   const tone = STATUS_TONE[status] || STATUS_TONE.active;
   const isPurePrepaid = sub.billing_model === "prepaid_credit";
+  const isDevelopment = sub.plan_key === "development";
   const isManualCommitment = sub.billing_model === "prepaid_commitment";
-  const period = isPurePrepaid
-    ? "Prepaid credit — no fixed billing period"
+  const period = isDevelopment
+    ? "Credit to build and test your integration, at Basic rates. No payment required."
+    : isPurePrepaid
+    ? "Prepaid credit. £100 minimum per purchase; no recurring charges or overage."
     : `Billing period ${formatIsoTimestamp(
         sub.current_period_start
       )} – ${formatIsoTimestamp(sub.current_period_end)}`;
@@ -71,7 +73,7 @@ function SubDisplay({ sub, plans, onManage }) {
     return {
       key: `${item.plan_id}-${item.price_id}`,
       label: price ? metricLabel(price) : "Line item",
-      rate: price ? lineRate(price) : "Unavailable",
+      rate: item.included === false ? "Not included" : price ? lineRate(price) : "Unavailable",
     };
   });
 
@@ -81,7 +83,7 @@ function SubDisplay({ sub, plans, onManage }) {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
             <span style={{ fontSize: 18, fontWeight: 500, color: C.head }}>
-              {planName(items, plans)}
+              {sub.plan_key ? sub.plan_key.charAt(0).toUpperCase() + sub.plan_key.slice(1) : planName(items, plans)}
             </span>
             <span
               style={{
@@ -105,7 +107,9 @@ function SubDisplay({ sub, plans, onManage }) {
           className={isPurePrepaid || isManualCommitment ? "btn-outline" : "btn-solid"}
           style={isPurePrepaid || isManualCommitment ? styles.outlineBtn : styles.primaryBtn}
         >
-          {isPurePrepaid
+          {isDevelopment
+            ? "Contact our team"
+            : isPurePrepaid
             ? "Add credit"
             : isManualCommitment
               ? "Contact billing"
@@ -113,14 +117,21 @@ function SubDisplay({ sub, plans, onManage }) {
         </button>
       </div>
 
-      <div style={styles.rateGrid}>
+      {lines.length > 0 && <div style={styles.rateGrid}>
         {lines.map((line) => (
           <div key={line.key} style={styles.rateItem}>
             <span style={styles.rateLabel}>{line.label}</span>
             <span style={styles.rateValue}>{line.rate}</span>
           </div>
         ))}
-      </div>
+      </div>}
+      {isDevelopment && (
+        <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+          When allowance runs out, API requests stop, but your keys and usage
+          remain available here. Contact welcome@openopps.com or choose a paid
+          plan.
+        </p>
+      )}
     </article>
   );
 }
@@ -135,6 +146,7 @@ const styles = {
   },
   header: {
     display: "flex",
+    flexWrap: "wrap",
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 24,
@@ -150,7 +162,7 @@ const styles = {
   rateItem: { display: "flex", flexDirection: "column", gap: 5 },
   rateLabel: {
     fontSize: 11,
-    letterSpacing: "0.06em",
+    letterSpacing: 0,
     textTransform: "uppercase",
     color: C.muted,
   },

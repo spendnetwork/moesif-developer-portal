@@ -100,9 +100,9 @@ function Subscription() {
       <div style={styles.header}>
         <div>
           <div style={styles.eyebrow}>Billing</div>
-          <h1 style={styles.h1}>Subscriptions</h1>
+          <h1 style={styles.h1}>Plan and credit</h1>
           <p style={{ margin: 0, fontSize: 15, color: C.muted }}>
-            Your active plans, their rates, and where to manage payment.
+            Your access, current rates and payment options.
           </p>
         </div>
       </div>
@@ -146,11 +146,11 @@ function Subscription() {
             </svg>
           </div>
           <div style={{ fontSize: 19, fontWeight: 500, color: C.head, marginBottom: 8 }}>
-            No active subscription yet
+            No plan arranged yet
           </div>
           <p style={styles.emptyBody}>
-            Pick a plan and your subscription will appear here with its rates and
-            billing period.
+            Contact our team about development allowance or a Growth or
+            Enterprise commitment. Basic prepaid starts at £100 per purchase.
           </p>
           <button
             type="button"
@@ -168,12 +168,12 @@ function Subscription() {
           {subscriptions.map((sub) => (
             <SubDisplay
               sub={sub}
-              key={sub.subscription_id}
+              key={sub.subscription_id || sub.plan_key}
               plans={plans}
               onManage={
                 sub.billing_model === "prepaid_credit"
                   ? startBasicTopUp
-                  : sub.billing_model === "prepaid_commitment"
+                  : sub.billing_model === "prepaid_commitment" || sub.plan_key === "development"
                     ? contactBilling
                   : openStripeManagement
               }
@@ -181,12 +181,16 @@ function Subscription() {
           ))}
           <p style={{ margin: "4px 0 0", fontSize: 12.5, color: C.muted }}>
             {subscriptions.some((sub) => sub.billing_model === "prepaid_credit")
-              ? "Basic payments are collected by Stripe and the available credit balance is verified with Moesif."
+              ? subscriptions.some((sub) => sub.debit_owner === "api")
+                ? "Basic payments are collected by Stripe. Your API credit ledger is authoritative."
+                : "Basic payments are collected by Stripe and the available credit balance is verified with Moesif."
               : subscriptions.some(
                     (sub) => sub.billing_model === "prepaid_commitment"
                   )
                 ? "Growth and Enterprise commitments are invoiced outside Stripe. Usage and available credit are metered in Moesif."
-                : "Subscription status is verified directly with Stripe."}
+                : subscriptions.some((sub) => sub.plan_key === "development")
+                  ? "Development allowance is managed by our team, separately from paid credit."
+                  : "Subscription status is verified directly with Stripe."}
           </p>
         </div>
       )}
@@ -204,7 +208,7 @@ const styles = {
   },
   eyebrow: {
     fontSize: 12,
-    letterSpacing: "0.1em",
+    letterSpacing: 0,
     textTransform: "uppercase",
     color: C.muted,
     marginBottom: 10,
@@ -214,7 +218,7 @@ const styles = {
     fontSize: 32,
     lineHeight: 1.15,
     fontWeight: 500,
-    letterSpacing: "-0.02em",
+    letterSpacing: 0,
     color: C.head,
   },
   errorCard: {
