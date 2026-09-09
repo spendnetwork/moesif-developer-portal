@@ -1397,6 +1397,7 @@ function stripeSubscriptionForPortal(entitlement) {
 app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => {
   try {
     const local = localSubscription(await requestLocalSummary(req));
+    if (local?.billing_provider === "manual") await ensureRequestEntitlement(req);
     if (local) return res.status(200).json([local]);
     const entitlement = await ensureRequestEntitlement(req);
     if (!entitlement.active) return res.status(200).json([]);
@@ -1459,6 +1460,7 @@ app.get("/subscriptions", portalAuthMiddleware, jsonParser, async (req, res) => 
 app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
   try {
     const local = localUsageSummary(await requestLocalSummary(req));
+    if (local?.billingModel === "annual_commitment") await ensureRequestEntitlement(req);
     if (local) return res.status(200).json(local);
     if (
       ["test", "growth", "enterprise"].includes(

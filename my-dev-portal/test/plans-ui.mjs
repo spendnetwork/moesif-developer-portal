@@ -12,7 +12,7 @@ const base = "http://127.0.0.1:4178";
 const browser = await chromium.launch({ channel: "msedge", headless: true });
 const errors = [];
 
-async function scenario(width, currentPlan = null, initialChange = null, basicAvailable = true) {
+async function scenario(width, currentPlan = null, initialChange = null, basicAvailable = true, paidHistory = false) {
   const page = await browser.newPage({ viewport: { width, height: 1000 } });
   page.on("pageerror", error => errors.push(error.message));
   let change = initialChange;
@@ -39,7 +39,7 @@ async function scenario(width, currentPlan = null, initialChange = null, basicAv
       "/plans": { hits: (basicAvailable ? ["basic", "growth", "enterprise"] : ["growth", "enterprise"]).map(key => ({ id: `prod_${key}`, name: key, status: "active", metadata: { plan_key: key } })) },
       "/subscriptions": currentPlan ? [{ plan_key: currentPlan, status: "active", id: `fixture_${currentPlan}` }] : [],
       "/plan-change": change,
-      "/portal-context": { current_plan_key: currentPlan, billing_status: currentPlan ? "active" : null },
+      "/portal-context": { current_plan_key: currentPlan, billing_status: currentPlan ? "active" : null, has_activated_paid_plan: paidHistory },
       "/usage-summary": { hasSubscription: false },
     };
     return endpoint in responses ? route.fulfill({ json: responses[endpoint] }) : route.continue();
@@ -114,6 +114,7 @@ try {
 
   for (const width of [1440, 390, 320]) {
     const { page, mutations } = await scenario(width, "basic");
+    assert.equal(await page.locator(".development-banner").count(), 0);
     await page.getByRole("button", { name: "Add credit", exact: true }).click();
     await page.waitForURL("**/checkout?**");
     assert.equal(new URL(page.url()).searchParams.get("purchase_type"), "basic_credit_top_up");
@@ -122,6 +123,7 @@ try {
 
     for (const plan of ["growth", "enterprise"]) {
       const { page, mutations } = await scenario(width, plan);
+      assert.equal(await page.locator(".development-banner").count(), 0);
       await noOverflow(page);
       assert.equal(await page.getByRole("button", { name: "Current plan", exact: true }).isDisabled(), true);
       await page.getByRole("button", { name: "Schedule Basic", exact: true }).click();
@@ -147,6 +149,9 @@ try {
   await missing.page.getByRole("alert").filter({ hasText: "Basic credit purchases are not available" }).waitFor();
   assert.deepEqual(missing.mutations, []);
   await missing.page.close();
+  const previousSubscriber = await scenario(390, null, null, true, true);
+  assert.equal(await previousSubscriber.page.locator(".development-banner").count(), 0);
+  await previousSubscriber.page.close();
   assert.deepEqual(errors, []);
   console.log("PASS unavailable Basic catalog entry, no real billing mutations, no browser errors");
 } finally {

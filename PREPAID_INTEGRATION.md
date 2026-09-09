@@ -1,7 +1,8 @@
 # Prepaid and Development Integration
 
-Portal changes are on the existing staging branch. No deployment, live billing
-mutation, migration or commit is part of this work.
+Shared Development allowance changes are on `feat/development_credits` across
+the API, admin tool and portal. Deploy the API and compatible admin consumer
+before the portal. This change does not itself deploy or mutate live billing.
 
 ## Readiness and Ownership
 
@@ -13,8 +14,9 @@ mutation, migration or commit is part of this work.
   Legacy Basic remains readable, but new purchases return
   `legacy_basic_migration_required` until deliberate migration is complete.
 - The API flag is `API_PREPAID_ENABLED`. No new portal or admin feature flag is used.
-- Local balances and settled metric costs are authoritative only for
-  `debit_owner: api`. Historical balances are separate from the current plan.
+- Local balances and settled metric costs are authoritative for
+  `debit_owner: api` and manually invoiced plans with `balance_authority: local_ledger`.
+  Development is organisation-scoped; paid balances and usage stay subscription-scoped.
   Remaining eligible credit is separate from spendable credit during a pause.
 
 ## Payments and Allowances
@@ -32,10 +34,20 @@ mutation, migration or commit is part of this work.
 - Development grants enter the existing service-token-protected
   `/admin/development-credit` route. Body and header request UUIDs must match.
   The verified admin actor is forwarded only after service-token authorization.
-  Identity/organization is checked before provisioning and on its response.
+  Identity/organization is checked at the proxy and inside the API transaction.
+  A single grant call creates Development access only if no plan exists;
+  otherwise it preserves the customer's current plan. The payload deliberately
+  omits subscription_id, making retries stable across plan changes.
 - Admin Move to Basic from Development or no plan returns `paymentRequired` and
   `paymentUrl` without changing the plan. Manual Growth/Enterprise commitments
   request their full amount, without subtracting Development credit.
+
+Paid plans start on activation, not after Development is exhausted. Remaining
+Development credit is spent first at the active plan's rates, without changing
+its expiry. A new discretionary grant can be added to supported paid plans.
+The Plans page hides the Development request banner after paid activation;
+admin grants remain available. Usage shows Development and paid balances
+separately and preserves the subscription's annual dates.
 
 ## Legacy and Scheduled Boundaries
 

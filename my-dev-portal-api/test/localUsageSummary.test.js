@@ -82,10 +82,11 @@ test("exhaustion keeps Development visible and management active without Stripe"
   assert.equal(result.items.length, 4);
 });
 
-test("Basic never includes historical development credit in its balance", () => {
+test("Basic includes available Development but excludes historical commercial balances", () => {
   const input = snapshot({ plan_key: "basic" });
   input.balances.commercial = { granted_gbp_pence: 10000, remaining_gbp_pence: 9600, spendable_gbp_pence: 9600, expired_gbp_pence: 0 };
-  assert.equal(localUsageSummary(input).credit.granted, 10000);
+  assert.equal(localUsageSummary(input).credit.granted, 20000);
+  assert.equal(localUsageSummary(input).credit.remaining, 19200);
 });
 
 test("legacy balances are not presented as locally authoritative, missing local money fails closed", () => {
@@ -94,3 +95,18 @@ test("legacy balances are not presented as locally authoritative, missing local 
 });
 
 module.exports = { snapshot };
+
+test("manual Growth uses mixed local balances without changing its annual period or rates", () => {
+  const input = snapshot({ plan_key: "growth", debit_owner: "admin", billing_provider: "manual",
+    current_period_end: "2027-09-01T00:00:00Z" });
+  input.usage.balance_authority = "local_ledger";
+  input.balances.commercial = { granted_gbp_pence: 500000, remaining_gbp_pence: 500000, spendable_gbp_pence: 500000, expired_gbp_pence: 0 };
+  input.rate_card = { api_call_quantity: 20, records_returned: 10, aggregate_call_quantity: 35, attachment_list_quantity: 50, attachment_download_quantity: 50 };
+  const result = localUsageSummary(input);
+  assert.equal(result.credit.remaining, 509600);
+  assert.equal(result.lines[2].included, true);
+  assert.equal(result.lines[2].rate, 35);
+  assert.equal(result.period.end, Date.parse(input.current_period_end) / 1000);
+  assert.equal(localSubscription(input).billing_provider, "manual");
+  assert.equal(result.analytics.source, "local_ledger");
+});

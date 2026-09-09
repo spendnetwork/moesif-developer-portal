@@ -13,7 +13,7 @@ function dependencies() {
     provisionSnApiLocalPrepaidCustomer: async payload => { calls.push(["provision", payload]); return provision; },
     grantSnApiDevelopmentCredit: async payload => {
       calls.push(["grant", payload]);
-      return { source_reference: `development_grant:${payload.source_reference}`, source_type: "development_grant", subscription_id: payload.subscription_id, amount_gbp_pence: payload.amount_gbp_pence };
+      return { source_reference: `development_grant:${payload.source_reference}`, source_type: "development_grant", subscription_id: "prepaid_dev", plan_key: "development", amount_gbp_pence: payload.amount_gbp_pence };
     },
   };
 }
@@ -22,22 +22,22 @@ test("admin allowance response and API payloads match the coordinated contract",
   const deps = dependencies();
   const result = await grantDevelopmentAllowance(body, requestId, deps);
   assert.deepEqual(result, { ok: true, requestId, planKey: "development", pending: false });
-  assert.equal(deps.calls[0][1].request_id, requestId);
-  assert.equal(deps.calls[0][1].expected_current_plan_key, null);
-  assert.equal(deps.calls[0][1].requested_by, body.requested_by);
-  assert.equal(deps.calls[1][1].amount_gbp_pence, 1234);
-  assert.equal(deps.calls[1][1].source_reference, `admin-development:${requestId}`);
-  assert.equal(deps.calls[1][1].granted_by, body.requested_by);
-  assert.equal(deps.calls[1][1].expires_at, null);
+  assert.equal(deps.calls.length, 1);
+  assert.equal(deps.calls[0][0], "grant");
+  assert.equal(deps.calls[0][1].subscription_id, undefined);
+  assert.equal(deps.calls[0][1].organization_id, 9);
+  assert.equal(deps.calls[0][1].amount_gbp_pence, 1234);
+  assert.equal(deps.calls[0][1].source_reference, `admin-development:${requestId}`);
+  assert.equal(deps.calls[0][1].granted_by, body.requested_by);
+  assert.equal(deps.calls[0][1].expires_at, null);
 });
 
-test("grant retries retain the same provision and grant payload after allowance activation", async () => {
+test("grant retries retain the same payload after a commercial plan activates", async () => {
   const deps = dependencies();
   await grantDevelopmentAllowance(body, requestId, deps);
-  deps.getSnApiPortalContext = async () => ({ organization_id: 9, current_plan_key: "development" });
+  deps.getSnApiPortalContext = async () => ({ organization_id: 9, current_plan_key: "growth" });
   await grantDevelopmentAllowance(body, requestId, deps);
-  assert.deepEqual(deps.calls[0], deps.calls[2]);
-  assert.deepEqual(deps.calls[1], deps.calls[3]);
+  assert.deepEqual(deps.calls[0], deps.calls[1]);
 });
 
 test("expired request retries are left to API idempotency, not rejected before reading the receipt", () => {
@@ -50,10 +50,10 @@ test("organization mismatch cannot provision or grant", async () => {
   assert.deepEqual(deps.calls, []);
 });
 
-test("commercial-plan API rejection never falls through to a grant or Stripe", async () => {
+test("legacy billing rejection never falls through to provisioning or Stripe", async () => {
   const deps = dependencies();
-  deps.provisionSnApiLocalPrepaidCustomer = async () => { throw Object.assign(new Error("Commercial plan"), { code: "development_cannot_replace_commercial" }); };
-  await assert.rejects(grantDevelopmentAllowance(body, requestId, deps), { code: "development_cannot_replace_commercial" });
+  deps.grantSnApiDevelopmentCredit = async () => { throw Object.assign(new Error("Legacy plan"), { code: "credit_subscription_conflict" }); };
+  await assert.rejects(grantDevelopmentAllowance(body, requestId, deps), { code: "credit_subscription_conflict" });
   assert.deepEqual(deps.calls, []);
 });
 

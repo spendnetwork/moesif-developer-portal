@@ -39,34 +39,24 @@ async function grantDevelopmentAllowance(body, headerRequestId, deps) {
   if (Number(context?.organization_id) !== grant.organizationId) {
     throw grantError("organization_identity_mismatch", "The user is not linked to this organization.", 409);
   }
-  // Null is stable across first grant and retries; the API permits convergent
-  // Development provisioning but rejects any commercial-to-Development change.
-  const provision = await deps.provisionSnApiLocalPrepaidCustomer({
-    request_id: grant.requestId,
-    auth0_user_id: grant.auth0UserId,
-    plan_key: "development",
-    expected_current_plan_key: null,
-    requested_by: grant.actor,
-  });
-  if (Number(provision?.organization_id) !== grant.organizationId || provision.plan_key !== "development" ||
-      provision.debit_owner !== "api" || !provision.subscription_id) {
-    throw grantError("development_provision_mismatch", "Development account setup needs review.", 409);
-  }
+  // The API resolves the current subscription under the organisation lock and
+  // atomically creates Development access only when no plan exists. Omitting a
+  // subscription keeps retries identical even if the customer changes plans.
   const sourceReference = `admin-development:${grant.requestId}`;
   const credit = await deps.grantSnApiDevelopmentCredit({
     source_reference: sourceReference,
     auth0_user_id: grant.auth0UserId,
-    subscription_id: provision.subscription_id,
+    organization_id: grant.organizationId,
     amount_gbp_pence: grant.pence,
     granted_by: grant.actor,
     reason: grant.reason,
     expires_at: grant.expiresAt,
   });
   if (credit?.source_reference !== `development_grant:${sourceReference}` || credit.source_type !== "development_grant" ||
-      credit.subscription_id !== provision.subscription_id || credit.amount_gbp_pence !== grant.pence) {
+      !credit.subscription_id || credit.amount_gbp_pence !== grant.pence) {
     throw grantError("development_credit_receipt_invalid", "The allowance confirmation is incomplete. Retry with the same request ID.", 503);
   }
-  return { ok: true, requestId: grant.requestId, planKey: "development", pending: false };
+  return { ok: true, requestId: grant.requestId, planKey: credit.plan_key || "development", pending: false };
 }
 
 module.exports = { validateDevelopmentGrant, grantDevelopmentAllowance };

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
+import useSWR from "swr";
 
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
@@ -9,7 +10,7 @@ import useAuthCombined from "../../../hooks/useAuthCombined";
 import usePlans from "../../../hooks/usePlans";
 import useSubscriptions from "../../../hooks/useSubscriptions";
 import usePlanChange from "../../../hooks/usePlanChange";
-import { apiRequest } from "../../../lib/portal-api";
+import { apiRequest, authedFetcher } from "../../../lib/portal-api";
 import "../../../styles/components/plan-options.css";
 
 // Design tokens (from the OpenOpps developer portal design).
@@ -103,6 +104,7 @@ export default function PlansView() {
   const { idToken, userEmail } = useAuthCombined();
   const { plans, plansLoading } = usePlans();
   const { subscriptions, finishedLoading } = useSubscriptions({ idToken });
+  const { data: accountContext } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
   const { planChange, refreshPlanChange } = usePlanChange({ idToken });
 
   const navigate = useNavigate();
@@ -144,6 +146,10 @@ export default function PlansView() {
 
   const hasActive = Boolean(currentPlan);
   const hasCommitment = hasActive && !["basic", "development"].includes(currentPlan);
+  const showDevelopmentRequest = (!idToken || Boolean(accountContext)) &&
+    !["basic", "growth", "enterprise", "test"].includes(currentPlan || accountContext?.current_plan_key) &&
+    !accountContext?.has_activated_paid_plan &&
+    !subscriptions?.some((subscription) => subscription.has_activated_paid_plan);
   const contactEmail =
     import.meta.env.REACT_APP_SALES_CONTACT_EMAIL ||
     DEFAULT_SALES_CONTACT_EMAIL;
@@ -327,7 +333,7 @@ export default function PlansView() {
           ))}
         </div>
 
-        <section className="development-banner" aria-labelledby="development-access-heading">
+        {showDevelopmentRequest && <section className="development-banner" aria-labelledby="development-access-heading">
           <div>
             <p className="development-banner__label">Development access{currentPlan === "development" ? " · Current plan" : ""}</p>
             <h2 id="development-access-heading">Testing the API?</h2>
@@ -338,7 +344,7 @@ export default function PlansView() {
             disabled={busy}
             onClick={() => setPending("development")}
           >Request access</button>
-        </section>
+        </section>}
       </div>
 
       {pendingTier && (
@@ -391,7 +397,7 @@ export default function PlansView() {
                 </p>
               ) : currentPlan === "development" ? (
                 <p style={styles.modalFine}>
-                  Your development allowance is not carried into Basic or reset by this purchase.
+                  Your remaining development credit will be used first, followed by your paid Basic credit. Its existing expiry still applies.
                 </p>
               ) : hasCommitment ? (
                 <p style={styles.modalFine}>

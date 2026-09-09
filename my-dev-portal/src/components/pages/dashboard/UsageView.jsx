@@ -196,6 +196,14 @@ export default function UsageView({
                 {credit.expired > 0 && (
                   <p style={styles.metricSub}>{formatMoney(credit.expired, currency)} expired</p>
                 )}
+                {usage.balances && usage.planKey !== "development" && (
+                  <dl style={{ margin: "14px 0 0", display: "grid", gridTemplateColumns: "1fr auto", gap: 8, fontSize: 13 }}>
+                    <dt>Development credit</dt>
+                    <dd style={{ margin: 0 }}>{formatMoney(usage.balances.development?.eligible_gbp_pence || 0, currency)}</dd>
+                    <dt>Paid credit</dt>
+                    <dd style={{ margin: 0 }}>{formatMoney(usage.balances.commercial?.eligible_gbp_pence || 0, currency)}</dd>
+                  </dl>
+                )}
                 {Number.isFinite(credit.spendable) && credit.spendable < credit.remaining && (
                   <p style={styles.metricSub}>{formatMoney(credit.spendable, currency)} currently spendable</p>
                 )}
