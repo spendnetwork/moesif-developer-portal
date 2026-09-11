@@ -131,6 +131,12 @@ export default function UsageView({
         </div>
       )}
 
+      {usage?.walletEnabled && <div style={{ marginBottom: 20, fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
+        <div>{usage.planKey === "basic" ? "Basic pricing applies." : `${usage.planKey === "growth" ? "Growth" : "Enterprise"} pricing ends ${new Date(usage.pricingEndsAt).toLocaleDateString("en-GB")}; Basic rates apply afterwards.`}</div>
+        {usage.paidCreditExpiresAt && <div>Purchased credit expires {new Date(usage.paidCreditExpiresAt).toLocaleDateString("en-GB")}.</div>}
+        <div>Development credit is spent first at Basic rates. Metric costs below retain the rates charged at the time.</div>
+      </div>}
+
       {loading ? (
         <div>
           <div style={styles.twoCol}>

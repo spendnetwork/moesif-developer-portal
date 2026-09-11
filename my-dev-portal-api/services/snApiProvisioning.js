@@ -449,6 +449,12 @@ function updateSnApiSubscriptionStatus(subscription, customerId) {
 }
 
 module.exports = {
+  migrateWallet: body => snApiKeyRequest("/api/v3/developer-portal/wallet/migrate", { method: "POST", body }),
+  flagWalletPaymentReview: body => snApiKeyRequest("/api/v3/developer-portal/wallet/payment-review", { method: "POST", body }),
+  createWalletPurchase: body => snApiKeyRequest("/api/v3/developer-portal/wallet/purchases", { method: "POST", body }),
+  confirmWalletPayment: (id, body) => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases/${encodeURIComponent(id)}/confirm`, { method: "POST", body }),
+  listWalletPurchases: user => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases?auth0_user_id=${encodeURIComponent(user.sub)}`),
+  getWalletPurchase: (user, id) => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases/${encodeURIComponent(id)}?auth0_user_id=${encodeURIComponent(user.sub)}`),
   provisionSnApiCustomer,
   provisionSnApiPrepaidCustomer,
   checkSnApiEmailAvailability,

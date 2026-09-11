@@ -32,7 +32,7 @@ const STRIPE_PREVIEW_CACHE_TTL_MS = 3 * 60 * 1000;
 const stripePreviewCache = new Map();
 const stripePreviewInflight = new Map();
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"];
-const BASIC_TOP_UP_MIN_AMOUNT_GBP = 100;
+const BASIC_TOP_UP_MIN_AMOUNT_GBP = 50;
 const PLAN_RANK = { basic: 0, growth: 1, enterprise: 2 };
 const PLAN_CHANGE_INVOICE_DAYS = Number.parseInt(
   process.env.PLAN_CHANGE_INVOICE_DAYS || "14",
@@ -1962,6 +1962,7 @@ async function grantCommitmentFromInvoice(invoice) {
 }
 
 module.exports = {
+  getOrCreateStripeCustomerId,
   verifyStripeSession,
   constructStripeEvent,
   grantCommitmentFromInvoice,

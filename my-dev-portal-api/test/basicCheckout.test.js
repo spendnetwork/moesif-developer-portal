@@ -16,15 +16,15 @@ const { createBasicCreditCheckoutSession } = require("../services/stripeApis");
 require.cache[stripePath].exports = Stripe;
 
 for (const purchaseType of ["basic_activation", "basic_credit_top_up"]) {
-  test(`${purchaseType} rejects new payments below GBP 100 before creating Checkout`, async () => {
+  test(`${purchaseType} rejects new payments below GBP 50 before creating Checkout`, async () => {
     const before = calls.length;
-    for (const amount of [0, -1, "", "invalid", 1, 50, 99.99, 100.001, Infinity]) {
+    for (const amount of [0, -1, "", "invalid", 1, 49.99, 50.001, Infinity]) {
       await assert.rejects(createBasicCreditCheckoutSession(authUser.email, "prod_basic", amount, purchaseType, authUser, "request"));
     }
     assert.equal(calls.length, before);
   });
   test(`${purchaseType} is a one-off payment on the existing product with no free credit`, async () => {
-    for (const amount of [100, 100.01, 250]) {
+    for (const amount of [50, 50.01, 100, 250]) {
       await createBasicCreditCheckoutSession(authUser.email, "prod_basic", amount, purchaseType, authUser, "request",
         { current_plan_key: "development", current_subscription_id: "prepaid_dev" });
       const [payload, options] = calls.at(-1);

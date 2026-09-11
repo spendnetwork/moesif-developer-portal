@@ -44,6 +44,7 @@ async function grantDevelopmentAllowance(body, headerRequestId, deps) {
   // subscription keeps retries identical even if the customer changes plans.
   const sourceReference = `admin-development:${grant.requestId}`;
   const credit = await deps.grantSnApiDevelopmentCredit({
+    wallet_mode: true,
     source_reference: sourceReference,
     auth0_user_id: grant.auth0UserId,
     organization_id: grant.organizationId,

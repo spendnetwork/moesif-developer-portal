@@ -497,10 +497,31 @@ async function requireActiveSubscription(req, res, next) {
   return next();
 }
 
+const { installWalletRoutes } = require("./services/walletRoutes");
+const walletPayments = installWalletRoutes(app, {
+  auth: portalAuthMiddleware, jsonParser, serviceTokenMatches,
+  invalidate: invalidatePortalContext,
+  deps: {
+    ...require("./services/snApiProvisioning"),
+    getOrCreateStripeCustomerId: require("./services/stripeApis").getOrCreateStripeCustomerId,
+    stripe: require("stripe")(process.env.STRIPE_API_KEY),
+    frontendOrigin: getFrontendOrigin(),
+  },
+});
+
 app.post(
   "/create-stripe-checkout-session",
   portalAuthMiddleware,
   async (req, res) => {
+    try {
+      const context = await getSnApiPortalContext(req.user);
+      if (context.wallet_enabled) return res.status(409).json({
+        code: "wallet_purchase_required",
+        message: "Use the credit purchase page for this prepaid wallet.",
+      });
+    } catch {
+      return res.status(503).json({ code: "billing_context_unavailable", message: "Your billing account could not be verified. No checkout was created." });
+    }
     const planId = req.query?.plan_id;
     const email = req.user?.email;
     const suppliedRequestId = req.query?.request_id;
@@ -1254,7 +1275,10 @@ app.post(
       event.type === "checkout.session.async_payment_succeeded"
     ) {
       try {
-        if (isBasicCreditSession(event.data.object)) {
+        if (event.data.object.metadata?.purchase_type === "wallet_credit") {
+          await walletPayments.reconcile(event.data.object.id, null);
+          invalidateUsageSummary();
+        } else if (isBasicCreditSession(event.data.object)) {
           await reconcileBasicCreditPurchase(
             event.data.object,
             null,
@@ -1287,6 +1311,14 @@ app.post(
       } catch (planChangeError) {
         console.error("Paid invoice plan-change processing failed", planChangeError);
         return res.status(500).json({ message: "Plan change processing failed" });
+      }
+    }
+
+    if (["charge.refunded", "charge.dispute.created"].includes(event.type)) {
+      try { await walletPayments.review(event); invalidateUsageSummary(); }
+      catch (error) {
+        console.error("Wallet payment review failed", safeBillingError(error, event.id));
+        return res.status(500).json({ message: "Payment review pending" });
       }
     }
 
@@ -1557,6 +1589,11 @@ app.post(
     let orphanSubscriptionId = null;
     try {
       const session = await verifyStripeSession(checkoutSessionId);
+      if (session.metadata?.purchase_type === "wallet_credit") {
+        const result = await walletPayments.reconcile(session.id, req.user);
+        invalidatePortalContext(req.user.sub);
+        return res.status(201).json(result);
+      }
       if (isBasicCreditSession(session)) {
         const reconciled = await reconcileBasicCreditPurchase(
           session,

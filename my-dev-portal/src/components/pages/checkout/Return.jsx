@@ -38,7 +38,7 @@ function Return() {
   const [loading, setLoading] = useState(false);
   const [provisionError, setProvisionError] = useState(null);
   const [registrationAttempt, setRegistrationAttempt] = useState(0);
-  const { idToken } = useAuthCombined();
+  const { idToken, userEmail } = useAuthCombined();
 
   const urlParams = new URLSearchParams(window.location.search);
   const sessionId = urlParams.get("session_id");
@@ -57,6 +57,14 @@ function Return() {
     setProvisionError(null);
     registerStripePurchase(sessionId, idToken)
       .then((data) => {
+        if (data?.status === "complete" && data?.purchase_type === "wallet_credit") {
+          const key = `wallet-purchase:${userEmail}:credit`;
+          const stored = sessionStorage.getItem(key);
+          if (stored) {
+            try { if (JSON.parse(stored).requestId === data.purchase?.request_id) sessionStorage.removeItem(key); }
+            catch { /* Keep an unreadable request for support reconciliation. */ }
+          }
+        }
         if (!cancelled) setResult(data);
       })
       .catch((error) => {
@@ -71,11 +79,15 @@ function Return() {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, idToken, purchaseType, registrationAttempt]);
+  }, [sessionId, idToken, purchaseType, registrationAttempt, userEmail]);
 
   if (loading) return <PageLoader />;
 
   if (result?.status === "complete") {
+    if (result.purchase_type === "wallet_credit") return <PageLayout>
+      <h1>Credit added</h1><p>Your payment is confirmed and your prepaid balance is ready.</p>
+      <Link to="/dashboard">View usage and credit</Link><p><Link to="/keys">Manage API keys</Link></p>
+    </PageLayout>;
     return (
       <PageLayout>
         <h1>

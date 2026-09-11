@@ -61,7 +61,7 @@ function SubDisplay({ sub, plans, onManage }) {
   const period = isDevelopment
     ? "Credit to build and test your integration, at Basic rates. No payment required."
     : isPurePrepaid
-    ? "Prepaid credit. £100 minimum per purchase; no recurring charges or overage."
+    ? "Prepaid credit. £50 minimum per purchase; no recurring charges or overage."
     : `Billing period ${formatIsoTimestamp(
         sub.current_period_start
       )} – ${formatIsoTimestamp(sub.current_period_end)}`;
@@ -99,6 +99,11 @@ function SubDisplay({ sub, plans, onManage }) {
             </span>
           </div>
           <div style={{ fontSize: 13.5, color: C.muted }}>{period}</div>
+          {sub.wallet_enabled && <div style={{ fontSize: 13.5, color: C.muted, marginTop: 8 }}>
+            <p>{sub.plan_key === "basic" ? "Basic pricing applies by default." : `${sub.plan_key === "growth" ? "Growth" : "Enterprise"} pricing until ${formatIsoTimestamp(sub.pricing_ends_at)}. Basic rates apply afterwards.`}</p>
+            {sub.paid_credit_expires_at && <p>Purchased credit expires {formatIsoTimestamp(sub.paid_credit_expires_at)}.</p>}
+            <p>Development credit is separate and is always spent at Basic rates.</p>
+          </div>}
         </div>
         <button
           type="button"

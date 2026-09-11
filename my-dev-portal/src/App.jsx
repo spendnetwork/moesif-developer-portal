@@ -9,6 +9,7 @@ import Return from "./components/pages/checkout/Return";
 import Plans from "./components/pages/plans/Plans";
 import Home from "./components/pages/home/Home";
 import Checkout from "./components/pages/checkout/Checkout";
+import CreditPurchase from "./components/pages/checkout/CreditPurchase";
 import Subscription from "./components/pages/subscription/Subscription";
 import Welcome from "./components/pages/welcome/Welcome";
 import { PageFooter } from "./components/page-footer";
@@ -30,6 +31,7 @@ function App() {
                   (unauthenticated) context. */}
               <Route path="/" element={<Home />} />
               <Route path="/plans" element={<Plans />} />
+              <Route path="/credit" element={<AuthenticationGuard component={CreditPurchase} />} />
               <Route
                 path="/checkout"
                 element={<AuthenticationGuard component={Checkout} />}

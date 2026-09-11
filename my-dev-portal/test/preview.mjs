@@ -11,11 +11,15 @@ const empty = { granted_gbp_pence: 0, remaining_gbp_pence: 0, spendable_gbp_penc
 const plans = ["basic", "growth", "enterprise"].map(key => ({ id: `prod_${key}`, name: key, status: "active", metadata: { plan_key: key } }));
 
 export function fixture(fixtureName) {
-  const plan = fixtureName === "unprovisioned" ? null : fixtureName.startsWith("basic") ? "basic" : "development";
+  const walletTier = fixtureName.startsWith("wallet-") ? fixtureName.slice(7) : null;
+  const plan = walletTier || (fixtureName === "unprovisioned" ? null : fixtureName.startsWith("basic") ? "basic" : "development");
   const exhausted = fixtureName.includes("exhausted");
   const paused = fixtureName.includes("paused");
   const balance = { ...empty, granted_gbp_pence: 10010, remaining_gbp_pence: exhausted ? 0 : 9620, eligible_gbp_pence: exhausted ? 0 : 9620, spendable_gbp_pence: exhausted || paused ? 0 : 9620 };
   return { prepaid_enabled: true, plan_key: plan, subscription_id: plan ? `prepaid_${plan}` : null, debit_owner: plan ? "api" : null, currency: "GBP",
+    wallet_enabled: Boolean(walletTier), has_activated_paid_plan: Boolean(walletTier),
+    pricing_ends_at: walletTier && walletTier !== "basic" ? "2027-09-01T00:00:00Z" : null,
+    paid_credit_expires_at: walletTier ? "2027-09-07T00:00:00Z" : null,
     balances: { development: plan === "development" ? balance : empty, commercial: plan === "basic" ? balance : empty, legacy: empty },
     historical_balances: { development: empty, commercial: empty, legacy: empty },
     usage: { cost_gbp_pence: exhausted ? 10010 : 390, from: "2026-09-01T00:00:00Z", to: "2026-09-07T12:00:00Z", measurements: { api_call_quantity: exhausted ? 100 : 10, records_returned: exhausted ? 570 : 10, aggregate_call_quantity: 0, attachment_list_quantity: 0, attachment_download_quantity: 0 }, cost_by_metric_gbp_pence: { api_call_quantity: exhausted ? 2600 : 260, records_returned: exhausted ? 7410 : 130, aggregate_call_quantity: 0, attachment_list_quantity: 0, attachment_download_quantity: 0 } },
@@ -43,7 +47,8 @@ const server = await createServer({
         if (req.method !== 'GET') { res.statusCode = 403; return res.end(JSON.stringify({ message: 'Payments and mutations disabled in local preview' })); }
         const result = {
           '/plans': { hits: plans }, '/plan-change': null,
-          '/portal-context': { current_plan_key: snapshot.plan_key, current_subscription_id: snapshot.subscription_id, billing_status: snapshot.plan_key ? 'active' : null, debit_owner: snapshot.debit_owner, access_paused: name.includes('paused'), access_block_reason: snapshot.access_block_reason },
+          '/portal-context': { current_plan_key: snapshot.plan_key, current_subscription_id: snapshot.subscription_id, billing_status: snapshot.plan_key ? 'active' : null, debit_owner: snapshot.debit_owner, access_paused: name.includes('paused'), access_block_reason: snapshot.access_block_reason, wallet_enabled: snapshot.wallet_enabled, has_activated_paid_plan: snapshot.has_activated_paid_plan },
+          '/wallet/purchases': { purchases: [] },
           '/subscriptions': snapshot.plan_key ? [localSubscription(snapshot)] : [], '/usage-summary': localUsageSummary(snapshot) || { hasSubscription: false },
           '/api-keys': { has_active_subscription: true, current_plan_key: snapshot.plan_key, active_count: 1, max_active_keys: 2,
             keys: [{ id: 1, name: 'Integration key', key_prefix: 'fixture_key_prefix', description: 'Development integration', created_at: '2026-09-01T00:00:00Z', age_days: 6, rotation_status: 'current' }] },

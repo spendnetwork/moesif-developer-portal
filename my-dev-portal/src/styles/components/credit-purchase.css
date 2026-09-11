@@ -1,0 +1,18 @@
+.credit-purchase { max-width: 720px; margin: 0 auto; padding: 36px 24px 64px; color: #23383a; }
+.credit-purchase header { margin: 24px 0 32px; }
+.credit-purchase h1 { font-size: 32px; line-height: 1.2; }
+.credit-purchase h2 { font-size: 22px; }
+.credit-purchase p { color: #526862; line-height: 1.6; }
+.credit-purchase form, .credit-purchase section { border-top: 1px solid #d7e1dc; padding-top: 24px; }
+.credit-purchase label { display: block; font-weight: 600; }
+.credit-purchase__amount { display: flex; align-items: center; gap: 12px; margin: 10px 0; font-size: 24px; }
+.credit-purchase__amount input { width: 100%; min-width: 0; padding: 12px; border: 1px solid #7a9187; border-radius: 6px; background: white; color: #23383a; font: inherit; }
+.credit-purchase dl { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr); gap: 16px; padding: 20px 0; border-block: 1px solid #d7e1dc; }
+.credit-purchase dd { margin: 0; overflow-wrap: anywhere; }
+.credit-purchase .credit-purchase__consent { display: flex; gap: 12px; align-items: flex-start; margin: 24px 0; font-weight: 400; line-height: 1.5; }
+.credit-purchase__consent input { margin-top: 5px; accent-color: #034737; }
+.credit-purchase button { border: 1px solid #034737; border-radius: 6px; background: #034737; color: white; padding: 14px 24px; min-height: 48px; font: inherit; cursor: pointer; }
+.credit-purchase button:disabled { background: #e4ebe7; border-color: #d0dbd5; color: #576c64; cursor: default; }
+.credit-purchase :focus-visible { outline: 3px solid #80a3bd; outline-offset: 3px; }
+.credit-purchase__error { padding: 14px; border-left: 3px solid #b7423b; background: #fff0ef; color: #8a2d28; }
+@media (max-width: 480px) { .credit-purchase { padding: 24px 18px 48px; } .credit-purchase h1 { font-size: 28px; } .credit-purchase button { width: 100%; } }

@@ -64,7 +64,7 @@ function BasicTopUpCheckout({ planId, idToken, purchaseType }) {
             min={BASIC_MINIMUM_GBP}
             step="0.01"
             inputMode="decimal"
-            placeholder="100.00"
+            placeholder="50.00"
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
             autoComplete="off"
@@ -72,7 +72,7 @@ function BasicTopUpCheckout({ planId, idToken, purchaseType }) {
           />
         </div>
         <p>
-          Minimum £100. No recurring fee; top up whenever you need more credit.
+          Minimum £50. No recurring fee; top up whenever you need more credit.
         </p>
       </div>
       {error && (
