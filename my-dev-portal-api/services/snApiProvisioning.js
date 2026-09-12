@@ -316,6 +316,16 @@ function rotateSnApiKey(authUser, apiKeyId) {
   );
 }
 
+function setSnApiKeyPaused(authUser, apiKeyId, paused) {
+  if (!authUser?.sub || !/^[1-9]\d*$/.test(String(apiKeyId)) || typeof paused !== "boolean") {
+    throw Object.assign(new Error("Invalid API key action"), { status: 422 });
+  }
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/portal-api-keys/${apiKeyId}/${paused ? "pause" : "resume"}`,
+    { method: "POST", body: { auth0_user_id: authUser.sub } }
+  );
+}
+
 function createSnApiPlanChange(authUser, planChange) {
   return snApiKeyRequest("/api/v3/developer-portal/plan-changes", {
     method: "POST",
@@ -469,6 +479,7 @@ module.exports = {
   createSnApiKey,
   revokeSnApiKey,
   rotateSnApiKey,
+  setSnApiKeyPaused,
   createSnApiPlanChange,
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,

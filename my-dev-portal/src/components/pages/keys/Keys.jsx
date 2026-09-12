@@ -8,6 +8,7 @@ import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { apiRequest, authedFetcher } from "../../../lib/portal-api";
+import "../../../styles/components/api-keys.css";
 
 const C = {
   green: "#034737",
@@ -69,8 +70,11 @@ function statusPill(rotationStatus) {
   return { label: "Active", color: "#17633C", background: "#E3F5E9", border: "#C4E7D2" };
 }
 
-function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
-  const pill = statusPill(apiKey.rotation_status);
+function KeyCard({ apiKey, onRotate, onRevoke, onPauseChange, onCopyPrefix, copiedId }) {
+  const paused = apiKey.is_active === false;
+  const pill = paused
+    ? { label: "Paused", color: C.muted, background: C.page, border: C.line }
+    : statusPill(apiKey.rotation_status);
   const showWarning = apiKey.rotation_status !== "current";
   const prefix = apiKey.key_prefix
     ? `${apiKey.key_prefix.slice(0, 18)}…`
@@ -85,7 +89,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
             <path d="M11 13L19 5M16.5 7.5l2 2M14.5 9.5l2 2" />
           </svg>
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="api-key-card-content">
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <span style={{ fontSize: 16, fontWeight: 500, color: C.head }}>
               {apiKey.name}
@@ -144,7 +148,7 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
             </div>
             <div style={styles.metaItem}>
               <span style={styles.metaLabel}>Status</span>
-              <span style={styles.metaValue}>Active</span>
+              <span style={styles.metaValue}>{paused ? "Paused" : "Active"}</span>
             </div>
             <div style={styles.metaItem}>
               <span style={styles.metaLabel}>Created</span>
@@ -152,13 +156,16 @@ function KeyCard({ apiKey, onRotate, onRevoke, onCopyPrefix, copiedId }) {
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "none" }}>
+        <div className="api-key-card-actions">
+          <button type="button" onClick={() => onPauseChange(apiKey)} className="btn-outline" style={styles.rotateOutline}>
+            {paused ? "Resume" : "Pause"}
+          </button>
           <button
             type="button"
             onClick={() => onRotate(apiKey)}
             disabled={!onRotate}
             className={showWarning ? "btn-solid" : "btn-outline"}
-            style={showWarning ? styles.rotateStrong : styles.rotateOutline}
+            style={{ ...(showWarning ? styles.rotateStrong : styles.rotateOutline), opacity: onRotate ? 1 : 0.5 }}
           >
             Rotate
           </button>
@@ -199,7 +206,7 @@ function Keys() {
   } = useSWR(keysKey, authedFetcher);
 
   const keys = keysData?.keys || [];
-  const maxKeys = keysData?.max_active_keys || 2;
+  const maxKeys = keysData?.max_keys || keysData?.max_active_keys || 2;
   const notProvisioned = keysError?.status === 404;
   const listError =
     keysError && keysError.status !== 404 ? keysError.message : "";
@@ -288,6 +295,23 @@ function Keys() {
     setModal(action);
   }
 
+  async function changeKeyState() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest(`/api-keys/${selectedKey.id}/${modal}`, idToken, { method: "POST" });
+      await mutateKeys(current => ({ ...current, keys: current.keys.map(key => key.id === result.id ? { ...key, ...result } : key) }), { revalidate: false });
+      setModal(null);
+      setSelectedKey(null);
+      await loadKeys();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function copyPrefix(apiKey) {
     const value = apiKey.key_prefix || `Key ID ${apiKey.id}`;
     if (copy(value)) {
@@ -326,7 +350,7 @@ function Keys() {
             API keys{!hardError ? ` (${keys.length})` : ""}
           </h1>
           <p style={{ margin: 0, fontSize: 15, color: C.muted }}>
-            Keys authenticate every request. Maximum two active keys.
+            Maximum two keys, active or paused.
           </p>
         </div>
         {!locked && !hardError && (
@@ -412,15 +436,16 @@ function Keys() {
                 <KeyCard
                   key={apiKey.id}
                   apiKey={apiKey}
-                  onRotate={locked ? undefined : (k) => openAction("rotate", k)}
+                  onRotate={locked || apiKey.is_active === false ? undefined : (k) => openAction("rotate", k)}
                   onRevoke={(k) => openAction("revoke", k)}
+                  onPauseChange={(k) => openAction(k.is_active === false ? "resume" : "pause", k)}
                   onCopyPrefix={copyPrefix}
                   copiedId={copiedId}
                 />
               ))}
               {atLimit && (
                 <p style={{ margin: "4px 0 0", fontSize: 12.5, color: C.muted }}>
-                  You have reached the maximum of two active keys. Revoke one to
+                  You have reached the maximum of two keys, active or paused. Revoke one to
                   create another.
                 </p>
               )}
@@ -541,6 +566,28 @@ function Keys() {
           </div>
         )}
 
+        {(modal === "pause" || modal === "resume") && (
+          <div>
+            <div style={styles.modalHead}>
+              <div style={styles.modalTitle}>{modal === "pause" ? "Pause" : "Resume"} {selectedKey?.name}?</div>
+            </div>
+            <div style={styles.modalBody}>
+              {error && <div style={styles.inlineError} role="alert">{error}</div>}
+              <p style={{ margin: 0, fontSize: 14, color: C.body, lineHeight: 1.55 }}>
+                {modal === "pause"
+                  ? "New requests using this key will be rejected. You can resume the same key later; its permissions and expiry will not change."
+                  : "The same key will be enabled again. Your account permissions, available credit and expiry still apply."}
+              </p>
+            </div>
+            <div style={styles.modalActions}>
+              <button type="button" disabled={busy} onClick={closeModal} className="btn-outline" style={styles.outlineBtn}>Cancel</button>
+              <button type="button" disabled={busy} onClick={changeKeyState} className="btn-solid" style={styles.primaryBtn}>
+                {busy ? "Saving..." : modal === "pause" ? "Pause key" : "Resume key"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {modal === "revoke" && (
           <div>
             <div style={styles.modalHead}>
@@ -615,6 +662,8 @@ const styles = {
     justifyContent: "center",
   },
   prefixChip: {
+    maxWidth: "100%",
+    overflowWrap: "anywhere",
     fontFamily: "'Fira Code', monospace",
     fontSize: 13,
     color: C.body,

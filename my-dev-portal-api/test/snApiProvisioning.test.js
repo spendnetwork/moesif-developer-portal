@@ -6,7 +6,36 @@ const {
   provisionSnApiLocalPrepaidCustomer,
   registerSnApiPaidCredit,
   getSnApiUsageSummary,
+  setSnApiKeyPaused,
 } = require("../services/snApiProvisioning");
+
+test("pause and resume send authenticated identity and validate key ids", async (t) => {
+  const env = { ...process.env };
+  process.env.SN_API_BASE_URL = "https://api.example.test";
+  process.env.SN_API_PROVISIONING_TOKEN = "fixture-token";
+  t.after(() => {
+    for (const name of ["SN_API_BASE_URL", "SN_API_PROVISIONING_TOKEN"]) {
+      if (env[name] === undefined) delete process.env[name]; else process.env[name] = env[name];
+    }
+  });
+  const calls = [];
+  t.mock.method(global, "fetch", async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ id: 7, is_active: url.endsWith("resume") }) };
+  });
+  for (const paused of [true, false]) {
+    const result = await setSnApiKeyPaused({ sub: "auth0|owner" }, "7", paused);
+    assert.equal(result.is_active, !paused);
+  }
+  assert.equal(calls[0].url, "https://api.example.test/api/v3/developer-portal/portal-api-keys/7/pause");
+  assert.equal(calls[1].url.endsWith("/7/resume"), true);
+  assert.deepEqual(JSON.parse(calls[0].options.body), { auth0_user_id: "auth0|owner" });
+  assert.equal(calls[0].options.headers["X-Developer-Portal-Token"], "fixture-token");
+  for (const id of ["../1", "7?auth0_user_id=other", "0", "7/resume"]) {
+    assert.throws(() => setSnApiKeyPaused({ sub: "auth0|owner" }, id, true), { status: 422 });
+  }
+  assert.equal(calls.length, 2);
+});
 
 test("registers an Auth0 account with SN API before billing", async (t) => {
   const originalFetch = global.fetch;

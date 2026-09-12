@@ -1,0 +1,25 @@
+.api-key-card-content {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.api-key-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+}
+
+@media (max-width: 600px) {
+  .api-key-card-content {
+    flex-basis: calc(100% - 62px);
+  }
+
+  .api-key-card-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    width: 100%;
+  }
+}

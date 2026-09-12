@@ -56,6 +56,7 @@ const {
   createSnApiKey,
   revokeSnApiKey,
   rotateSnApiKey,
+  setSnApiKeyPaused,
   createSnApiPlanChange,
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,
@@ -1813,6 +1814,18 @@ app.delete("/api-keys/:api_key_id", portalAuthMiddleware, async function (req, r
     sendKeyManagementError(res, error);
   }
 });
+
+for (const action of ["pause", "resume"]) {
+  app.post(`/api-keys/:api_key_id/${action}`, portalAuthMiddleware, async (req, res) => {
+    try {
+      // Key state never grants billing access; the API independently enforces
+      // account status, current permissions and available credit on requests.
+      res.status(200).json(await setSnApiKeyPaused(req.user, req.params.api_key_id, action === "pause"));
+    } catch (error) {
+      sendKeyManagementError(res, error);
+    }
+  });
+}
 
 app.post(
   "/api-keys/:api_key_id/rotate",

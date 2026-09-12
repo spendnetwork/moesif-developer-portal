@@ -33,6 +33,7 @@ function harness({ ledgerFailure = false, ledgerStatus = 503, currentPlan = "dev
     createSnApiManualCommitment: async (_user, payload) => { calls.push(["commitment", payload]); return { status: "awaiting_invoice", amount_gbp_pence: payload.to_plan_key === "growth" ? 500000 : 1200000 }; },
     getSnApiUsageSummary: async () => { calls.push("ledger"); if (ledgerFailure) throw Object.assign(new Error("Ledger unavailable"), { status: ledgerStatus }); return snapshot; },
     listSnApiKeys: async () => ({ keys: [{ id: 1, name: "Existing integration" }], max_active_keys: 2 }),
+    setSnApiKeyPaused: async (user, id, paused) => { calls.push({ user, id, paused }); return { id: Number(id), is_active: !paused }; },
   };
   const appPath = path.resolve(__dirname, "../app.js");
   const realRequire = createRequire(appPath);
@@ -78,6 +79,20 @@ test("exhausted development subscriptions, keys and usage stay readable without 
   assert.equal(usage.body.credit.remaining, 0);
   assert.equal(usage.body.debitOwner, "api");
   assert.ok(server.calls.every(call => call === "ledger"));
+});
+
+test("pause and resume bind actions to the signed-in user, ignoring supplied identity", async () => {
+  const server = harness();
+  for (const action of ["pause", "resume"]) {
+    const response = await server.request("post", `/api-keys/:api_key_id/${action}`, {
+      params: { api_key_id: "7" }, body: { auth0_user_id: "attacker", is_active: true },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.is_active, action === "resume");
+  }
+  assert.equal(server.calls.length, 2);
+  assert.equal(server.calls[0].user.sub, "auth0|dev");
+  assert.equal(server.calls[0].paused, true);
 });
 
 test("admin grant endpoint rejects public callers before any API calls", async () => {
