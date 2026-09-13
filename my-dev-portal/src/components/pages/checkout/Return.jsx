@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { PageLayout } from "../../page-layout";
+import PurchaseResult from "../../purchase-result";
 import noPriceIcon from "../../../images/icons/empty-state-price.svg";
 import NoticeBox from "../../notice-box";
 import useAuthCombined from "../../../hooks/useAuthCombined";
@@ -85,8 +86,17 @@ function Return() {
 
   if (result?.status === "complete") {
     if (result.purchase_type === "wallet_credit") return <PageLayout>
-      <h1>Credit added</h1><p>Your payment is confirmed and your prepaid balance is ready.</p>
-      <Link to="/dashboard">View usage and credit</Link><p><Link to="/keys">Manage API keys</Link></p>
+      <PurchaseResult
+        titleTag="h1"
+        status="success"
+        title="Credit added"
+        description="Your payment is confirmed and your prepaid balance is ready."
+        amountPence={result.purchase?.amount_gbp_pence}
+        reference={result.purchase?.request_id}
+      >
+        <Link to="/dashboard" className="purchase-result__button">View usage and credit</Link>
+        <Link to="/keys" className="purchase-result__button purchase-result__button--outline">Manage API keys</Link>
+      </PurchaseResult>
     </PageLayout>;
     return (
       <PageLayout>

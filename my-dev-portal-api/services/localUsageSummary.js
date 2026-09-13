@@ -44,6 +44,18 @@ function localUsageSummary(snapshot) {
   const remaining = balance.eligible_gbp_pence == null
     ? Math.max(0, totalRemaining - expired)
     : nonnegative(balance.eligible_gbp_pence);
+  const periodStart = unix(snapshot.usage?.from || snapshot.current_period_start);
+  // `current_period_end` only describes a real, bounded pricing term (Growth
+  // or Enterprise wallet pricing). It can be left over from a term that has
+  // already lapsed -- e.g. pricing reverted to Basic but the stored end date
+  // was not cleared in time -- in which case it stops advancing and would
+  // otherwise render as a period that appears to start and end on the same
+  // day. Only trust it when it is still ahead of the period start; otherwise
+  // show the actual settlement window, up to now.
+  const rawPeriodEnd = snapshot.current_period_end ? unix(snapshot.current_period_end) : null;
+  const periodEnd = rawPeriodEnd != null && periodStart != null && rawPeriodEnd > periodStart
+    ? rawPeriodEnd
+    : unix(snapshot.usage?.to);
   const accrued = nonnegative(snapshot.usage?.cost_gbp_pence);
   const costs = snapshot.usage?.cost_by_metric_gbp_pence;
   const cost = key => costs?.[key] == null ? null : nonnegative(costs[key]);
@@ -68,7 +80,7 @@ function localUsageSummary(snapshot) {
     billingModel: snapshot.plan_key === "development" ? "development_allowance" : snapshot.billing_provider === "manual" ? "annual_commitment" : "prepaid_credit",
     debitOwner: snapshot.debit_owner,
     currency: "GBP",
-    period: { start: unix(snapshot.usage?.from || snapshot.current_period_start), end: unix(snapshot.current_period_end || snapshot.usage?.to) },
+    period: { start: periodStart, end: periodEnd },
     accrued,
     overage: nonnegative(snapshot.usage?.overage_gbp_pence ?? 0),
     lines,

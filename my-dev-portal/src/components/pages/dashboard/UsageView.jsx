@@ -158,6 +158,15 @@ export default function UsageView({
             <Skeleton w="60%" h={14} />
           </div>
         </div>
+      ) : usage?.hasSubscription === false ? (
+        <div style={styles.metricCard}>
+          <div style={{ fontSize: 15, fontWeight: 500, color: C.head }}>
+            No plan selected yet
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 13, color: C.muted }}>
+            Usage and credit will appear here once you choose a plan.
+          </p>
+        </div>
       ) : usage ? (
         <div>
           <div style={styles.twoCol}>
@@ -168,7 +177,7 @@ export default function UsageView({
               </div>
               <div style={styles.metricSub}>
                 {usage?.period?.start && usage?.period?.end
-                  ? `${formatDate(usage.period.start)} – ${formatDate(
+                  ? `${formatDate(usage.period.start, true)} – ${formatDate(
                       usage.period.end,
                       true
                     )}`

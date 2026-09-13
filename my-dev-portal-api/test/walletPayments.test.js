@@ -36,6 +36,18 @@ test("wallet amounts reject rounding, coercion and amounts below GBP50", () => {
   assert.equal(amountPence(50.01), 5001);
 });
 
+test("admin creation reuses verified context and rejects malformed or mismatched API receipts", async () => {
+  const { id, deps } = setup();
+  deps.getSnApiPortalContext = async () => { throw new Error("Duplicate lookup"); };
+  const input = { requestId: id, purchaseKind: "growth", amountGbp: 5000 };
+  const receipt = await createPurchase(user, input, deps, "admin@example.test", { organization_id: 12 });
+  assert.equal(receipt.organization_id, 12);
+  for (const bad of [null, {}, { ...receipt, organization_id: 99 }, { ...receipt, status: "unknown" }]) {
+    deps.createWalletPurchase = async () => bad;
+    await assert.rejects(createPurchase(user, input, deps, "admin@example.test", { organization_id: 12 }), { code: "invalid_purchase_response" });
+  }
+});
+
 test("refund review binds a verified PaymentIntent to the API organisation", async () => {
   const { id, deps } = setup();
   const reviews = [];
@@ -74,7 +86,7 @@ test("exact packages and large credit purchases request an invoice without conta
 });
 test("old uncertain card requests cannot create a second Checkout after idempotency expires", async () => {
   const { id, calls, deps } = setup();
-  deps.createWalletPurchase = async () => ({ status: "awaiting_payment", payment_provider: "stripe", created_at: new Date(Date.now() - 86400000).toISOString() });
+  deps.createWalletPurchase = async payload => ({ ...payload, status: "awaiting_payment", payment_provider: "stripe", created_at: new Date(Date.now() - 86400000).toISOString() });
   await assert.rejects(createPurchase(user, { requestId: id, purchaseKind: "credit", amountGbp: 50 }, deps), { code: "wallet_checkout_review_required" });
   assert.equal(calls.length, 0);
 });

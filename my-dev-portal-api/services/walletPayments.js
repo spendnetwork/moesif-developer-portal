@@ -20,7 +20,7 @@ function requestIdentity(id) {
   return id;
 }
 
-async function createPurchase(user, input, deps, actor = null) {
+async function createPurchase(user, input, deps, actor = null, verifiedContext = null) {
   const id = requestIdentity(input.requestId);
   const kind = input.purchaseKind;
   if (!["credit", "growth", "enterprise"].includes(kind)) throw failure("invalid_purchase_kind", "Choose credit, Growth or Enterprise.", 422);
@@ -28,12 +28,18 @@ async function createPurchase(user, input, deps, actor = null) {
   if ((kind === "growth" && amount !== 500000) || (kind === "enterprise" && amount !== 1200000)) {
     throw failure("invalid_package_amount", "Growth is GBP 5,000; Enterprise is GBP 12,000.", 422);
   }
-  const context = await deps.getSnApiPortalContext(user);
+  const context = verifiedContext || await deps.getSnApiPortalContext(user);
   const purchase = await deps.createWalletPurchase({
     request_id: id, auth0_user_id: user.sub, organization_id: context.organization_id,
     purchase_kind: kind, payment_provider: amount >= 500000 ? "invoice" : "stripe",
     amount_gbp_pence: amount, requested_by: actor || user.sub,
   });
+  if (!purchase || purchase.request_id !== id || purchase.organization_id !== context.organization_id ||
+      purchase.purchase_kind !== kind || purchase.amount_gbp_pence !== amount ||
+      purchase.payment_provider !== (amount >= 500000 ? "invoice" : "stripe") ||
+      !["awaiting_payment", "paid"].includes(purchase.status)) {
+    throw failure("invalid_purchase_response", "The purchase could not be verified. Retry the same request; do not make another payment.", 502);
+  }
   if (purchase.status === "paid" || purchase.payment_provider === "invoice") return purchase;
   // Stripe's idempotency retention is finite. An old unconfirmed request must
   // be reconciled, never silently submitted as a fresh card charge.

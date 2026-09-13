@@ -7,7 +7,31 @@ const {
   registerSnApiPaidCredit,
   getSnApiUsageSummary,
   setSnApiKeyPaused,
+  getSnApiPortalContext,
 } = require("../services/snApiProvisioning");
+
+test("API transport reports safe connection and response-body diagnostics without leaking identities", async (t) => {
+  const env = { ...process.env };
+  process.env.SN_API_BASE_URL = "https://api.example.test";
+  process.env.SN_API_PROVISIONING_TOKEN = "private-fixture-token";
+  t.after(() => {
+    for (const name of ["SN_API_BASE_URL", "SN_API_PROVISIONING_TOKEN"]) {
+      if (env[name] === undefined) delete process.env[name]; else process.env[name] = env[name];
+    }
+  });
+  const logs = [];
+  t.mock.method(console, "warn", message => logs.push(JSON.parse(message)));
+  const transport = t.mock.method(global, "fetch", async () => {
+    throw Object.assign(new TypeError("fetch failed with private-fixture-token"), { cause: { code: "ECONNRESET" } });
+  });
+  await assert.rejects(getSnApiPortalContext({ sub: "auth0|private-user" }), { status: 503, code: "sn_api_unavailable" });
+  transport.mock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("Truncated private response"); } }));
+  await assert.rejects(getSnApiPortalContext({ sub: "auth0|private-user" }), { status: 503, code: "sn_api_unavailable" });
+  assert.deepEqual(logs.map(log => log.phase), ["connection", "response_body"]);
+  assert.deepEqual(logs.map(log => log.errorCode), ["ECONNRESET", "SyntaxError"]);
+  for (const log of logs) assert.equal(log.path, "/api/v3/developer-portal/portal-context");
+  assert.equal(JSON.stringify(logs).includes("private"), false);
+});
 
 test("pause and resume send authenticated identity and validate key ids", async (t) => {
   const env = { ...process.env };

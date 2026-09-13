@@ -10,12 +10,24 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
       prepaid_not_enabled: "Prepaid purchases have not been enabled on the API yet. No credit was added.",
       invalid_credit_amount: "The minimum credit purchase is GBP 50. Enter an amount with at most two decimal places.",
       invalid_payment_time: "Enter the actual cleared payment date, not a future date. No credit was added.",
+      invalid_payment_reference: "Enter a valid payment reference for this purchase.",
       wallet_checkout_review_required: "This earlier checkout needs a payment review. Contact our team before paying again.",
       migration_balance_changed: "The balance differs from the reviewed amount. Refresh and reconcile it before continuing.",
       pause_access_before_migration: "Pause API access before confirming this migration.",
       pending_usage_requires_reconciliation: "Outstanding usage must be reconciled before migration.",
       resolve_pending_plan_changes: "Resolve the pending plan changes or invoices before migration.",
       migration_subscription_conflict: "The current subscription has changed. Refresh and review it before migration.",
+      // Confirmation-specific: distinct, actionable outcomes instead of the
+      // generic "we could not confirm this purchase" fallback below.
+      purchase_not_found: "This purchase could not be found. Refresh and try again.",
+      purchase_not_payable: "This purchase has already been confirmed or is no longer awaiting payment. Refresh to see its current status.",
+      payment_amount_mismatch: "The confirmed amount no longer matches this purchase. Refresh and try again.",
+      stripe_customer_conflict: "This payment is linked to a different Stripe customer. Contact our team before retrying.",
+      payment_already_recorded: "This payment reference has already been recorded against another purchase. Check the invoice reference.",
+      billing_context_changed: "This organisation's billing has changed since the purchase was created. Refresh and review it before confirming.",
+      billing_inactive: "This organisation's billing is not active. Resolve that before confirming payment.",
+      credit_reconciliation_required: "This account's credit balance needs review before more credit can be added. Contact engineering.",
+      credit_limit_exceeded: "This purchase would exceed the maximum storable credit. Contact our team before retrying.",
     };
     return res.status(error.status >= 400 && error.status <= 599 ? error.status : 503).json({ code,
       message: messages[code] || (error.status === 422 ? "Check the entered values. This request was rejected before changing credit." : "We could not confirm this purchase. Retry the same request; do not make another payment.") });
@@ -41,13 +53,13 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
   app.post("/admin/wallet-purchases", admin, jsonParser, async (req, res) => {
     try {
       const user = { sub: req.body.auth0UserId };
-      const context = await deps.getSnApiPortalContext(user);
+      const context = await deps.getSnApiPortalContext(user, { timeoutMs: 10000 });
       if (!req.body.requested_by || Number(context.organization_id) !== req.body.organizationId) {
-        return res.status(409).json({ code: "organization_identity_mismatch" });
+        return res.status(409).json({ code: "organization_identity_mismatch", message: "This request does not match the expected organisation. Refresh and try again." });
       }
       // Small purchases are self-service card payments, never an admin grant.
-      if (req.body.amountGbp < 5000) return res.status(422).json({ code: "card_purchase_required" });
-      const result = await createPurchase(user, req.body, deps, req.body.requested_by);
+      if (req.body.amountGbp < 5000) return res.status(422).json({ code: "card_purchase_required", message: "Invoice purchases start at GBP 5,000. Amounts below that are a self-service card payment in the developer portal." });
+      const result = await createPurchase(user, req.body, deps, req.body.requested_by, context);
       invalidate(user.sub);
       res.json(result);
     } catch (error) { respondError(res, error); }
@@ -56,7 +68,7 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
     try {
       const user = { sub: req.body.auth0UserId };
       const context = await deps.getSnApiPortalContext(user);
-      if (context.organization_id !== req.body.organizationId) return res.status(409).json({ code: "organization_identity_mismatch" });
+      if (context.organization_id !== req.body.organizationId) return res.status(409).json({ code: "organization_identity_mismatch", message: "This request does not match the expected organisation. Refresh and try again." });
       const result = await deps.migrateWallet({ request_id: requestIdentity(req.body.requestId),
         auth0_user_id: user.sub, organization_id: context.organization_id,
         expected_subscription_id: req.body.expectedSubscriptionId,
@@ -72,10 +84,10 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
       const user = { sub: req.body.auth0UserId };
       const context = await deps.getSnApiPortalContext(user);
       if (context.organization_id !== req.body.organizationId || !req.body.confirmedBy || req.body.fundsCleared !== true) {
-        return res.status(422).json({ code: "payment_confirmation_required" });
+        return res.status(422).json({ code: "payment_confirmation_required", message: "Confirm the invoice reference, payment date, and that funds have cleared before submitting." });
       }
       const purchase = await deps.getWalletPurchase(user, requestIdentity(req.params.id));
-      if (!purchase || purchase.payment_provider !== "invoice") return res.status(404).json({ code: "invoice_purchase_not_found" });
+      if (!purchase || purchase.payment_provider !== "invoice") return res.status(404).json({ code: "invoice_purchase_not_found", message: "This invoice purchase could not be found for this organisation." });
       const result = await deps.confirmWalletPayment(purchase.request_id, {
         organization_id: context.organization_id, payment_reference: req.body.invoiceReference,
         amount_gbp_pence: purchase.amount_gbp_pence, currency: "GBP",

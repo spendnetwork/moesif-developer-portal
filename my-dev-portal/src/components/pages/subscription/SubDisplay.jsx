@@ -52,6 +52,9 @@ function lineRate(price) {
 
 function SubDisplay({ sub, plans, onManage }) {
   const items = sub?.items || [];
+  // Subscription data can arrive before the optional catalogue (or while it
+  // is unavailable). Embedded prices must still render in that case.
+  const catalogue = Array.isArray(plans) ? plans : [];
 
   const status = String(sub.status || "active").toLowerCase();
   const tone = STATUS_TONE[status] || STATUS_TONE.active;
@@ -67,7 +70,7 @@ function SubDisplay({ sub, plans, onManage }) {
       )} – ${formatIsoTimestamp(sub.current_period_end)}`;
 
   const lines = items.map((item) => {
-    const foundPlan = plans.find((plan) => plan.id === item.plan_id);
+    const foundPlan = catalogue.find((plan) => plan.id === item.plan_id);
     const price =
       foundPlan?.prices?.find((p) => p.id === item.price_id) || item.price;
     return {
@@ -83,7 +86,7 @@ function SubDisplay({ sub, plans, onManage }) {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
             <span style={{ fontSize: 18, fontWeight: 500, color: C.head }}>
-              {sub.plan_key ? sub.plan_key.charAt(0).toUpperCase() + sub.plan_key.slice(1) : planName(items, plans)}
+              {sub.plan_key ? sub.plan_key.charAt(0).toUpperCase() + sub.plan_key.slice(1) : planName(items, catalogue)}
             </span>
             <span
               style={{

@@ -9,11 +9,11 @@ const requestTimeoutMs = Number.parseInt(
   10
 );
 
-function requestSignal() {
+function requestSignal(maximumMs = Infinity) {
   return AbortSignal.timeout(
-    Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+    Math.min(maximumMs, Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
       ? requestTimeoutMs
-      : 10000
+      : 10000)
   );
 }
 
@@ -199,20 +199,34 @@ async function checkSnApiEmailAvailability(authUser) {
   );
 }
 
-async function snApiKeyRequest(path, { method = "GET", body } = {}) {
+async function snApiKeyRequest(path, { method = "GET", body, timeoutMs } = {}) {
   const snApiBaseUrl = requireConfig("SN_API_BASE_URL", { url: true });
   const provisioningToken = requireConfig("SN_API_PROVISIONING_TOKEN");
-  const response = await fetch(`${snApiBaseUrl}${path}`, {
-    method,
-    signal: requestSignal(),
-    headers: {
-      "Content-Type": "application/json",
-      "X-Developer-Portal-Token": provisioningToken,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const responseBody =
-    response.status === 204 ? null : await response.json().catch(() => ({}));
+  const started = Date.now();
+  let response;
+  let responseBody;
+  try {
+    response = await fetch(`${snApiBaseUrl}${path}`, {
+      method,
+      signal: requestSignal(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Developer-Portal-Token": provisioningToken,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    responseBody = response.status === 204 ? null : await response.json();
+  } catch (cause) {
+    console.warn(JSON.stringify({ event: "sn_api_request_failed", method,
+      path: path.split("?")[0], phase: response ? "response_body" : "connection",
+      requestId: body?.request_id || null, durationMs: Date.now() - started,
+      errorCode: cause?.cause?.code || cause?.code || cause?.name || "unknown",
+    }));
+    throw Object.assign(new Error("The API service could not confirm the outcome. Retry the same request."), {
+      status: response?.status >= 400 && response.status < 500 ? response.status : 503,
+      code: "sn_api_unavailable",
+    });
+  }
   if (!response.ok) {
     const detail = responseBody?.detail;
     const error = new Error(
@@ -227,14 +241,14 @@ async function snApiKeyRequest(path, { method = "GET", body } = {}) {
   return responseBody;
 }
 
-async function getSnApiPortalContext(authUser) {
+async function getSnApiPortalContext(authUser, options = {}) {
   if (!authUser?.sub) {
     throw new Error("Authenticated Auth0 user id is required");
   }
   return snApiKeyRequest(
     `/api/v3/developer-portal/portal-context?auth0_user_id=${encodeURIComponent(
       authUser.sub
-    )}`
+    )}`, { timeoutMs: options.timeoutMs }
   );
 }
 
@@ -461,7 +475,7 @@ function updateSnApiSubscriptionStatus(subscription, customerId) {
 module.exports = {
   migrateWallet: body => snApiKeyRequest("/api/v3/developer-portal/wallet/migrate", { method: "POST", body }),
   flagWalletPaymentReview: body => snApiKeyRequest("/api/v3/developer-portal/wallet/payment-review", { method: "POST", body }),
-  createWalletPurchase: body => snApiKeyRequest("/api/v3/developer-portal/wallet/purchases", { method: "POST", body }),
+  createWalletPurchase: body => snApiKeyRequest("/api/v3/developer-portal/wallet/purchases", { method: "POST", body, timeoutMs: 10000 }),
   confirmWalletPayment: (id, body) => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases/${encodeURIComponent(id)}/confirm`, { method: "POST", body }),
   listWalletPurchases: user => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases?auth0_user_id=${encodeURIComponent(user.sub)}`),
   getWalletPurchase: (user, id) => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases/${encodeURIComponent(id)}?auth0_user_id=${encodeURIComponent(user.sub)}`),

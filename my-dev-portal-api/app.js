@@ -1544,6 +1544,13 @@ app.get("/usage-summary", portalAuthMiddleware, async (req, res) => {
       );
       return res.status(200).json(summary);
     }
+    if (!req.portalContext?.current_plan_key) {
+      // sn-api has no plan_key on file at all -- a freshly self-registered
+      // account that has not chosen (or been given) a plan yet. It has
+      // neither a local ledger row nor a Stripe customer, so the legacy
+      // lookup below would only ever fail for it; this is not an error.
+      return res.status(200).json({ hasSubscription: false });
+    }
     const summary = await getUsageSummary(req.user?.email, req.user, {
       userId: req.portalContext?.moesif_user_id,
       companyId: req.portalContext?.moesif_company_id,

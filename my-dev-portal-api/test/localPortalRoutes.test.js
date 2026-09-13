@@ -127,6 +127,14 @@ test("Development to Growth or Enterprise passes a full manual commitment reques
   }
 });
 
+test("a freshly registered account with no plan_key at all reports no subscription instead of crashing into the legacy Stripe lookup", async () => {
+  const server = harness({ currentPlan: null, debitOwner: null });
+  const usage = await server.request("get", "/usage-summary");
+  assert.equal(usage.status, 200);
+  assert.equal(usage.body.hasSubscription, false);
+  assert.ok(server.calls.every(call => call === "ledger"));
+});
+
 test("ledger failure never falls back to Stripe or hides existing keys", async () => {
   const server = harness({ ledgerFailure: true });
   assert.equal((await server.request("get", "/usage-summary")).status, 503);

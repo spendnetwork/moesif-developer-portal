@@ -45,7 +45,11 @@ try {
   for (const width of [1440, 1024, 768, 390, 320]) {
     const { page, purchases } = await pageFor(width);
     await page.goto(base + "/plans?fixture=unprovisioned");
-    await page.getByRole("button", { name: "Buy Growth", exact: true }).waitFor();
+    // Growth and Enterprise are contact-led now -- a mailto link, not a
+    // button into the self-service invoice-request form below.
+    const growthLink = page.getByRole("link", { name: "Email us about Growth", exact: true });
+    await growthLink.waitFor();
+    assert.match(await growthLink.getAttribute("href"), /^mailto:welcome@openopps\.com\?subject=/);
     await page.evaluate(() => document.fonts.ready);
     assert.deepEqual(await page.locator(".plan-option h2").allTextContents(), ["Basic", "Growth", "Enterprise"]);
     assert.equal(await page.getByRole("heading", { name: "Testing the API?" }).count(), 1);
@@ -54,10 +58,11 @@ try {
     if (width > 860) assert.equal(new Set(boxes.map(box => box.height)).size, 1);
     await noOverflow(page);
     await page.screenshot({ path: path.join(output, "wallet-plans-" + width + ".png"), fullPage: true });
-    await page.getByRole("button", { name: "Buy Growth", exact: true }).click();
-    await page.getByRole("heading", { name: "Buy Growth", exact: true }).waitFor();
-    assert.equal(await page.getByLabel("Credit amount (GBP)").inputValue(), "5000");
-    assert.equal(await page.getByLabel("Credit amount (GBP)").getAttribute("readonly"), "");
+    // The self-service invoice-request form is now only reachable through
+    // Basic -- exercise it there (a large top-up still routes to invoice).
+    await page.getByRole("button", { name: "Buy credit", exact: true }).click();
+    await page.getByRole("heading", { name: "Buy API credit" }).waitFor();
+    await page.getByLabel("Credit amount (GBP)").fill("5000");
     await page.getByRole("checkbox").check();
     await noOverflow(page);
     await page.screenshot({ path: path.join(output, "wallet-invoice-" + width + ".png"), fullPage: true });
@@ -76,8 +81,10 @@ try {
     assert.equal(await page.locator(".development-banner").count(), 0);
     if (tier === "enterprise") {
       assert.equal(await page.getByRole("button", { name: "Available after Enterprise ends" }).isDisabled(), true);
+      // Contact-led takes priority over the blocked-Growth state: a stale
+      // link to /credit?package=growth still just points back to email.
       await page.goto(base + "/credit?package=growth");
-      await page.getByRole("heading", { name: "Your Enterprise pricing is still active" }).waitFor();
+      await page.getByRole("heading", { name: "Growth is arranged by invoice" }).waitFor();
       assert.equal(await page.getByRole("button", { name: "Request invoice" }).count(), 0);
     } else {
       await page.getByRole("button", { name: "Buy credit", exact: true }).click();

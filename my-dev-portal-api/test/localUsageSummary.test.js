@@ -110,3 +110,15 @@ test("manual Growth uses mixed local balances without changing its annual period
   assert.equal(localSubscription(input).billing_provider, "manual");
   assert.equal(result.analytics.source, "local_ledger");
 });
+
+test("a stale current_period_end left over from a lapsed pricing term falls back to the settlement window", () => {
+  // Regression: pricing reverted to Basic (or was never reset) and left
+  // current_period_end sitting on the same day as current_period_start,
+  // which used to render as a period that starts and ends on the same day
+  // instead of showing usage up to now.
+  const input = snapshot({ current_period_end: "2026-09-01T00:00:00Z" });
+  const result = localUsageSummary(input);
+  assert.equal(result.period.start, Date.parse(input.current_period_start) / 1000);
+  assert.equal(result.period.end, Date.parse(input.usage.to) / 1000);
+  assert.notEqual(result.period.start, result.period.end);
+});
