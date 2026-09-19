@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import useSWR from "swr";
 import { PageLayout } from "../../page-layout";
@@ -15,18 +15,18 @@ export default function CreditPurchase() {
   const kind = Object.hasOwn(PACKAGES, params.get("package")) ? params.get("package") : "credit";
   const selected = PACKAGES[kind];
   const [amount, setAmount] = useState(String(selected.amount));
-  const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [locked, setLocked] = useState(false);
+  const [recovering, setRecovering] = useState(true);
+  const requestedMethod = params.get("payment") === "invoice" ? "invoice" : "card";
+  const [paymentMethod, setPaymentMethod] = useState(requestedMethod);
+  const submitting = useRef(false);
   const { data: context, error: contextError } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
-  // Growth and Enterprise are arranged by invoice through the team, not this
-  // self-service form -- reached only via a stale link/bookmark now that the
-  // pricing page sends these straight to email.
-  const contactLed = kind === "growth" || kind === "enterprise";
   const blocked = kind === "growth" && context?.current_plan_key === "enterprise";
-  const invoice = Number(amount) >= 5000;
+  const method = kind === "credit" ? (Number(amount) >= 5000 ? "invoice" : "card") : paymentMethod;
+  const invoice = method === "invoice";
   const amountError = kind === "credit" && (!/^\d+(\.\d{1,2})?$/.test(amount) || Number(amount) < 50)
     ? "The minimum credit purchase is £50."
     : "";
@@ -34,27 +34,36 @@ export default function CreditPurchase() {
   useEffect(() => {
     if (!idToken || !userEmail) return;
     let cancelled = false;
-    const stored = sessionStorage.getItem(storageKey);
-    if (!stored) { setAmount(String(PACKAGES[kind].amount)); setLocked(false); setResult(null); return; }
+    setRecovering(true); setError(""); setResult(null);
+    let stored;
+    try { stored = sessionStorage.getItem(storageKey); }
+    catch { setLocked(true); setError("Purchase recovery is unavailable. Enable browser storage before paying."); return; }
+    if (!stored) { setAmount(String(PACKAGES[kind].amount)); setPaymentMethod(requestedMethod); setLocked(false); setRecovering(false); return; }
     let request;
-    try { request = JSON.parse(stored); }
-    catch { setError("Purchase details could not be recovered. Contact support before paying again."); return; }
+    try {
+      request = JSON.parse(stored);
+      if (!request || request.purchaseKind !== kind || !Number.isFinite(request.amountGbp) || !request.requestId ||
+          (request.paymentMethod && !["card", "invoice"].includes(request.paymentMethod))) throw new Error("Invalid saved request");
+    } catch { setLocked(true); setError("Purchase details could not be recovered. Contact support before paying again."); return; }
     setAmount(String(request.amountGbp));
+    setPaymentMethod(request.paymentMethod || (request.amountGbp >= 5000 ? "invoice" : "card"));
     setLocked(true);
     apiRequest("/wallet/purchases", idToken).then(({ purchases }) => {
       if (cancelled) return;
       const prior = purchases.find(item => item.request_id === request.requestId);
       if (prior?.status === "paid") {
         sessionStorage.removeItem(storageKey);
-        setLocked(false); setResult(null); setAccepted(false);
+        setLocked(false); setResult(prior);
       } else if (prior?.payment_provider === "invoice") setResult(prior);
-    }).catch(() => { if (!cancelled) setError("We could not refresh your earlier purchase. Retry it without starting another payment."); });
+    }).catch(() => { if (!cancelled) setError("We could not refresh your earlier purchase. Retry it without starting another payment."); })
+      .finally(() => { if (!cancelled) setRecovering(false); });
     return () => { cancelled = true; };
-  }, [storageKey, idToken, userEmail, kind]);
+  }, [storageKey, idToken, userEmail, kind, requestedMethod]);
   async function submit(event) {
     event.preventDefault();
     setError("");
-    if (amountError) return;
+    if (amountError || blocked || recovering || !context || contextError || submitting.current) return;
+    submitting.current = true;
     const value = Number(amount);
     setBusy(true);
     try {
@@ -62,15 +71,20 @@ export default function CreditPurchase() {
       const stored = sessionStorage.getItem(storageKey);
       if (stored) {
         request = JSON.parse(stored);
-        if (request.amountGbp !== value || request.purchaseKind !== kind) {
+        if (request.amountGbp !== value || request.purchaseKind !== kind ||
+            (request.paymentMethod || (request.amountGbp >= 5000 ? "invoice" : "card")) !== method) {
           throw new Error("An earlier purchase is awaiting confirmation. Return to its original amount before retrying.");
         }
       } else {
-        request = { requestId: crypto.randomUUID(), purchaseKind: kind, amountGbp: value };
+        request = { requestId: crypto.randomUUID(), purchaseKind: kind, amountGbp: value, paymentMethod: method };
         sessionStorage.setItem(storageKey, JSON.stringify(request));
       }
       setLocked(true);
       const response = await apiRequest("/wallet/purchases", idToken, { method: "POST", body: JSON.stringify(request) });
+      if (!response || response.request_id !== request.requestId || response.purchase_kind !== kind ||
+          response.amount_gbp_pence !== Math.round(value * 100) || response.payment_provider !== (method === "card" ? "stripe" : "invoice") ||
+          !["paid", "awaiting_payment"].includes(response.status) ||
+          (method === "card" && response.status !== "paid" && !response.checkoutUrl)) throw new Error("The checkout could not be confirmed. Retry this same purchase.");
       setResult(response);
       if (response.checkoutUrl) {
         const url = new URL(response.checkoutUrl);
@@ -83,14 +97,13 @@ export default function CreditPurchase() {
       if (failure.status === 422) { sessionStorage.removeItem(storageKey); setLocked(false); }
       setError(failure.message || "Purchase confirmation is unavailable. Retry this same request.");
     }
-    finally { setBusy(false); }
+    finally { submitting.current = false; setBusy(false); }
   }
   function startOver() {
     sessionStorage.removeItem(storageKey);
     setLocked(false);
     setResult(null);
     setError("");
-    setAccepted(false);
     setAmount(String(selected.amount));
   }
   const quickAmounts = [50, 100, 250, 500];
@@ -100,13 +113,7 @@ export default function CreditPurchase() {
       <header><h1>{selected.title}</h1><p>Prepaid credit. No recurring charges or overages.</p></header>
       {error && <div role="alert" className="credit-purchase__error">{error}</div>}
       {contextError && <div role="alert" className="credit-purchase__error">We could not verify your account. Please refresh before purchasing.</div>}
-      {contactLed ? <div className="credit-purchase__card">
-          <section>
-            <h2>{selected.title.replace("Buy ", "")} is arranged by invoice</h2>
-            <p>Email our team to set up {selected.title.replace("Buy ", "")} pricing; this page does not take card payment for it.</p>
-            <a className="credit-purchase__button" href={`mailto:welcome@openopps.com?subject=${encodeURIComponent(`${selected.title.replace("Buy ", "")} plan enquiry`)}`}>Email welcome@openopps.com</a>
-          </section>
-        </div> : blocked ? <div className="credit-purchase__card">
+      {blocked ? <div className="credit-purchase__card">
           <section>
             <h2>Your Enterprise pricing is still active</h2>
             <p>You can buy additional credit now. Growth becomes available when your Enterprise pricing period ends.</p>
@@ -122,6 +129,7 @@ export default function CreditPurchase() {
         >
           {result.status !== "paid" && <a className="purchase-result__button purchase-result__button--outline" href={`mailto:welcome@openopps.com?subject=${encodeURIComponent(`API invoice ${result.request_id}`)}`}>Contact our team about this invoice</a>}
           <Link to="/dashboard" className="purchase-result__button">View your usage and balance</Link>
+          {result.status === "paid" && <button type="button" className="credit-purchase__link-button" onClick={startOver}>Make another purchase</button>}
         </PurchaseResult> : <div className="credit-purchase__card"><form onSubmit={submit}>
             <div className="credit-purchase__amount-field">
               <label htmlFor="credit-amount">Credit amount (GBP)</label>
@@ -134,16 +142,18 @@ export default function CreditPurchase() {
               </div>}
               {!amountError && <p className="credit-purchase__hint">{kind === "credit" ? "Minimum £50. A credit top-up does not change your current pricing tier." : `Includes £${selected.amount.toLocaleString("en-GB")} of credit and 12 months of ${kind === "growth" ? "Growth" : "Enterprise"} pricing from cleared payment.`}</p>}
             </div>
+            {kind !== "credit" && <fieldset className="credit-purchase__methods" disabled={locked || busy || recovering}>
+              <legend>Payment method</legend>
+              <label><input type="radio" name="payment-method" value="card" checked={paymentMethod === "card"} onChange={() => setPaymentMethod("card")} />Card through Stripe</label>
+              <label><input type="radio" name="payment-method" value="invoice" checked={paymentMethod === "invoice"} onChange={() => setPaymentMethod("invoice")} />Invoice from our team</label>
+            </fieldset>}
             <dl className="credit-purchase__summary">
               <div><dt>Payment</dt><dd>{invoice ? "Invoice from our team" : "Card through Stripe"}</dd></div>
               <div><dt>Credit expiry</dt><dd>12 months from your latest credit purchase</dd></div>
             </dl>
             <p className="credit-purchase__fineprint">Each purchase extends your unexpired purchased balance. Development credit keeps its separate expiry and is charged at Basic rates.</p>
-            <label className="credit-purchase__consent"><input type="checkbox" checked={accepted} onChange={event => setAccepted(event.target.checked)} required /><span>I understand that credit is non-refundable and expires under these terms.</span></label>
-            <button type="submit" className="credit-purchase__submit" disabled={busy || !accepted || !idToken || !context || Boolean(contextError) || Boolean(amountError)}>{busy ? "Confirming purchase…" : locked ? "Retry this purchase" : invoice ? "Request invoice" : "Continue to card payment"}</button>
-            {locked && !busy && <button type="button" className="credit-purchase__link-button" onClick={startOver}>
-              {kind === "credit" ? "Use a different amount instead" : "Start a new request instead"}
-            </button>}
+            <button type="submit" className="credit-purchase__submit" disabled={busy || recovering || !idToken || !context || Boolean(contextError) || Boolean(amountError)}>{busy ? "Confirming purchase…" : recovering ? "Checking purchase…" : locked ? "Resume this purchase" : invoice ? "Request invoice" : "Continue to card payment"}</button>
+            {locked && <p className="credit-purchase__hint">Your existing purchase is saved. Resume it or contact our team before starting another payment.</p>}
           </form></div>}
     </div>
   </main></PageLayout>;

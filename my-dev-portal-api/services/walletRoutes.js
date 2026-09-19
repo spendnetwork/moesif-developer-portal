@@ -9,6 +9,8 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
       enterprise_pricing_still_active: "Growth is available after your Enterprise pricing period ends. You can still buy credit.",
       prepaid_not_enabled: "Prepaid purchases have not been enabled on the API yet. No credit was added.",
       invalid_credit_amount: "The minimum credit purchase is GBP 50. Enter an amount with at most two decimal places.",
+      invalid_payment_method: "Use card or invoice for Growth and Enterprise. Credit-only purchases of GBP 5,000 or more use an invoice.",
+      admin_invoice_required: "Admin purchases must be recorded as invoices. Card purchases are made in the developer portal.",
       invalid_payment_time: "Enter the actual cleared payment date, not a future date. No credit was added.",
       invalid_payment_reference: "Enter a valid payment reference for this purchase.",
       wallet_checkout_review_required: "This earlier checkout needs a payment review. Contact our team before paying again.",
@@ -59,7 +61,7 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
       }
       // Small purchases are self-service card payments, never an admin grant.
       if (req.body.amountGbp < 5000) return res.status(422).json({ code: "card_purchase_required", message: "Invoice purchases start at GBP 5,000. Amounts below that are a self-service card payment in the developer portal." });
-      const result = await createPurchase(user, req.body, deps, req.body.requested_by, context);
+      const result = await createPurchase(user, { ...req.body, paymentMethod: "invoice" }, deps, req.body.requested_by, context);
       invalidate(user.sub);
       res.json(result);
     } catch (error) { respondError(res, error); }

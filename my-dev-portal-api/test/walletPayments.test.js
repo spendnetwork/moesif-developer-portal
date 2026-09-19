@@ -19,6 +19,9 @@ function setup() {
   const deps = {
     frontendOrigin: "https://developers.example.test",
     getSnApiPortalContext: async () => ({ organization_id: 12 }),
+    getWalletPurchase: async (_, requestId) => ({ request_id: requestId, organization_id: 12,
+      purchase_kind: session.metadata.purchase_kind || "credit", payment_provider: "stripe",
+      amount_gbp_pence: session.amount_total, status: "awaiting_payment" }),
     createWalletPurchase: async payload => { calls.push(["purchase", payload]); return { ...payload, status: "awaiting_payment", created_at: new Date().toISOString() }; },
     confirmWalletPayment: async (...args) => { calls.push(["confirm", ...args]); return { request_id: id, receipt: { plan_key: "basic" } }; },
     getOrCreateStripeCustomerId: async () => "cus_wallet",
@@ -84,6 +87,84 @@ test("exact packages and large credit purchases request an invoice without conta
   const { id, deps } = setup();
   await assert.rejects(createPurchase(user, { requestId: id, purchaseKind: "growth", amountGbp: 5001 }, deps));
 });
+
+test("Growth and Enterprise card purchases use fixed one-off prices, no subscription or extra credit", async () => {
+  for (const [kind, amount] of [["growth", 5000], ["enterprise", 12000]]) {
+    const { id, calls, deps } = setup();
+    const body = { requestId: id, purchaseKind: kind, amountGbp: amount, paymentMethod: "card" };
+    await createPurchase(user, body, deps);
+    await createPurchase(user, body, deps);
+    const sessions = calls.filter(call => call[0] === "stripe");
+    assert.deepEqual(sessions[0], sessions[1]);
+    const checkout = sessions[0][1];
+    assert.equal(checkout.mode, "payment");
+    assert.deepEqual(checkout.payment_method_types, ["card"]);
+    assert.equal(checkout.line_items[0].price_data.unit_amount, amount * 100);
+    assert.equal(checkout.metadata.purchase_kind, kind);
+    assert.equal(checkout.payment_intent_data.metadata.purchase_kind, kind);
+    assert.equal(checkout.cancel_url, `${deps.frontendOrigin}/credit?package=${kind}&cancelled=1`);
+    assert.equal(calls.filter(call => call[0] === "confirm").length, 0);
+  }
+});
+
+test("both packages retain explicit invoicing and invalid methods never create purchases", async () => {
+  for (const [kind, amount] of [["growth", 5000], ["enterprise", 12000]]) {
+    const { id, calls, deps } = setup();
+    await createPurchase(user, { requestId: id, purchaseKind: kind, amountGbp: amount, paymentMethod: "invoice" }, deps);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][1].payment_provider, "invoice");
+  }
+  for (const update of [{ paymentMethod: "cash" }, { purchaseKind: "credit", amountGbp: 6500 }, { amountGbp: 5001 }]) {
+    const { id, calls, deps } = setup();
+    await assert.rejects(createPurchase(user, { requestId: id, purchaseKind: "growth", amountGbp: 5000, paymentMethod: "card", ...update }, deps));
+    assert.equal(calls.length, 0);
+  }
+  const { id, calls, deps } = setup();
+  await assert.rejects(createPurchase(user, { requestId: id, purchaseKind: "growth", amountGbp: 5000, paymentMethod: "card" }, deps, "admin"), { code: "admin_invoice_required" });
+  assert.equal(calls.length, 0);
+});
+
+test("a pending Growth card checkout cannot reopen after Enterprise activates", async () => {
+  const { id, calls, deps } = setup();
+  deps.getSnApiPortalContext = async () => ({ organization_id: 12, current_plan_key: "enterprise" });
+  await assert.rejects(createPurchase(user, { requestId: id, purchaseKind: "growth", amountGbp: 5000, paymentMethod: "card" }, deps), { code: "enterprise_pricing_still_active" });
+  assert.equal(calls.filter(call => call[0] === "stripe").length, 0);
+});
+
+function setPackage(session, kind, amount) {
+  session.metadata.purchase_kind = kind;
+  session.metadata.amount_gbp_pence = String(amount);
+  session.amount_total = session.payment_intent.amount_received = session.line_items.data[0].amount_total = amount;
+  session.payment_intent.metadata = { purchase_kind: kind, wallet_purchase_id: session.metadata.wallet_purchase_id,
+    auth0_user_id: user.sub, organization_id: "12" };
+}
+
+test("verified package payments reconcile identically from webhook and browser", async () => {
+  for (const [kind, amount] of [["growth", 500000], ["enterprise", 1200000]]) {
+    const { session, deps, calls } = setup();
+    setPackage(session, kind, amount);
+    await reconcilePayment("cs_wallet", user, deps);
+    await reconcilePayment("cs_wallet", null, deps);
+    assert.deepEqual(calls[0], calls[1]);
+    assert.equal(calls[0][2].amount_gbp_pence, amount);
+  }
+});
+
+test("a card receipt cannot pay an invoice, different package or another organisation's purchase", async () => {
+  for (const change of [{ payment_provider: "invoice" }, { purchase_kind: "credit" }, { organization_id: 99 }, { amount_gbp_pence: 499999 }, { status: "cancelled" }]) {
+    const { session, deps, calls } = setup();
+    setPackage(session, "growth", 500000);
+    const get = deps.getWalletPurchase;
+    deps.getWalletPurchase = async (...args) => ({ ...await get(...args), ...change });
+    await assert.rejects(reconcilePayment("cs_wallet", user, deps), { code: "wallet_payment_verification_failed" });
+    assert.equal(calls.length, 0);
+  }
+  const { session, deps, calls } = setup();
+  setPackage(session, "growth", 500000);
+  session.payment_intent.metadata.purchase_kind = "enterprise";
+  await assert.rejects(reconcilePayment("cs_wallet", user, deps));
+  assert.equal(calls.length, 0);
+});
 test("old uncertain card requests cannot create a second Checkout after idempotency expires", async () => {
   const { id, calls, deps } = setup();
   deps.createWalletPurchase = async payload => ({ ...payload, status: "awaiting_payment", payment_provider: "stripe", created_at: new Date(Date.now() - 86400000).toISOString() });
@@ -100,7 +181,7 @@ test("browser and webhook confirmation use the same verified Stripe receipt", as
 test("unpaid, refunded, disputed, cross-tenant and tampered payments never grant credit", async () => {
   const changes = [s => s.payment_status = "unpaid", s => s.customer.metadata.authUserId = "other",
     s => s.metadata.organization_id = "99", s => s.payment_intent.latest_charge.refunded = true,
-    s => s.payment_intent.latest_charge.disputed = true, s => s.amount_total = 5001,
+    s => s.payment_intent.latest_charge.disputed = true, s => s.payment_intent.latest_charge.amount_refunded = 1, s => s.amount_total = 5001,
     s => s.payment_intent.amount_received = 4999, s => s.line_items.data[0].quantity = 2];
   for (const change of changes) {
     const { calls, deps, session } = setup(); change(session);

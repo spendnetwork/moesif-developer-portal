@@ -133,6 +133,9 @@
   border-color: var(--border-subtle);
 }
 
+.plan-option__alternative { min-height: 38px; padding-top: 12px; text-align: center; font-size: 13px; line-height: 1.5; }
+.plan-option__alternative a { color: var(--link-text-color); text-underline-offset: 3px; }
+
 .development-banner {
   display: flex;
   align-items: center;

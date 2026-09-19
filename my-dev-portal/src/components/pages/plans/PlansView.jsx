@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import useSWR from "swr";
 import { PageLayout } from "../../page-layout";
 import useAuthCombined from "../../../hooks/useAuthCombined";
@@ -28,34 +28,23 @@ export default function PlansView() {
     <div id="plan-options" className="plan-options">
       {TIERS.map(tier => {
         const blocked = tier.key === "growth" && current === "enterprise";
-        // Growth and Enterprise are arranged by invoice, not self-service
-        // checkout -- send the customer straight to email instead of
-        // starting a purchase request they can't actually complete online.
-        const contactLed = tier.key === "growth" || tier.key === "enterprise";
+        const packageTier = tier.key !== "basic";
         return <section key={tier.key} className={`plan-option${current === tier.key ? " plan-option--current" : ""}`} aria-labelledby={`plan-${tier.key}`}>
           <div className="plan-option__heading"><h2 id={`plan-${tier.key}`}>{tier.name}</h2>
             {current === tier.key && <span className="plan-option__badge">Current pricing</span>}</div>
           <p className="plan-option__commitment">{tier.price}</p>
           <dl className="plan-option__rates" aria-label="Usage rates per unit">{LABELS.map((label, i) => <div key={label}><dt>{label}</dt><dd>{tier.rates[i]}</dd></div>)}</dl>
           <p className="plan-option__note">{blocked ? "Growth is available when your Enterprise pricing period ends. You can still add credit without changing your rates." : tier.note}</p>
-          {contactLed ? (
-            blocked ? (
-              <button className="plan-choice-button" disabled>Available after Enterprise ends</button>
-            ) : (
-              <a className="plan-choice-button" href={`mailto:welcome@openopps.com?subject=${encodeURIComponent(`${tier.name} plan enquiry`)}`}>
-                Email us about {tier.name}
-              </a>
-            )
-          ) : (
-            <button className="plan-choice-button" disabled={Boolean(error) || Boolean(idToken && !context)}
-              onClick={() => navigate("/credit?package=credit")}>
-              Buy credit
-            </button>
-          )}
+          <button className="plan-choice-button" disabled={blocked || Boolean(error) || Boolean(idToken && !context)}
+            onClick={() => navigate(`/credit?package=${packageTier ? tier.key : "credit"}`)}>
+            {blocked ? "Available after Enterprise ends" : packageTier ? `Pay ${tier.key === "growth" ? "£5,000" : "£12,000"} by card` : "Buy credit"}
+          </button>
+          <div className="plan-option__alternative">{packageTier && !blocked && !error && (!idToken || context) &&
+            <Link to={`/credit?package=${tier.key}&payment=invoice`}>Request an invoice instead</Link>}</div>
         </section>;
       })}
     </div>
-    <p style={{ color: "#526862", lineHeight: 1.6, marginTop: 24 }}>Basic credit is paid by card below £5,000, or by invoice for £5,000 and above, and is added once payment clears, extending your unexpired purchased credit by 12 months from that date. Growth and Enterprise are arranged directly with our team by email.</p>
+    <p style={{ color: "#526862", lineHeight: 1.6, marginTop: 24 }}>Growth and Enterprise can be paid by card or invoice. Credit-only top-ups use card below £5,000 and invoice from £5,000. Credit and pricing activate only after payment clears.</p>
     {showDevelopment && <section className="development-banner" aria-labelledby="development-access-heading">
       <div><p className="development-banner__label">Development access</p><h2 id="development-access-heading">Testing the API?</h2><p>Speak to our team about development credits. Separate expiry, metered at Basic rates.</p></div>
       <a className="plan-choice-button" href="mailto:welcome@openopps.com?subject=API%20development%20credit">Request access</a>

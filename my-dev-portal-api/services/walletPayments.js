@@ -28,19 +28,31 @@ async function createPurchase(user, input, deps, actor = null, verifiedContext =
   if ((kind === "growth" && amount !== 500000) || (kind === "enterprise" && amount !== 1200000)) {
     throw failure("invalid_package_amount", "Growth is GBP 5,000; Enterprise is GBP 12,000.", 422);
   }
+  // Omitted method retains the old contract for saved requests and older clients.
+  // The updated portal explicitly chooses card for pricing packages.
+  const method = input.paymentMethod ?? (amount >= 500000 ? "invoice" : "card");
+  if (!["card", "invoice"].includes(method) || (method === "invoice" && amount < 500000) ||
+      (method === "card" && kind === "credit" && amount >= 500000)) {
+    throw failure("invalid_payment_method", "Choose a supported payment method for this purchase.", 422);
+  }
+  if (actor && method !== "invoice") throw failure("admin_invoice_required", "Admin purchases must use a cleared invoice.", 422);
+  const provider = method === "card" ? "stripe" : "invoice";
   const context = verifiedContext || await deps.getSnApiPortalContext(user);
   const purchase = await deps.createWalletPurchase({
     request_id: id, auth0_user_id: user.sub, organization_id: context.organization_id,
-    purchase_kind: kind, payment_provider: amount >= 500000 ? "invoice" : "stripe",
+    purchase_kind: kind, payment_provider: provider,
     amount_gbp_pence: amount, requested_by: actor || user.sub,
   });
   if (!purchase || purchase.request_id !== id || purchase.organization_id !== context.organization_id ||
       purchase.purchase_kind !== kind || purchase.amount_gbp_pence !== amount ||
-      purchase.payment_provider !== (amount >= 500000 ? "invoice" : "stripe") ||
+      purchase.payment_provider !== provider ||
       !["awaiting_payment", "paid"].includes(purchase.status)) {
     throw failure("invalid_purchase_response", "The purchase could not be verified. Retry the same request; do not make another payment.", 502);
   }
   if (purchase.status === "paid" || purchase.payment_provider === "invoice") return purchase;
+  if (kind === "growth" && context.current_plan_key === "enterprise") {
+    throw failure("enterprise_pricing_still_active", "Growth is available after Enterprise pricing ends.");
+  }
   // Stripe's idempotency retention is finite. An old unconfirmed request must
   // be reconciled, never silently submitted as a fresh card charge.
   if (purchase.created_at && Date.now() - Date.parse(purchase.created_at) > 23 * 60 * 60 * 1000) {
@@ -50,13 +62,13 @@ async function createPurchase(user, input, deps, actor = null, verifiedContext =
   const session = await deps.stripe.checkout.sessions.create({
     mode: "payment", customer, client_reference_id: user.sub, payment_method_types: ["card"],
     success_url: `${deps.frontendOrigin}/return?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${deps.frontendOrigin}/credit?cancelled=1`,
+    cancel_url: kind === "credit" ? `${deps.frontendOrigin}/credit?cancelled=1` : `${deps.frontendOrigin}/credit?package=${kind}&cancelled=1`,
     metadata: { purchase_type: "wallet_credit", wallet_purchase_id: id, auth0_user_id: user.sub,
-      organization_id: String(context.organization_id), amount_gbp_pence: String(amount) },
+      organization_id: String(context.organization_id), amount_gbp_pence: String(amount), ...(kind !== "credit" ? { purchase_kind: kind } : {}) },
     payment_intent_data: { metadata: { purchase_type: "wallet_credit", wallet_purchase_id: id,
-      auth0_user_id: user.sub, organization_id: String(context.organization_id) } },
+      auth0_user_id: user.sub, organization_id: String(context.organization_id), ...(kind !== "credit" ? { purchase_kind: kind } : {}) } },
     line_items: [{ price_data: { currency: "gbp", unit_amount: amount,
-      product_data: { name: "Open Opportunities API credit" } }, quantity: 1 }],
+      product_data: { name: kind === "credit" ? "Open Opportunities API credit" : `Open Opportunities API - ${kind === "growth" ? "Growth" : "Enterprise"} credit and 12-month pricing` } }, quantity: 1 }],
   }, { idempotencyKey: `wallet-checkout-${crypto.createHash("sha256").update(`${user.sub}:${id}`).digest("hex")}` });
   return { ...purchase, checkoutUrl: session.url };
 }
@@ -73,12 +85,14 @@ async function reconcilePayment(sessionId, user, deps) {
   const customer = session.customer;
   const sub = session.metadata.auth0_user_id;
   const amount = Number(session.metadata.amount_gbp_pence);
+  const kind = session.metadata.purchase_kind || "credit";
+  const validPackage = kind === "growth" ? amount === 500000 : kind === "enterprise" ? amount === 1200000 : kind === "credit" && amount >= 5000 && amount < 500000;
   if (!sub || (user && user.sub !== sub) || session.client_reference_id !== sub || customer?.metadata?.authUserId !== sub ||
-      !Number.isSafeInteger(amount) || amount < 5000 || amount >= 500000 ||
+      !Number.isSafeInteger(amount) || !validPackage ||
       session.amount_total !== amount || session.currency !== "gbp" || payment?.status !== "succeeded" ||
       payment.amount_received !== amount || payment.currency !== "gbp" ||
       (typeof payment.customer === "string" ? payment.customer : payment.customer?.id) !== customer.id ||
-      !payment.latest_charge?.paid || payment.latest_charge.refunded || payment.latest_charge.disputed ||
+      !payment.latest_charge?.paid || payment.latest_charge.refunded || payment.latest_charge.amount_refunded > 0 || payment.latest_charge.disputed ||
       !Number.isSafeInteger(payment.latest_charge.created) ||
       session.line_items?.has_more || session.line_items?.data?.length !== 1 ||
       session.line_items.data[0].quantity !== 1 || session.line_items.data[0].amount_total !== amount) {
@@ -86,7 +100,16 @@ async function reconcilePayment(sessionId, user, deps) {
   }
   const context = await deps.getSnApiPortalContext({ sub });
   if (String(context.organization_id) !== session.metadata.organization_id) throw failure("organization_identity_mismatch", "Payment account mismatch.");
-  const result = await deps.confirmWalletPayment(requestIdentity(session.metadata.wallet_purchase_id), {
+  const id = requestIdentity(session.metadata.wallet_purchase_id);
+  const purchase = await deps.getWalletPurchase({ sub }, id);
+  if (!purchase || purchase.request_id !== id || purchase.organization_id !== context.organization_id ||
+      purchase.payment_provider !== "stripe" || purchase.purchase_kind !== kind || purchase.amount_gbp_pence !== amount ||
+      !["awaiting_payment", "paid"].includes(purchase.status) || (kind !== "credit" &&
+        (payment.metadata?.purchase_kind !== kind || payment.metadata?.wallet_purchase_id !== id ||
+         payment.metadata?.auth0_user_id !== sub || payment.metadata?.organization_id !== String(context.organization_id)))) {
+    throw failure("wallet_payment_verification_failed", "The payment does not match the recorded purchase.");
+  }
+  const result = await deps.confirmWalletPayment(id, {
     organization_id: context.organization_id, payment_reference: payment.id,
     stripe_customer_id: customer.id, amount_gbp_pence: amount, currency: "GBP",
     paid_at: new Date(payment.latest_charge.created * 1000).toISOString(), confirmed_by: "stripe_verified_payment",
