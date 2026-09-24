@@ -8,6 +8,8 @@ import { AuthenticationGuard } from "./components/authentication-guard";
 import Return from "./components/pages/checkout/Return";
 import Plans from "./components/pages/plans/Plans";
 import Home from "./components/pages/home/Home";
+import Signup from "./components/pages/signup/Signup";
+import AcceptInvitation from "./components/pages/signup/AcceptInvitation";
 import Checkout from "./components/pages/checkout/Checkout";
 import CreditPurchase from "./components/pages/checkout/CreditPurchase";
 import Subscription from "./components/pages/subscription/Subscription";
@@ -15,6 +17,7 @@ import Welcome from "./components/pages/welcome/Welcome";
 import { PageFooter } from "./components/page-footer";
 import SessionTimeout from "./components/session-timeout";
 import RouteScrollReset from "./components/route-scroll-reset";
+import OnboardingGate from "./components/onboarding-gate";
 
 function App() {
   return (
@@ -24,12 +27,15 @@ function App() {
           <RouteScrollReset />
           <Auth0ProviderWithNavigate>
             <SessionTimeout />
+            <OnboardingGate>
             <Routes>
               {/* Home redirects signed-in users to /dashboard itself. The
                   redirect can't live here: App sits above Auth0Provider, so a
                   useAuth0() call at this level would always read the default
                   (unauthenticated) context. */}
               <Route path="/" element={<Home />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/invitation" element={<AcceptInvitation />} />
               <Route path="/plans" element={<Plans />} />
               <Route path="/credit" element={<AuthenticationGuard component={CreditPurchase} />} />
               <Route
@@ -61,6 +67,7 @@ function App() {
                 element={<AuthenticationGuard component={Subscription} />}
               />
             </Routes>
+            </OnboardingGate>
           </Auth0ProviderWithNavigate>
         </BrowserRouter>
       </div>

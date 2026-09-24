@@ -72,6 +72,9 @@ async function reconcileActiveSubscription(
   let subscription = await deps.getStripeSubscription(
     stripeId(subscriptionOrId)
   );
+  if (subscription.metadata?.purchase_type === "wallet_subscription") {
+    throw reconciliationError("wallet_payment_pending", "This prepaid subscription is activated by its verified paid invoice, not legacy subscription provisioning.");
+  }
   if (!deps.liveStatuses.includes(subscription.status)) {
     throw reconciliationError(
       "no_active_subscription",
@@ -237,6 +240,9 @@ async function resolveAuthenticatedEntitlement(authUser, portalContext, deps) {
     throw error;
   }
 
+  if (active.subscription.metadata?.purchase_type === "wallet_subscription") {
+    return { active: false, reason: "wallet_payment_pending", source: "wallet_subscription", reconciled: false };
+  }
   const productId = subscriptionProductId(active.subscription);
   const planKey = await deps.getPlanKeyForProduct(productId);
   const contextIsCurrent =

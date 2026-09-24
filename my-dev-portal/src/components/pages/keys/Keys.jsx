@@ -206,7 +206,7 @@ function Keys() {
   } = useSWR(keysKey, authedFetcher);
 
   const keys = keysData?.keys || [];
-  const maxKeys = keysData?.max_keys || keysData?.max_active_keys || 2;
+  const maxKeys = keysData?.max_keys || keysData?.max_active_keys || 4;
   const notProvisioned = keysError?.status === 404;
   const listError =
     keysError && keysError.status !== 404 ? keysError.message : "";
@@ -350,7 +350,7 @@ function Keys() {
             API keys{!hardError ? ` (${keys.length})` : ""}
           </h1>
           <p style={{ margin: 0, fontSize: 15, color: C.muted }}>
-            Maximum two keys, active or paused.
+            Maximum {maxKeys} keys, active or paused.
           </p>
         </div>
         {!locked && !hardError && (
@@ -445,7 +445,7 @@ function Keys() {
               ))}
               {atLimit && (
                 <p style={{ margin: "4px 0 0", fontSize: 12.5, color: C.muted }}>
-                  You have reached the maximum of two keys, active or paused. Revoke one to
+                  You have reached the maximum of {maxKeys} keys, active or paused. Revoke one to
                   create another.
                 </p>
               )}

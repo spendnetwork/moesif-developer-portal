@@ -1,0 +1,35 @@
+.signup-entry {
+  max-width: 560px;
+  min-height: 60vh;
+  margin: 0 auto;
+  padding: 64px 24px;
+  color: #243733;
+  letter-spacing: 0;
+}
+
+.signup-entry__logo {
+  filter: brightness(0.2);
+  display: block;
+  width: 200px;
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 32px;
+}
+
+.signup-entry h1 { font-size: 28px; line-height: 1.25; margin: 0 0 16px; }
+.signup-entry p { font-size: 16px; line-height: 1.6; }
+.signup-entry__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.signup-entry__actions button {
+  max-width: 100%;
+  min-height: 44px;
+  padding: 12px 16px;
+  border: 1px solid #034737;
+  border-radius: 4px;
+  background: #034737;
+  color: white;
+  font: inherit;
+  white-space: normal;
+  cursor: pointer;
+}
+.signup-entry__actions .signup-entry__signin { background: transparent; color: #034737; }
+.signup-entry__actions button:focus-visible { outline: 2px solid #034737; outline-offset: 3px; }

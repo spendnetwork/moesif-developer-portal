@@ -473,6 +473,12 @@ function updateSnApiSubscriptionStatus(subscription, customerId) {
 }
 
 module.exports = {
+  getWalletCardSubscription: user => snApiKeyRequest(`/api/v3/developer-portal/wallet/card-subscription?auth0_user_id=${encodeURIComponent(user.sub)}`),
+  reserveWalletCardSubscription: body => snApiKeyRequest("/api/v3/developer-portal/wallet/card-subscription/reserve", { method: "POST", body }),
+  syncWalletCardSubscription: body => snApiKeyRequest("/api/v3/developer-portal/wallet/card-subscription/state", { method: "POST", body }),
+  settleWalletSubscriptionInvoice: body => snApiKeyRequest("/api/v3/developer-portal/wallet/card-subscription/invoice", { method: "POST", body }),
+  reviewWalletSubscriptionPayment: body => snApiKeyRequest("/api/v3/developer-portal/wallet/card-subscription/payment-review", { method: "POST", body }),
+  invitationRequest: (path, options) => snApiKeyRequest(path, options),
   migrateWallet: body => snApiKeyRequest("/api/v3/developer-portal/wallet/migrate", { method: "POST", body }),
   flagWalletPaymentReview: body => snApiKeyRequest("/api/v3/developer-portal/wallet/payment-review", { method: "POST", body }),
   createWalletPurchase: body => snApiKeyRequest("/api/v3/developer-portal/wallet/purchases", { method: "POST", body, timeoutMs: 10000 }),

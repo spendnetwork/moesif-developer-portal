@@ -1432,6 +1432,7 @@ async function ensureSubscriptionMeteredPrices(
       expand: ["items.data.price"],
     }),
   ]);
+  if (subscription.metadata?.purchase_type === "wallet_subscription") return subscription;
   const existingPriceIds = new Set(
     subscription.items.data.map((item) => item.price.id)
   );

@@ -274,6 +274,7 @@ const moesifMiddleware = moesif({
     return req?.user?.moesif_company_id;
   },
   skip: function (req, _res) {
+    if (req.path.startsWith("/onboarding") || req.path.startsWith("/invitations") || req.path.startsWith("/admin/invitations") || req.path.startsWith("/invitation-notifications")) return true;
     return ["/usage-summary", "/embed-charts", "/portal-context"].includes(
       req.path
     );
@@ -370,7 +371,12 @@ async function attachSnApiPortalContext(req, _res, next) {
   next();
 }
 
-const portalAuthMiddleware = [authMiddleware, attachSnApiPortalContext];
+const onboarding = require("./services/onboarding").createOnboarding(require("./services/snApiProvisioning"));
+onboarding.install(app, authMiddleware, jsonParser);
+const portalAuthMiddleware = [authMiddleware, onboarding.requireTerms, attachSnApiPortalContext];
+const { createInvitations, installInvitationRoutes } = require("./services/invitations");
+const invitationService = createInvitations({ request: require("./services/snApiProvisioning").invitationRequest });
+installInvitationRoutes(app, { service: invitationService, auth: [authMiddleware, onboarding.requireTerms], jsonParser, serviceTokenMatches, invalidate: invalidatePortalContext });
 
 async function requestLocalSummary(req) {
   if (!req.portalContext) return null;
@@ -505,6 +511,7 @@ const walletPayments = installWalletRoutes(app, {
   deps: {
     ...require("./services/snApiProvisioning"),
     getOrCreateStripeCustomerId: require("./services/stripeApis").getOrCreateStripeCustomerId,
+    updateStripeCustomerIdentity: require("./services/stripeApis").updateStripeCustomerIdentity,
     stripe: require("stripe")(process.env.STRIPE_API_KEY),
     frontendOrigin: getFrontendOrigin(),
   },
@@ -1276,7 +1283,7 @@ app.post(
       event.type === "checkout.session.async_payment_succeeded"
     ) {
       try {
-        if (event.data.object.metadata?.purchase_type === "wallet_credit") {
+        if (["wallet_credit", "wallet_subscription"].includes(event.data.object.metadata?.purchase_type)) {
           await walletPayments.reconcile(event.data.object.id, null);
           invalidateUsageSummary();
         } else if (isBasicCreditSession(event.data.object)) {
@@ -1302,6 +1309,19 @@ app.post(
         console.error("Checkout webhook reconciliation failed", safeBillingError(reconciliationError, event.id));
         return res.status(500).json({ message: "Checkout reconciliation failed" });
       }
+    }
+
+    // Wallet subscriptions must never enter the legacy Stripe-credit or
+    // metered-item attachment paths, even after the rollout flag is disabled.
+    try {
+      const handled = await walletPayments.subscriptionEvent(event);
+      if (handled?.handled) {
+        invalidateUsageSummary();
+        return res.status(200).json({ received: true });
+      }
+    } catch (error) {
+      console.error("Wallet subscription reconciliation failed", safeBillingError(error, event.id));
+      return res.status(500).json({ message: "Subscription reconciliation pending" });
     }
 
     if (event.type === "invoice.paid") {
@@ -1597,7 +1617,7 @@ app.post(
     let orphanSubscriptionId = null;
     try {
       const session = await verifyStripeSession(checkoutSessionId);
-      if (session.metadata?.purchase_type === "wallet_credit") {
+      if (["wallet_credit", "wallet_subscription"].includes(session.metadata?.purchase_type)) {
         const result = await walletPayments.reconcile(session.id, req.user);
         invalidatePortalContext(req.user.sub);
         return res.status(201).json(result);
@@ -1882,6 +1902,7 @@ app.get(
 );
 
 app.listen(port, () => {
+  require("./services/invitationDelivery").startInvitationWorker(invitationService);
   console.log(`My Dev Portal Backend is listening at http://localhost:${port}`);
 });
 

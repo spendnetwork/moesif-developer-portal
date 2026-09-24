@@ -3,8 +3,10 @@ import moesifBrowser from "moesif-browser-js";
 import './main.css'
 import { SWRConfig } from 'swr'
 import App from './App.jsx'
+import { captureInvitation, skipInvitationAnalytics } from './lib/invitation-session'
 import "./styles/styles.scss";
 
+captureInvitation();
 createRoot(document.getElementById('root')).render(
   <SWRConfig
     value={{
@@ -22,6 +24,7 @@ createRoot(document.getElementById('root')).render(
 if (import.meta.env.REACT_APP_MOESIF_PUBLISHABLE_APPLICATION_ID) {
   moesifBrowser.init({
     applicationId: import.meta.env.REACT_APP_MOESIF_PUBLISHABLE_APPLICATION_ID,
+    skip: skipInvitationAnalytics,
     // add other option here
   });
   if (window) {

@@ -9,19 +9,19 @@ const output = process.env.PORTAL_QA_OUTPUT;
 if (output) await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ channel: "msedge", headless: true });
 try {
-  for (const width of [1440, 390]) {
+  for (const [width, limit] of [[1440, 4], [390, 4], [390, 2]]) {
     const page = await browser.newPage({ viewport: { width, height: 1000 } });
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     let failPause = true;
     let pauseRequests = 0;
     let key = { id: 1, name: "Integration key", is_active: true, key_prefix: "openopps_api_ABCDEF", created_at: "2026-09-01T00:00:00Z", age_days: 11, rotation_status: "current" };
-    const other = { ...key, id: 2, name: "Other integration" };
+    const others = Array.from({ length: limit - 1 }, (_, index) => ({ ...key, id: index + 2, name: `Other integration ${index + 2}` }));
     await page.route("**/*", async route => {
       const req = route.request();
       const url = new URL(req.url());
       if (url.origin !== new URL(base).origin) return route.abort();
-      if (url.pathname === "/qa-api/api-keys") return route.fulfill({ json: { keys: [key, other], has_active_subscription: true, max_keys: 2, active_count: key.is_active ? 2 : 1 } });
+      if (url.pathname === "/qa-api/api-keys") return route.fulfill({ json: { keys: [key, ...others], has_active_subscription: true, max_keys: limit, active_count: key.is_active ? limit : limit - 1 } });
       if (url.pathname === "/qa-api/api-keys/1/pause") {
         pauseRequests++;
         if (failPause) { failPause = false; return route.fulfill({ status: 503, json: { message: "Temporary failure. Retry this action." } }); }
@@ -35,7 +35,8 @@ try {
       return route.continue();
     });
     await page.goto(`${base}/keys?fixture=wallet-basic`);
-    await page.getByRole("heading", { name: "API keys (2)" }).waitFor();
+    await page.getByRole("heading", { name: `API keys (${limit})` }).waitFor();
+    await page.getByText(`Maximum ${limit} keys, active or paused.`, { exact: true }).waitFor();
     await page.getByRole("button", { name: "Pause", exact: true }).first().click();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.equal(pauseRequests, 0);
@@ -50,7 +51,7 @@ try {
     await page.reload();
     await page.getByRole("button", { name: "Resume", exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-    if (output) await page.screenshot({ path: path.join(output, `paused-keys-${width}.png`), fullPage: true });
+    if (output) await page.screenshot({ path: path.join(output, `paused-keys-${limit}-${width}.png`), fullPage: true });
     await page.getByRole("button", { name: "Resume", exact: true }).click();
     await page.getByRole("button", { name: "Resume key", exact: true }).click();
     await page.getByRole("button", { name: "Pause", exact: true }).nth(1).waitFor();

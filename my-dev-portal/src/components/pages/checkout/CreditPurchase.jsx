@@ -24,9 +24,11 @@ export default function CreditPurchase() {
   const [paymentMethod, setPaymentMethod] = useState(requestedMethod);
   const submitting = useRef(false);
   const { data: context, error: contextError } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
+  const { data: paymentOptions, error: paymentOptionsError } = useSWR(idToken ? ["/wallet/payment-options", idToken] : null, authedFetcher);
   const blocked = kind === "growth" && context?.current_plan_key === "enterprise";
   const method = kind === "credit" ? (Number(amount) >= 5000 ? "invoice" : "card") : paymentMethod;
   const invoice = method === "invoice";
+  const recurring = !invoice && kind !== "credit" && paymentOptions?.cardSubscriptions === true;
   const amountError = kind === "credit" && (!/^\d+(\.\d{1,2})?$/.test(amount) || Number(amount) < 50)
     ? "The minimum credit purchase is £50."
     : "";
@@ -54,6 +56,10 @@ export default function CreditPurchase() {
       if (prior?.status === "paid") {
         sessionStorage.removeItem(storageKey);
         setLocked(false); setResult(prior);
+      } else if (prior?.status === "cancelled") {
+        sessionStorage.removeItem(storageKey);
+        setLocked(false);
+        setError("Your earlier checkout expired without payment. You can start a new purchase.");
       } else if (prior?.payment_provider === "invoice") setResult(prior);
     }).catch(() => { if (!cancelled) setError("We could not refresh your earlier purchase. Retry it without starting another payment."); })
       .finally(() => { if (!cancelled) setRecovering(false); });
@@ -62,7 +68,7 @@ export default function CreditPurchase() {
   async function submit(event) {
     event.preventDefault();
     setError("");
-    if (amountError || blocked || recovering || !context || contextError || submitting.current) return;
+    if (amountError || blocked || recovering || !context || contextError || !paymentOptions || paymentOptionsError || submitting.current) return;
     submitting.current = true;
     const value = Number(amount);
     setBusy(true);
@@ -94,7 +100,7 @@ export default function CreditPurchase() {
         sessionStorage.removeItem(storageKey);
       }
     } catch (failure) {
-      if (failure.status === 422) { sessionStorage.removeItem(storageKey); setLocked(false); }
+      if (failure.status === 422 || failure.code === "card_checkout_closed") { sessionStorage.removeItem(storageKey); setLocked(false); }
       setError(failure.message || "Purchase confirmation is unavailable. Retry this same request.");
     }
     finally { submitting.current = false; setBusy(false); }
@@ -110,9 +116,10 @@ export default function CreditPurchase() {
   return <PageLayout><main className="credit-purchase">
     <div className="credit-purchase__container">
       <Link to="/plans" className="credit-purchase__back">← Back to pricing</Link>
-      <header><h1>{selected.title}</h1><p>Prepaid credit. No recurring charges or overages.</p></header>
+      <header><h1>{selected.title}</h1><p>{recurring ? "Annual subscription with prepaid credit. No usage overages." : "Prepaid credit. No automatic top-ups or usage overages."}</p></header>
       {error && <div role="alert" className="credit-purchase__error">{error}</div>}
       {contextError && <div role="alert" className="credit-purchase__error">We could not verify your account. Please refresh before purchasing.</div>}
+      {paymentOptionsError && <div role="alert" className="credit-purchase__error">We could not verify the payment terms. Please refresh before purchasing.</div>}
       {blocked ? <div className="credit-purchase__card">
           <section>
             <h2>Your Enterprise pricing is still active</h2>
@@ -149,10 +156,12 @@ export default function CreditPurchase() {
             </fieldset>}
             <dl className="credit-purchase__summary">
               <div><dt>Payment</dt><dd>{invoice ? "Invoice from our team" : "Card through Stripe"}</dd></div>
+              {recurring && <div><dt>Annual renewal</dt><dd>£{selected.amount.toLocaleString("en-GB")} automatically each year</dd></div>}
               <div><dt>Credit expiry</dt><dd>12 months from your latest credit purchase</dd></div>
             </dl>
             <p className="credit-purchase__fineprint">Each purchase extends your unexpired purchased balance. Development credit keeps its separate expiry and is charged at Basic rates.</p>
-            <button type="submit" className="credit-purchase__submit" disabled={busy || recovering || !idToken || !context || Boolean(contextError) || Boolean(amountError)}>{busy ? "Confirming purchase…" : recovering ? "Checking purchase…" : locked ? "Resume this purchase" : invoice ? "Request invoice" : "Continue to card payment"}</button>
+            {recurring && <p className="credit-purchase__fineprint">Your card is charged now and annually until renewal is cancelled. Credit is added after each successful payment. Contact welcome@openopps.com to stop renewal or change your subscription.</p>}
+            <button type="submit" className="credit-purchase__submit" disabled={busy || recovering || !idToken || !context || !paymentOptions || Boolean(paymentOptionsError) || Boolean(contextError) || Boolean(amountError)}>{busy ? "Confirming purchase…" : recovering ? "Checking purchase…" : locked ? "Resume this purchase" : invoice ? "Request invoice" : recurring ? "Continue to annual subscription" : "Continue to card payment"}</button>
             {locked && <p className="credit-purchase__hint">Your existing purchase is saved. Resume it or contact our team before starting another payment.</p>}
           </form></div>}
     </div>

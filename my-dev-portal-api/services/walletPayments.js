@@ -37,11 +37,13 @@ async function createPurchase(user, input, deps, actor = null, verifiedContext =
   }
   if (actor && method !== "invoice") throw failure("admin_invoice_required", "Admin purchases must use a cleared invoice.", 422);
   const provider = method === "card" ? "stripe" : "invoice";
+  const subscriptions = require("./walletStripeSubscriptions");
   const context = verifiedContext || await deps.getSnApiPortalContext(user);
   const purchase = await deps.createWalletPurchase({
     request_id: id, auth0_user_id: user.sub, organization_id: context.organization_id,
     purchase_kind: kind, payment_provider: provider,
     amount_gbp_pence: amount, requested_by: actor || user.sub,
+    ...(provider === "stripe" && subscriptions.enabled() ? { card_checkout_mode: "catalog_subscription" } : {}),
   });
   if (!purchase || purchase.request_id !== id || purchase.organization_id !== context.organization_id ||
       purchase.purchase_kind !== kind || purchase.amount_gbp_pence !== amount ||
@@ -58,6 +60,7 @@ async function createPurchase(user, input, deps, actor = null, verifiedContext =
   if (purchase.created_at && Date.now() - Date.parse(purchase.created_at) > 23 * 60 * 60 * 1000) {
     throw failure("wallet_checkout_review_required", "This checkout needs a payment review. Contact our team before paying again.");
   }
+  if (subscriptions.enabled()) return subscriptions.createCheckout(user, purchase, context, deps);
   const customer = await deps.getOrCreateStripeCustomerId(user.email, user);
   const session = await deps.stripe.checkout.sessions.create({
     mode: "payment", customer, client_reference_id: user.sub, payment_method_types: ["card"],
@@ -74,6 +77,9 @@ async function createPurchase(user, input, deps, actor = null, verifiedContext =
 }
 
 async function reconcilePayment(sessionId, user, deps) {
+  const checkout = await deps.stripe.checkout.sessions.retrieve(sessionId);
+  const subscriptions = require("./walletStripeSubscriptions");
+  if (checkout.metadata?.purchase_type === subscriptions.TYPE) return subscriptions.reconcileCheckout(checkout, user, deps);
   const session = await deps.stripe.checkout.sessions.retrieve(sessionId, {
     expand: ["payment_intent.latest_charge", "customer", "line_items"],
   });

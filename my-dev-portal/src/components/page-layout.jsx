@@ -2,6 +2,7 @@ import React from "react";
 import { NavBar } from "./navigation/desktop/nav-bar";
 import { MobileNavBar } from "./navigation/mobile/mobile-nav-bar";
 import AccountStatusBanner from "./account-status-banner";
+import InvitationNotice from "./invitation-notice";
 
 export const PageLayout = ({ hideNavTabs, children, isHome }) => {
   return (
@@ -10,6 +11,7 @@ export const PageLayout = ({ hideNavTabs, children, isHome }) => {
       <MobileNavBar hideNavTabs={hideNavTabs} />
       <div className="page-layout__content">
         <AccountStatusBanner />
+        <InvitationNotice />
         {children}
       </div>
     </div>

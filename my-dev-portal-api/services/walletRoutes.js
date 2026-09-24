@@ -1,10 +1,18 @@
 const { createPurchase, reconcilePayment, requestIdentity } = require("./walletPayments");
 
 function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps, invalidate }) {
+  const subscriptions = require("./walletStripeSubscriptions");
+  app.get("/wallet/payment-options", auth, (_req, res) => res.json({ cardSubscriptions: subscriptions.enabled() }));
   const respondError = (res, error) => {
     const code = typeof error.code === "string" && /^[a-z_]+$/.test(error.code) ? error.code : "wallet_service_unavailable";
     console.warn(JSON.stringify({ event: "wallet_request_failed", code, status: error.status || 503 }));
     const messages = {
+      card_subscription_exists: "A card subscription or checkout already exists. Resume the checkout, or contact our team to change your subscription. You can still buy credit for an active subscription.",
+      card_checkout_closed: "This checkout has expired. Start a new purchase; no payment was taken by this checkout.",
+      subscription_price_not_configured: "Card subscription checkout has not been configured yet. Contact our team or choose an invoice.",
+      invalid_subscription_price: "The Stripe subscription price needs configuration. No new payment was taken. Contact our team.",
+      subscription_invoice_mismatch: "Your subscription payment needs review. Contact our team before paying again.",
+      subscription_payment_unverified: "The subscription payment could not yet be verified. Do not make another payment; contact our team.",
       legacy_wallet_reconciliation_required: "This account needs a balance review before wallet purchases can be enabled. Contact our team.",
       enterprise_pricing_still_active: "Growth is available after your Enterprise pricing period ends. You can still buy credit.",
       prepaid_not_enabled: "Prepaid purchases have not been enabled on the API yet. No credit was added.",
@@ -100,6 +108,7 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
     } catch (error) { respondError(res, error); }
   });
   return {
+    subscriptionEvent: event => subscriptions.handleEvent(event, deps),
     reconcile: (sessionId, user) => reconcilePayment(sessionId, user, deps),
     review: event => require("./walletPayments").reviewPaymentEvent(event, deps),
   };

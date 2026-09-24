@@ -37,6 +37,21 @@ function formatDate(unixSeconds, withYear = false) {
   }).format(new Date(unixSeconds * 1000));
 }
 
+function formatIsoDate(iso) {
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso));
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <rect x="1.5" y="3" width="11" height="9.5" rx="1.5" stroke={C.muted} strokeWidth="1.2" />
+      <path d="M1.5 5.5H12.5" stroke={C.muted} strokeWidth="1.2" />
+      <path d="M4 1.5V3.5M10 1.5V3.5" stroke={C.muted} strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function Skeleton({ w, h, style }) {
   return (
     <div
@@ -131,11 +146,27 @@ export default function UsageView({
         </div>
       )}
 
-      {usage?.walletEnabled && <div style={{ marginBottom: 20, fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
-        <div>{usage.planKey === "basic" ? "Basic pricing applies." : `${usage.planKey === "growth" ? "Growth" : "Enterprise"} pricing ends ${new Date(usage.pricingEndsAt).toLocaleDateString("en-GB")}; Basic rates apply afterwards.`}</div>
-        {usage.paidCreditExpiresAt && <div>Purchased credit expires {new Date(usage.paidCreditExpiresAt).toLocaleDateString("en-GB")}.</div>}
-        <div>Development credit is spent first at Basic rates. Metric costs below retain the rates charged at the time.</div>
-      </div>}
+      {usage?.walletEnabled && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <span style={styles.metaChip}>
+              <CalendarIcon />
+              {usage.planKey === "basic"
+                ? "Basic pricing"
+                : `${usage.planKey === "growth" ? "Growth" : "Enterprise"} pricing until ${formatIsoDate(usage.pricingEndsAt)}`}
+            </span>
+            {usage.paidCreditExpiresAt && (
+              <span style={styles.metaChip}>
+                <CalendarIcon />
+                Credit expires {formatIsoDate(usage.paidCreditExpiresAt)}
+              </span>
+            )}
+          </div>
+          <p style={{ margin: "10px 2px 0", fontSize: 12.5, color: C.muted, lineHeight: 1.5 }}>
+            Development credit is spent first, at Basic rates. Metric costs below keep the rate charged at the time.
+          </p>
+        </div>
+      )}
 
       {loading ? (
         <div>
@@ -311,6 +342,18 @@ const styles = {
     color: C.head,
   },
   lead: { margin: 0, fontSize: 15, color: C.muted },
+  metaChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13,
+    fontWeight: 500,
+    color: C.head,
+    background: "#FFFFFF",
+    border: `1px solid ${C.line}`,
+    borderRadius: 999,
+    padding: "6px 12px 6px 10px",
+  },
   twoCol: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",

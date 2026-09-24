@@ -46,11 +46,16 @@ const server = await createServer({
         res.setHeader('Content-Type', 'application/json');
         if (req.method !== 'GET') { res.statusCode = 403; return res.end(JSON.stringify({ message: 'Payments and mutations disabled in local preview' })); }
         const result = {
+          '/onboarding': name === 'terms-required' ? { enabled: true, required: true, version: 'preview-only', document: {
+            version: 'preview-only', title: 'Terms of API Access', sha256: 'a'.repeat(64),
+            text: 'PREVIEW ONLY. This is not an approved legal agreement.\n\n' + Array.from({ length: 12 }, (_, index) => `${index + 1}. Preview section\nThis placeholder demonstrates the onboarding layout. Approved terms, including the confidentiality obligations, must be published before enforcement is activated.\n`).join('\n'),
+          } } : { enabled: false, required: false, version: null, accepted_at: null },
           '/plans': { hits: plans }, '/plan-change': null,
           '/portal-context': { current_plan_key: snapshot.plan_key, current_subscription_id: snapshot.subscription_id, billing_status: snapshot.plan_key ? 'active' : null, debit_owner: snapshot.debit_owner, access_paused: name.includes('paused'), access_block_reason: snapshot.access_block_reason, wallet_enabled: snapshot.wallet_enabled, has_activated_paid_plan: snapshot.has_activated_paid_plan },
           '/wallet/purchases': { purchases: [] },
+          '/wallet/payment-options': { cardSubscriptions: true },
           '/subscriptions': snapshot.plan_key ? [localSubscription(snapshot)] : [], '/usage-summary': localUsageSummary(snapshot) || { hasSubscription: false },
-          '/api-keys': { has_active_subscription: true, current_plan_key: snapshot.plan_key, active_count: 1, max_active_keys: 2,
+          '/api-keys': { has_active_subscription: true, current_plan_key: snapshot.plan_key, active_count: 1, max_active_keys: 4, max_keys: 4,
             keys: [{ id: 1, name: 'Integration key', key_prefix: 'fixture_key_prefix', description: 'Development integration', created_at: '2026-09-01T00:00:00Z', age_days: 6, rotation_status: 'current' }] },
         };
         if (path === '/embed-charts') return setTimeout(() => { res.statusCode = 503; res.end(JSON.stringify({ message: 'Fixture chart unavailable' })); }, 12000);

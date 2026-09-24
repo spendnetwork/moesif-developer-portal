@@ -8,6 +8,11 @@ import useUsageSummary from "../hooks/useUsageSummary";
 const SUPPORT_EMAIL =
   import.meta.env.REACT_APP_SALES_CONTACT_EMAIL || "welcome@openopps.com";
 
+function formatMoney(minorUnits) {
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    .format((Number(minorUnits) || 0) / 100);
+}
+
 // API access is independent of portal access, including when credit runs out.
 export default function AccountStatusBanner() {
   const { idToken } = useAuthCombined();
@@ -24,6 +29,11 @@ export default function AccountStatusBanner() {
   const isBasic = planKey === "basic";
   const isExhausted = reason === "insufficient_credit";
   const paused = data?.access_paused || reason === "access_paused";
+  // A leftover balance too small to cover any request never reaches exactly
+  // zero on its own, so say what's true -- the amount left and that it can't
+  // be spent -- rather than declaring credit "finished" when it isn't.
+  const remaining = usage?.credit?.remaining;
+  const remainingKnown = Number.isFinite(remaining);
   const { data: catalog } = useSWR(idToken && isBasic && isExhausted ? "/plans" : null, publicFetcher);
   const basicProduct = catalog?.hits?.find(plan => plan.status === "active" &&
     (plan.metadata?.plan_key?.toLowerCase() === "basic" || /^basic\b/i.test(plan.name || "")));
@@ -37,7 +47,11 @@ export default function AccountStatusBanner() {
       <span style={styles.dot} aria-hidden="true" />
       <div>
         <div style={styles.title}>
-          {paused ? "API access paused" : isExhausted ? isDevelopment ? "Development allowance exhausted" : "Prepaid credit exhausted" : "API access unavailable"}
+          {paused
+            ? "API access paused"
+            : isExhausted
+              ? `${isDevelopment ? "Development allowance" : "Prepaid credit"}: ${remainingKnown ? `${formatMoney(remaining)} left, not enough for another request` : "not enough left for another request"}`
+              : "API access unavailable"}
         </div>
         <div style={styles.body}>
           API requests are blocked. Your portal, API keys and usage history remain

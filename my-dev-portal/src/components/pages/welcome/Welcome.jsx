@@ -28,7 +28,7 @@ const STEPS = [
   {
     n: 2,
     title: "Create an API key",
-    body: "Up to two active keys, rotate them whenever you need.",
+    body: "Up to four keys, active or paused. Rotate them whenever you need.",
     linkLabel: "Go to API keys",
     to: "/keys",
   },

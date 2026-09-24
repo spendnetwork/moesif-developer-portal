@@ -25,7 +25,7 @@ try {
     };
     await page.goto("http://127.0.0.1:4178/plans?fixture=development-exhausted");
     await page.getByRole("heading", { name: "Open Opportunities API plans", exact: true }).waitFor();
-    assert.equal(await page.getByText("Development allowance exhausted", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Development allowance: £0.00 left, not enough for another request", { exact: true }).count(), 1);
     await bannerBelowHeader();
     await noOverflow();
     await page.screenshot({ path: path.join(output, `plans-${width}.png`), fullPage: true });
@@ -65,7 +65,7 @@ try {
     await noOverflow();
     await page.screenshot({ path: path.join(output, `usage-${width}.png`), fullPage: true });
     await page.goto("http://127.0.0.1:4178/plans?fixture=basic-exhausted");
-    await page.getByText("Prepaid credit exhausted", { exact: true }).waitFor();
+    await page.getByText("Prepaid credit: £0.00 left, not enough for another request", { exact: true }).waitFor();
     await bannerBelowHeader();
     const addCredit = page.getByRole("link", { name: "Add credit from £100", exact: true });
     await page.waitForFunction(() => [...document.querySelectorAll('a')].some(a => a.textContent === 'Add credit from £100' && a.href.includes('basic_credit_top_up')));

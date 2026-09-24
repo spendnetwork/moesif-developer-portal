@@ -39,6 +39,7 @@ function throwAuthError(body, response) {
 }
 
 function throwForResponse(body, response) {
+  if (body?.code === "terms_acceptance_required") window.dispatchEvent(new Event("openopps:terms-required"));
   if (response.status === 401) throwAuthError(body, response);
   throwWithStatus(body, response);
 }
