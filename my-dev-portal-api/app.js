@@ -2,6 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 require("dotenv").config();
 const moesif = require("moesif-nodejs");
+const { shouldSkipMoesifEvent, maskMoesifEvent } = require("./services/moesifPrivacy");
 const cors = require("cors");
 
 const {
@@ -274,11 +275,9 @@ const moesifMiddleware = moesif({
     return req?.user?.moesif_company_id;
   },
   skip: function (req, _res) {
-    if (req.path.startsWith("/onboarding") || req.path.startsWith("/invitations") || req.path.startsWith("/admin/invitations") || req.path.startsWith("/invitation-notifications")) return true;
-    return ["/usage-summary", "/embed-charts", "/portal-context"].includes(
-      req.path
-    );
+    return shouldSkipMoesifEvent(req);
   },
+  maskContent: maskMoesifEvent,
 });
 
 function getFrontendOrigin() {
