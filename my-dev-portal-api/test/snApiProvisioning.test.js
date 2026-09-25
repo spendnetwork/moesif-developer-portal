@@ -113,6 +113,7 @@ test("registers an Auth0 account with SN API before billing", async (t) => {
   assert.deepEqual(JSON.parse(request.options.body), {
     auth0_user_id: "auth0|new-user",
     email: "new-user@example.com",
+    email_verified: false,
     full_name: "New User",
     organization_name: "example.com",
   });

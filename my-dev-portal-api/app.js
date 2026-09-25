@@ -58,6 +58,11 @@ const {
   revokeSnApiKey,
   rotateSnApiKey,
   setSnApiKeyPaused,
+  listSnApiOrganizationKeys,
+  pauseSnApiOrganizationKey,
+  revokeSnApiOrganizationKey,
+  listSnApiOrganizationMembers,
+  suspendSnApiOrganizationMember,
   createSnApiPlanChange,
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,
@@ -300,7 +305,10 @@ app.use(
   cors({
     origin: getFrontendOrigin(),
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "Stripe-Signature"],
+    // X-Pending-Invitation: sent by onboarding-gate.jsx so registration can
+    // attach a validated team invitation. A custom header -- browsers block
+    // the whole request at preflight unless it's listed here.
+    allowedHeaders: ["Authorization", "Content-Type", "Stripe-Signature", "X-Pending-Invitation"],
     maxAge: 600,
   })
 );
@@ -342,9 +350,14 @@ async function attachSnApiPortalContext(req, _res, next) {
 
       // A browser commonly starts several authenticated requests together.
       // Share one registration call so account creation stays idempotent.
+      // Defensive fallback only -- onboarding.requireTerms's own get() call
+      // is expected to have already registered the user (with any pending
+      // invitation token) before this middleware ever runs.
       let registration = portalRegistrationRequests.get(auth0UserId);
       if (!registration) {
-        registration = registerSnApiPortalAccount(req.user).finally(() => {
+        const parsed = req.headers["x-pending-invitation"] && invitationService
+          ? invitationService.parseToken(req.headers["x-pending-invitation"]) : null;
+        registration = registerSnApiPortalAccount(req.user, parsed).finally(() => {
           portalRegistrationRequests.delete(auth0UserId);
         });
         portalRegistrationRequests.set(auth0UserId, registration);
@@ -370,12 +383,12 @@ async function attachSnApiPortalContext(req, _res, next) {
   next();
 }
 
-const onboarding = require("./services/onboarding").createOnboarding(require("./services/snApiProvisioning"));
-onboarding.install(app, authMiddleware, jsonParser);
-const portalAuthMiddleware = [authMiddleware, onboarding.requireTerms, attachSnApiPortalContext];
 const { createInvitations, installInvitationRoutes } = require("./services/invitations");
 const invitationService = createInvitations({ request: require("./services/snApiProvisioning").invitationRequest });
-installInvitationRoutes(app, { service: invitationService, auth: [authMiddleware, onboarding.requireTerms], jsonParser, serviceTokenMatches, invalidate: invalidatePortalContext });
+const onboarding = require("./services/onboarding").createOnboarding(require("./services/snApiProvisioning"), invitationService);
+onboarding.install(app, authMiddleware, jsonParser);
+const portalAuthMiddleware = [authMiddleware, onboarding.requireTerms, attachSnApiPortalContext];
+installInvitationRoutes(app, { service: invitationService, auth: [authMiddleware, onboarding.requireTerms], portalAuth: portalAuthMiddleware, jsonParser, serviceTokenMatches, invalidate: invalidatePortalContext });
 
 async function requestLocalSummary(req) {
   if (!req.portalContext) return null;
@@ -1867,6 +1880,72 @@ app.post(
     }
   }
 );
+
+// Org-admin visibility only -- listing/metadata, never rotation or creation
+// (sn-api keeps those strictly owner-only so an admin can never silently
+// take ownership of a colleague's key by rotating it).
+app.get("/organization-api-keys", portalAuthMiddleware, async function (req, res) {
+  try {
+    res.status(200).json(await listSnApiOrganizationKeys(req.user));
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+app.post("/organization-api-keys/:api_key_id/pause", portalAuthMiddleware, async function (req, res) {
+  try {
+    res.status(200).json(await pauseSnApiOrganizationKey(req.user, req.params.api_key_id));
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+app.delete("/organization-api-keys/:api_key_id", portalAuthMiddleware, async function (req, res) {
+  try {
+    await revokeSnApiOrganizationKey(req.user, req.params.api_key_id);
+    res.status(204).send();
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+app.get("/team-members", portalAuthMiddleware, async function (req, res) {
+  try {
+    res.status(200).json(await listSnApiOrganizationMembers(req.portalContext.organization_id));
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+// Staff-operated only (admin-portal), same machine-to-machine trust boundary
+// as /admin/development-credit above. Not self-service -- full member
+// administration beyond invite/list/suspend stays out of scope for now.
+app.get("/admin/organization-members", async (req, res) => {
+  const expected = process.env.ADMIN_PLAN_CHANGE_TOKEN;
+  if (!expected) return res.status(503).json({ code: "admin_not_configured", message: "Admin service is not configured." });
+  if (!serviceTokenMatches(req.headers["x-admin-service-token"], expected)) {
+    return res.status(401).json({ code: "unauthorized", message: "Invalid admin service token." });
+  }
+  try {
+    res.status(200).json(await listSnApiOrganizationMembers(req.query.organizationId));
+  } catch (error) {
+    res.status(error.status || 503).json({ code: error.code, message: error.message || "Could not list organization members." });
+  }
+});
+
+app.post("/admin/organization-members/:user_id/suspend", async (req, res) => {
+  const expected = process.env.ADMIN_PLAN_CHANGE_TOKEN;
+  if (!expected) return res.status(503).json({ code: "admin_not_configured", message: "Admin service is not configured." });
+  if (!serviceTokenMatches(req.headers["x-admin-service-token"], expected)) {
+    return res.status(401).json({ code: "unauthorized", message: "Invalid admin service token." });
+  }
+  try {
+    const result = await suspendSnApiOrganizationMember(req.params.user_id);
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(error.status || 503).json({ code: error.code, message: error.message || "Could not suspend this member." });
+  }
+});
 
 app.get(
   "/embed-charts",

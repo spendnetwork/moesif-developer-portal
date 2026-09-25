@@ -273,6 +273,35 @@ function listSnApiKeys(authUser) {
   );
 }
 
+// Admin-only listing/metadata -- sn-api resolves the org from auth0_user_id
+// itself and enforces is_org_admin server-side.
+function listSnApiOrganizationKeys(authUser) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/organization-api-keys?auth0_user_id=${encodeURIComponent(authUser.sub)}`
+  );
+}
+
+function pauseSnApiOrganizationKey(authUser, apiKeyId) {
+  return snApiKeyRequest(`/api/v3/developer-portal/organization-api-keys/${apiKeyId}/pause`, {
+    method: "POST", body: { auth0_user_id: authUser.sub },
+  });
+}
+
+function revokeSnApiOrganizationKey(authUser, apiKeyId) {
+  return snApiKeyRequest(
+    `/api/v3/developer-portal/organization-api-keys/${apiKeyId}?auth0_user_id=${encodeURIComponent(authUser.sub)}`,
+    { method: "DELETE" }
+  );
+}
+
+function listSnApiOrganizationMembers(organizationId) {
+  return snApiKeyRequest(`/api/v3/developer-portal/organization-members?organization_id=${encodeURIComponent(organizationId)}`);
+}
+
+function suspendSnApiOrganizationMember(userId) {
+  return snApiKeyRequest(`/api/v3/developer-portal/organization-members/${userId}/suspend`, { method: "POST" });
+}
+
 function getSnApiUsageSummary(authUser) {
   return snApiKeyRequest(
     `/api/v3/developer-portal/usage-summary?auth0_user_id=${encodeURIComponent(authUser.sub)}`
@@ -355,7 +384,7 @@ function getSnApiCurrentPlanChange(authUser) {
   );
 }
 
-function registerSnApiPortalAccount(authUser) {
+function registerSnApiPortalAccount(authUser, pendingInvitation = null) {
   if (!authUser?.sub || !authUser?.email) {
     throw new Error("Authenticated Auth0 user id and email are required");
   }
@@ -364,12 +393,17 @@ function registerSnApiPortalAccount(authUser) {
     body: {
       auth0_user_id: authUser.sub,
       email: authUser.email,
+      email_verified: authUser.email_verified === true,
       full_name: authUser.name || authUser.nickname || authUser.email,
       organization_name:
         authUser.organization_name ||
         authUser.org_name ||
         authUser.email.split("@")[1] ||
         authUser.email,
+      // Validated the same way identify()/accept() validate a token -- never
+      // trusted by email match alone. Omitted entirely (not just falsy) when
+      // there's no captured invitation, or it failed to parse.
+      ...(pendingInvitation ? { invitation_id: pendingInvitation.id, invitation_token_hash: pendingInvitation.token_hash } : {}),
     },
   });
 }
@@ -500,6 +534,11 @@ module.exports = {
   revokeSnApiKey,
   rotateSnApiKey,
   setSnApiKeyPaused,
+  listSnApiOrganizationKeys,
+  pauseSnApiOrganizationKey,
+  revokeSnApiOrganizationKey,
+  listSnApiOrganizationMembers,
+  suspendSnApiOrganizationMember,
   createSnApiPlanChange,
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,

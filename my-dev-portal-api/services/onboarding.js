@@ -6,14 +6,23 @@ const messages = {
   terms_identity_mismatch: "Sign in with the email address associated with your account.",
 };
 
-function createOnboarding(deps) {
-  const get = async (user, includeDocument = true) => {
+function createOnboarding(deps, invitations) {
+  const get = async (user, includeDocument = true, rawInvitationToken = null) => {
     const path = `${PREFIX}?auth0_user_id=${encodeURIComponent(user.sub)}&include_document=${includeDocument}`;
     let result;
     try { result = await deps.invitationRequest(path); }
     catch (error) {
       if (error.status !== 404 || error.code !== "terms_account_not_found") throw error;
-      await deps.registerSnApiPortalAccount(user);
+      // Thread a captured invitation token through to registration itself --
+      // NOT just the later /invitations/accept call -- since this is the
+      // first request that actually creates the AuthUser row, before the
+      // browser could ever reach an invitation-specific endpoint. Parsed
+      // (not raw) so sn-api gets the same {id, token_hash} shape
+      // identify()/accept() already validate; an invalid/stale token is
+      // simply not forwarded (parseToken returns null), never silently
+      // treated as a valid one.
+      const parsed = rawInvitationToken && invitations ? invitations.parseToken(rawInvitationToken) : null;
+      await deps.registerSnApiPortalAccount(user, parsed);
       result = await deps.invitationRequest(path);
     }
     if (typeof result?.required !== "boolean" || typeof result?.enabled !== "boolean") throw new Error("Invalid onboarding response");
@@ -33,14 +42,14 @@ function createOnboarding(deps) {
         if (/^\/register\/stripe\//.test(req.path) ||
             (req.method === "DELETE" && /^\/api-keys\/[^/]+\/?$/.test(req.path)) ||
             (req.method === "POST" && /^\/api-keys\/[^/]+\/pause\/?$/.test(req.path))) return next();
-        const result = await get(req.user, false);
+        const result = await get(req.user, false, req.headers["x-pending-invitation"]);
         if (result.required) return res.status(403).json({ code: "terms_acceptance_required", message: messages.terms_acceptance_required });
         next();
       } catch (error) { return errorResponse(res, error); }
     },
     install(app, auth, jsonParser) {
       app.get("/onboarding", auth, async (req, res) => {
-        try { res.json(await get(req.user)); }
+        try { res.json(await get(req.user, true, req.headers["x-pending-invitation"])); }
         catch (error) { errorResponse(res, error); }
       });
       app.post("/onboarding/accept", auth, jsonParser, async (req, res) => {

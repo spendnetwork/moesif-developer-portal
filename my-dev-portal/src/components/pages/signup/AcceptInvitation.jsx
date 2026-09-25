@@ -24,7 +24,11 @@ export default function AcceptInvitation() {
       const claims = await getIdTokenClaims();
       if (!claims?.__raw) throw new Error("Sign in again to accept this invitation.");
       const result = await apiRequest("/invitations/accept", claims.__raw, { method: "POST", body: JSON.stringify({ token }) });
-      if (!result?.id || result.status !== "accepted" || !result.credit_receipt) throw new Error("The invitation could not be confirmed. Please try again.");
+      // A team-member invitation grants no credit -- credit_receipt is only
+      // expected (and required) for the original new-customer kind.
+      if (!result?.id || result.status !== "accepted" || (result.kind !== "team_member" && !result.credit_receipt)) {
+        throw new Error("The invitation could not be confirmed. Please try again.");
+      }
       if (alive.current) {
         clearInvitation();
         navigate("/dashboard", { replace: true });
@@ -41,10 +45,10 @@ export default function AcceptInvitation() {
   if (!isLoading && !isAuthenticated && token) return <Signup />;
   return <main className="signup-entry">
     <img className="signup-entry__logo" src={openOpportunitiesLogo} alt="Open Opportunities" />
-    <h1>{error ? "We could not finish setting up your credit" : "Setting up your development credit"}</h1>
+    <h1>{error ? "We could not finish setting up your account" : "Setting up your account"}</h1>
     {!token ? <><p>Open the link from your invitation email to continue.</p><Link to="/dashboard">Go to dashboard</Link></> : <>
       {error && <p role="alert">{error}</p>}
-      {(busy || isLoading) && <p role="status">Confirming your invitation and applying your credit...</p>}
+      {(busy || isLoading) && <p role="status">Confirming your invitation...</p>}
       {error && <div className="signup-entry__actions">
         <button type="button" disabled={busy || isLoading} onClick={() => void request()}>Try again</button>
         <button type="button" disabled={busy} className="signup-entry__signin" onClick={async () => {

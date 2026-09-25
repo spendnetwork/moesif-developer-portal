@@ -8,7 +8,15 @@ import logo from "../images/assets/open-opportunities-logo.png";
 import "../styles/components/onboarding.css";
 
 const request = async (token, options) => {
-  const data = await apiRequest("/onboarding", token, { signal: AbortSignal.timeout(15000), ...options });
+  // Thread a captured invitation token to the FIRST request that could
+  // trigger registration -- not just the later /invitations/accept call --
+  // since this is what actually creates the AuthUser row for a genuinely new
+  // teammate. A header, never a query string, so it never lands in access
+  // logs or analytics. Absent for an ordinary signup or a returning user.
+  const pending = pendingInvitation();
+  const headers = pending ? { "X-Pending-Invitation": pending } : undefined;
+  const data = await apiRequest("/onboarding", token, { signal: AbortSignal.timeout(15000), ...options,
+    headers: { ...headers, ...options?.headers } });
   if (typeof data?.required !== "boolean" || typeof data?.enabled !== "boolean" || (data.required && !data.document?.text)) throw new Error("Invalid onboarding response");
   return data;
 };

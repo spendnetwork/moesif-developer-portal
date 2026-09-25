@@ -48,6 +48,14 @@ function createInvitations({ request, env = process.env }) {
   return {
     settings, token,
     link(id) { return `${settings().origin}/signup#invitation=${token(id)}`; },
+    // Used by onboarding.js to validate a captured invitation token before
+    // registration -- never by email match alone. Invalid shape returns
+    // null rather than throwing, since a stale/garbled token must not block
+    // ordinary onboarding; sn-api still rejects a genuinely invalid token
+    // clearly if one is forwarded.
+    parseToken(value) {
+      try { return parse(value); } catch { return null; }
+    },
     create(body) {
       const id = String(body.requestId || "").toLowerCase();
       const rawToken = token(id);
@@ -61,6 +69,33 @@ function createInvitations({ request, env = process.env }) {
       const value = Number(offset);
       if (!Number.isSafeInteger(value) || value < 0) fail("invalid_invitation_page");
       return request(`${PREFIX}/invitations?offset=${value}&limit=50`);
+    },
+    // Self-service: organization_id and admin authorization are resolved
+    // server-side from auth0UserId -- never client-supplied.
+    createTeamMember(body) {
+      const id = String(body.requestId || "").toLowerCase();
+      const rawToken = token(id);
+      return request(`${PREFIX}/team-invitations`, { method: "POST", body: {
+        request_id: id, email: body.email, full_name: body.fullName,
+        internal_note: body.internalNote || "", token_hash: hash(rawToken),
+        auth0_user_id: body.auth0UserId,
+      } });
+    },
+    // Staff-assisted: the caller isn't a developer-portal AuthUser, so
+    // organizationId is supplied directly, same trust boundary as /admin/invitations.
+    createTeamMemberStaff(body) {
+      const id = String(body.requestId || "").toLowerCase();
+      const rawToken = token(id);
+      return request(`${PREFIX}/admin/team-invitations`, { method: "POST", body: {
+        request_id: id, email: body.email, full_name: body.fullName,
+        organization_id: body.organizationId, internal_note: body.internalNote || "",
+        token_hash: hash(rawToken), requested_by: body.requestedBy,
+      } });
+    },
+    listTeamMembers(organizationId, offset = 0) {
+      const value = Number(offset);
+      if (!Number.isSafeInteger(value) || value < 0) fail("invalid_invitation_page");
+      return request(`${PREFIX}/team-invitations?organization_id=${encodeURIComponent(organizationId)}&offset=${value}&limit=50`);
     },
     change(id, action, body) {
       if (!UUID.test(id) || !["resend", "revoke", "retry-notifications"].includes(action)) fail("invalid_invitation_id");
@@ -99,7 +134,7 @@ const messages = {
   legacy_wallet_reconciliation_required: "Your existing balance needs review by our team before this credit can be granted.",
 };
 
-function installInvitationRoutes(app, { service, auth, jsonParser, serviceTokenMatches, invalidate }) {
+function installInvitationRoutes(app, { service, auth, portalAuth, jsonParser, serviceTokenMatches, invalidate }) {
   function admin(req, res, next) {
     if (!process.env.ADMIN_PLAN_CHANGE_TOKEN) return res.status(503).json({ code: "admin_not_configured", message: "Admin service is not configured." });
     if (!serviceTokenMatches(req.headers["x-admin-service-token"], process.env.ADMIN_PLAN_CHANGE_TOKEN)) return res.status(401).json({ code: "unauthorized" });
@@ -125,6 +160,28 @@ function installInvitationRoutes(app, { service, auth, jsonParser, serviceTokenM
   }));
   app.get("/invitation-notifications", auth, handle(req => service.notifications(req.user)));
   app.post("/invitation-notifications/:id/dismiss", auth, handle(req => service.dismiss(req.user, req.params.id)));
+
+  app.get("/admin/team-invitations", admin, handle(req => service.listTeamMembers(req.query.organizationId, req.query.offset)));
+
+  // Staff-assisted: admin-portal supplies organizationId directly (staff
+  // aren't developer-portal users), same trust boundary as /admin/invitations.
+  app.post("/admin/team-invitations", admin, jsonParser, handle(req => service.createTeamMemberStaff({
+    requestId: req.body.requestId, email: req.body.email, fullName: req.body.fullName,
+    organizationId: req.body.organizationId, internalNote: req.body.internalNote, requestedBy: req.body.requestedBy,
+  })));
+
+  // Self-service: organization_id and admin authorization are resolved
+  // server-side from the caller's own identity -- never client-supplied.
+  app.post("/team-invitations", auth, jsonParser, handle(req => service.createTeamMember({
+    requestId: req.body.requestId, email: req.body.email, fullName: req.body.fullName,
+    internalNote: req.body.internalNote, auth0UserId: req.user.sub,
+  })));
+
+  // portalAuth (not just auth) so req.portalContext.organization_id is
+  // resolved -- never trust a client-supplied organization_id here.
+  if (portalAuth) {
+    app.get("/team-invitations", portalAuth, handle(req => service.listTeamMembers(req.portalContext.organization_id, req.query.offset)));
+  }
 }
 
 module.exports = { createInvitations, installInvitationRoutes };

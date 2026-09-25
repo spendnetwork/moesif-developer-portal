@@ -1,9 +1,13 @@
 import React from "react";
+import useSWR from "swr";
 
 import { useAuth0 } from "@auth0/auth0-react";
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
 import NoticeBox from "../../notice-box";
+import Team from "./Team";
+import useAuthCombined from "../../../hooks/useAuthCombined";
+import { authedFetcher } from "../../../lib/portal-api";
 import profileIcon from "../../../images/icons/user.svg";
 
 const C = {
@@ -45,6 +49,8 @@ function Auth0Settings(props) {
   } = useAuth0();
 
   const { openStripeManagement } = props;
+  const { idToken } = useAuthCombined();
+  const { data: portalContext } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
 
   if (isLoading) {
     return (
@@ -136,6 +142,8 @@ function Auth0Settings(props) {
                 Manage billing
               </button>
             </div>
+
+            <Team isOrgAdmin={Boolean(portalContext?.is_org_admin)} />
           </>
         ) : (
           <NoticeBox
