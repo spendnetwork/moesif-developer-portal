@@ -24,6 +24,26 @@ test("local templates escape HTML once, retain plain text, and do not evaluate r
   assert.throws(() => renderEmail("invite", {}), { code: "EmailTemplateInvalid" });
   assert.throws(() => renderEmail("unknown", data), { code: "UnknownEmailTemplate" });
 });
+test("team templates render names into one-line subjects and never mention credit", () => {
+  const invite = renderEmail("team_invite", { name: "Tara", company: "Acme\r\nLtd", invitationUrl: data.invitationUrl, invitationExpiresAt: data.invitationExpiresAt });
+  assert.equal(invite.subject, "You're invited to join Acme Ltd on Open Opportunities");
+  assert.ok(invite.html.includes("#invitation"));
+  assert.ok(invite.text.includes(data.invitationUrl));
+  const joined = renderEmail("team_joined", { memberName: "<b>Tara</b>", memberEmail: "tara@example.com", company: "A&B", teamUrl: "https://portal.example.com/settings" });
+  assert.equal(joined.subject, "<b>Tara</b> joined A&B on Open Opportunities");
+  assert.ok(joined.html.includes("&lt;b&gt;Tara&lt;/b&gt;"));
+  for (const rendered of [invite, joined]) assert.ok(!/credit is|development credit|GBP|£/i.test(rendered.text));
+  assert.throws(() => renderEmail("team_joined", { memberName: "Tara" }), { code: "EmailTemplateInvalid" });
+});
+test("several recipients are sent as separate copies", async () => {
+  const { calls, email } = setup();
+  await email.send({ kind: "team_joined", to: ["a@example.com", "b@example.com"], deliveryId: "job-2",
+    data: { memberName: "Tara", memberEmail: "tara@example.com", company: "Acme", teamUrl: "https://portal.example.com/settings" } });
+  assert.deepEqual(calls[0].to, ["a@example.com", "b@example.com"]);
+  assert.equal(calls[0].isMultiple, true);
+  await email.send({ kind: "invite", to: "a@example.com", data, deliveryId: "job-3" });
+  assert.equal(calls[1].isMultiple, undefined);
+});
 test("SendGrid sends local HTML/text with tracking off and returns only accepted message ID", async () => {
   const { calls, email } = setup();
   assert.equal(await email.send({ kind: "invite", to: "recipient@example.com", data, deliveryId: "job-1" }), "message-123");

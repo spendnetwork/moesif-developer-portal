@@ -20,8 +20,10 @@ function emailSettings(env = process.env) {
 const templates = Object.fromEntries([
   ["invite", require("../email-templates/customer-invitation.json")],
   ["accepted_email", require("../email-templates/development-credit-granted.json")],
+  ["team_invite", require("../email-templates/team-invitation.json")],
+  ["team_joined", require("../email-templates/team-member-joined.json")],
 ].map(([kind, template]) => [kind, {
-  subject: template.subject,
+  subject: Handlebars.compile(template.subject, { strict: true, noEscape: true }),
   text: Handlebars.compile(template.text, { strict: true, noEscape: true }),
   html: Handlebars.compile(template.html, { strict: true }),
 }]));
@@ -29,8 +31,11 @@ const templates = Object.fromEntries([
 function renderEmail(kind, data) {
   const template = templates[kind];
   if (!template) throw emailError("UnknownEmailTemplate", true);
-  try { return { subject: template.subject, text: template.text(data), html: template.html(data) }; }
-  catch { throw emailError("EmailTemplateInvalid", true); }
+  try {
+    // Names in a subject line must stay on one line.
+    const subject = template.subject(data).replace(/\s+/g, " ").trim();
+    return { subject, text: template.text(data), html: template.html(data) };
+  } catch { throw emailError("EmailTemplateInvalid", true); }
 }
 
 function classifySendError(error) {
@@ -57,7 +62,9 @@ function createNotificationEmail({ env = process.env, client } = {}) {
       let response;
       try {
         [response] = await mail.send({
-          to, from: { email: settings.from, name: settings.name }, ...content,
+          // Several recipients each get their own copy and never see each other's address.
+          to, ...(Array.isArray(to) ? { isMultiple: true } : {}),
+          from: { email: settings.from, name: settings.name }, ...content,
           customArgs: { notification: kind, delivery_id: String(deliveryId) },
           trackingSettings: {
             clickTracking: { enable: false, enableText: false },

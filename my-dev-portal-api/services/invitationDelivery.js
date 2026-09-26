@@ -11,17 +11,34 @@ function createDeliveryWorker({ service, email, env = process.env, fetcher = fet
   let running = false;
   async function deliver(job) {
     const invite = job.invitation;
+    const team = invite.kind === "team_member";
     if (job.kind === "accepted_slack") {
       const webhook = new URL(env.INVITATION_SLACK_WEBHOOK_URL);
       if (webhook.protocol !== "https:" || !["hooks.slack.com", "hooks.slack-gov.com"].includes(webhook.hostname)) throw deliveryError("InvalidSlackConfiguration");
+      const text = team
+        ? `Teammate joined\n${invite.full_name} (${invite.email})\n${invite.company_name}\nTeam invitation: no credit granted.\nInvitation: ${invite.id}`
+        : `Invitation accepted\n${invite.full_name} (${invite.email})\n${invite.company_name}\nGBP ${(invite.amount_gbp_pence / 100).toFixed(2)} development credit granted for ${invite.validity_days} days.\nInvitation: ${invite.id}`;
       const response = await fetcher(webhook, { method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blocks: [{ type: "section", text: { type: "plain_text",
-          text: `Invitation accepted\n${invite.full_name} (${invite.email})\n${invite.company_name}\nGBP ${(invite.amount_gbp_pence / 100).toFixed(2)} development credit granted for ${invite.validity_days} days.\nInvitation: ${invite.id}` } }] }) });
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blocks: [{ type: "section", text: { type: "plain_text", text } }] }) });
       if (!response.ok || (await response.text()).trim() !== "ok") throw deliveryError("SlackDeliveryRejected");
       return "slack";
     }
     const invitation = job.kind === "invite";
     if (!invitation && job.kind !== "accepted_email") throw deliveryError("UnknownDeliveryKind");
+    if (team) {
+      const origin = service.settings().origin;
+      if (invitation) {
+        return (email || createNotificationEmail({ env })).send({ kind: "team_invite", to: invite.email, deliveryId: job.id,
+          data: { name: invite.full_name || "", company: invite.company_name || "", invitationUrl: service.link(invite.id),
+            invitationExpiresAt: displayDate(invite.expires_at) } });
+      }
+      // Admins only; sn-api resolves them and cancels the job when there are none.
+      const recipients = Array.isArray(job.recipients) ? job.recipients.filter(item => typeof item === "string" && item) : [];
+      if (!recipients.length) throw Object.assign(deliveryError("NoAdminRecipients"), { permanent: true });
+      return (email || createNotificationEmail({ env })).send({ kind: "team_joined", to: recipients, deliveryId: job.id,
+        data: { memberName: invite.full_name || invite.email, memberEmail: invite.email, company: invite.company_name || "",
+          teamUrl: `${origin}/settings` } });
+    }
     const data = {
       name: invite.full_name || "", company: invite.company_name || "",
       creditAmount: (invite.amount_gbp_pence / 100).toFixed(2), currency: "GBP", validityDays: String(invite.validity_days),
