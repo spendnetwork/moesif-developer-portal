@@ -1,0 +1,21 @@
+.notifications-page { width: 100%; max-width: 960px; color: #23383a; }
+.notifications-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 28px; }
+.notifications-eyebrow { margin: 0 0 8px; color: #647873; font-size: 13px; text-transform: uppercase; }
+.notifications-heading h1 { margin: 0; font-size: 32px; line-height: 1.25; letter-spacing: 0; }
+.notifications-icon { width: 40px; height: 40px; flex: 0 0 40px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #cbd6d0; border-radius: 6px; background: white; color: #034737; cursor: pointer; }
+.notifications-icon:hover:not(:disabled) { background: #edf4ef; border-color: #034737; }
+.notifications-icon:focus-visible { outline: 2px solid #034737; outline-offset: 3px; }
+.notifications-icon:disabled { opacity: .5; cursor: wait; }
+.notifications-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid #dce5df; }
+.notification-row { display: flex; align-items: flex-start; gap: 16px; padding: 24px 12px; border-bottom: 1px solid #dce5df; }
+.notification-row--unread { background: #fff; }
+.notification-indicator { width: 7px; height: 7px; flex: 0 0 7px; margin-top: 9px; border-radius: 50%; background: #cbd6d0; }
+.notification-row--unread .notification-indicator { background: #2468a0; }
+.notification-content { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notification-content h2 { margin: 0 0 8px; font-size: 17px; line-height: 1.45; letter-spacing: 0; }
+.notification-content p { margin: 0 0 12px; font-size: 15px; line-height: 1.65; color: #526760; }
+.notification-content time { font-size: 12px; color: #647873; }
+.notifications-error { border-left: 3px solid #ad4141; padding: 12px 16px; background: #fff0ef; color: #873636; }
+.notifications-empty { padding: 48px 0; color: #647873; }
+.notifications-empty h2 { margin: 16px 0 8px; font-size: 20px; color: #23383a; }
+@media (max-width: 600px) { .notifications-heading h1 { font-size: 28px; } .notification-row { padding: 20px 4px; gap: 10px; } }

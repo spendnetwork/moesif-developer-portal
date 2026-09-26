@@ -18,6 +18,7 @@ import { PageFooter } from "./components/page-footer";
 import SessionTimeout from "./components/session-timeout";
 import RouteScrollReset from "./components/route-scroll-reset";
 import OnboardingGate from "./components/onboarding-gate";
+import Notifications from "./components/pages/notifications/Notifications";
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
             <SessionTimeout />
             <OnboardingGate>
             <Routes>
+              <Route path="/notifications" element={<AuthenticationGuard component={Notifications} />} />
               {/* Home redirects signed-in users to /dashboard itself. The
                   redirect can't live here: App sits above Auth0Provider, so a
                   useAuth0() call at this level would always read the default

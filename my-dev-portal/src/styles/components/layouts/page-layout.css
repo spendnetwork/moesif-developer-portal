@@ -49,7 +49,7 @@
   max-width: 1800px;
 }
 
-@media only screen and (max-width: 640px) {
+@media only screen and (max-width: 960px) {
   .page-layout__content {
     margin-top: 0;
     padding-top: calc(6.4rem + 24px);

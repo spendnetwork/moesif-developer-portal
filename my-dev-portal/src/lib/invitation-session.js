@@ -2,7 +2,7 @@ const KEY = "openopps.pending-invitation.v1";
 export function skipInvitationAnalytics(event) {
   try {
     const path = new URL(event?.request?.uri || "", "https://portal.invalid").pathname;
-    return /\/(?:invitations|invitation-notifications)(?:\/|$)/.test(path);
+    return /\/(?:invitations|invitation-notifications|notifications)(?:\/|$)/.test(path);
   } catch { return true; }
 }
 export function captureInvitation() {

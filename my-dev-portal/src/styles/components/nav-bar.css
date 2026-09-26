@@ -138,7 +138,7 @@
   }
 }
 
-@media only screen and (max-width: 640px) {
+@media only screen and (max-width: 960px) {
   /* The mobile nav bar takes over below this width. */
   .nav-bar__container {
     display: none;

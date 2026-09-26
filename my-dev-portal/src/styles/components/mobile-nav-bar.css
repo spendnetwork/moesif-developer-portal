@@ -167,7 +167,7 @@
   }
 }
 
-@media only screen and (max-width: 640px) {
+@media only screen and (max-width: 960px) {
   .mobile-nav-bar__container {
     display: flex;
   }

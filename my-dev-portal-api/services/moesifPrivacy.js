@@ -7,6 +7,7 @@ const SENSITIVE_PATH_PREFIXES = [
   "/api-keys",
   "/organization-api-keys",
   "/stripe/",
+  "/notifications",
   "/admin/",
   "/wallet/",
   "/create-stripe-checkout-session",

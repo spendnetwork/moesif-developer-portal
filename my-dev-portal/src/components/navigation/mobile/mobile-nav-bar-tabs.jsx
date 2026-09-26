@@ -9,6 +9,9 @@ export const MobileNavBarTabs = ({ handleClick }) => {
     <div className="mobile-nav-bar__tabs">
       {isAuthenticated && (
         <>
+          <MobileNavBarTab path="/notifications" label="Notifications" handleClick={handleClick} />
+          <MobileNavBarTab path="/plans" label="Plans" handleClick={handleClick} />
+          <MobileNavBarTab path="/subscription" label="Billing" handleClick={handleClick} />
           <MobileNavBarTab
             path="/settings"
             label="Settings"

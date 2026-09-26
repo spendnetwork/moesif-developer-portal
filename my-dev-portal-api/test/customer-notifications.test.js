@@ -44,7 +44,9 @@ test("paused access explains itself without revealing the staff reason, and rest
   const review = await run({ id: "access_paused:1:b", lease_id: "l", kind: "access_paused", recipients: admins, company: "Acme", payload: { reason: "payment_review" } });
   assert.ok(review.rendered.text.includes("please don't pay again"));
   const restored = await run({ id: "access_restored:1:c", lease_id: "l", kind: "access_restored", recipients: admins, company: "Acme", payload: {} });
-  assert.equal(restored.rendered.subject, "Your Open Opportunities API access is restored");
+  assert.match(restored.rendered.subject, /staff pause.*removed/);
+  assert.match(restored.rendered.text, /sufficient valid credit, accepted terms and an active API key/);
+  assert.doesNotMatch(restored.rendered.text, /keys work as before/);
 });
 
 test("undeliverable jobs fail permanently while provider outages retry", async () => {

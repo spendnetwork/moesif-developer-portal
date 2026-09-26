@@ -388,6 +388,9 @@ const invitationService = createInvitations({ request: require("./services/snApi
 const onboarding = require("./services/onboarding").createOnboarding(require("./services/snApiProvisioning"), invitationService);
 onboarding.install(app, authMiddleware, jsonParser);
 const portalAuthMiddleware = [authMiddleware, onboarding.requireTerms, attachSnApiPortalContext];
+require("./services/notificationRoutes").installNotificationRoutes(app, {
+  auth: portalAuthMiddleware, request: require("./services/snApiProvisioning").invitationRequest, origin: getFrontendOrigin(),
+});
 installInvitationRoutes(app, { service: invitationService, auth: [authMiddleware, onboarding.requireTerms], portalAuth: portalAuthMiddleware, jsonParser, serviceTokenMatches, invalidate: invalidatePortalContext });
 
 async function requestLocalSummary(req) {
@@ -1265,6 +1268,11 @@ const SUBSCRIPTION_LIFECYCLE_EVENTS = [
   "customer.subscription.resumed",
 ];
 
+app.post("/notifications/sendgrid/events", express.raw({ type: "application/json", limit: "1mb" }),
+  require("./services/sendgridEvents").createSendgridEventHandler({
+    request: require("./services/snApiProvisioning").invitationRequest,
+  }));
+
 app.post(
   "/stripe/webhook",
   express.raw({ type: "application/json" }),
@@ -1288,6 +1296,18 @@ app.post(
     } catch (err) {
       console.error("Stripe webhook signature verification failed", safeBillingError(err));
       return res.status(400).json({ message: "Invalid signature" });
+    }
+
+    if (["invoice.payment_failed", "checkout.session.async_payment_failed"].includes(event.type)) {
+      try {
+        const customer = event.data.object.customer;
+        if (customer) await require("./services/snApiProvisioning").invitationRequest(
+          "/api/v3/developer-portal/notification-deliveries/payment-failed", {
+            method: "POST", body: { event_id: event.id, stripe_customer_id: typeof customer === "string" ? customer : customer.id },
+          });
+      } catch {
+        return res.status(503).json({ message: "Payment notification pending" });
+      }
     }
 
     if (

@@ -61,7 +61,7 @@ export default function AccountStatusBanner() {
           </a>{" "}
           {isExhausted && !paused ? isDevelopment ? "to discuss development allowance or a Growth or Enterprise commitment, or " : "to discuss a Growth or Enterprise commitment, or " : "to restore access, or review "}
           <Link to={isBasic && isExhausted && !paused ? topUpPath : "/plans"} style={styles.link}>
-            {isExhausted && !paused ? isBasic ? "Add credit from £100" : "choose Basic prepaid from £100" : "your plan options"}
+            {isExhausted && !paused ? isBasic ? "Add credit from £50" : "choose Basic prepaid from £50" : "your plan options"}
           </Link>.
         </div>
       </div>
