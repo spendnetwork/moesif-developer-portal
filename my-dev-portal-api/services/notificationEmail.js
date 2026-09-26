@@ -22,6 +22,10 @@ const templates = Object.fromEntries([
   ["accepted_email", require("../email-templates/development-credit-granted.json")],
   ["team_invite", require("../email-templates/team-invitation.json")],
   ["team_joined", require("../email-templates/team-member-joined.json")],
+  ["welcome", require("../email-templates/welcome.json")],
+  ["payment_confirmed", require("../email-templates/payment-confirmed.json")],
+  ["access_paused", require("../email-templates/access-paused.json")],
+  ["access_restored", require("../email-templates/access-restored.json")],
 ].map(([kind, template]) => [kind, {
   subject: Handlebars.compile(template.subject, { strict: true, noEscape: true }),
   text: Handlebars.compile(template.text, { strict: true, noEscape: true }),

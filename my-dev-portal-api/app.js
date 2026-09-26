@@ -1981,6 +1981,8 @@ app.get(
 
 app.listen(port, () => {
   require("./services/invitationDelivery").startInvitationWorker(invitationService);
+  require("./services/customerNotificationDelivery").startCustomerNotificationWorker(
+    invitationService, require("./services/snApiProvisioning").invitationRequest);
   console.log(`My Dev Portal Backend is listening at http://localhost:${port}`);
 });
 
