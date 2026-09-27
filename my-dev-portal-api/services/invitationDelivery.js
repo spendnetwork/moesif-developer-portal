@@ -1,5 +1,6 @@
 "use strict";
 const { createNotificationEmail } = require("./notificationEmail");
+const { slackNotification } = require("./slackNotification");
 function deliveryError(code) { return Object.assign(new Error(code), { name: code }); }
 function displayDate(value) {
   const date = new Date(value);
@@ -14,12 +15,17 @@ function createDeliveryWorker({ service, email, env = process.env, fetcher = fet
     const team = invite.kind === "team_member";
     if (job.kind === "accepted_slack") {
       const webhook = new URL(env.INVITATION_SLACK_WEBHOOK_URL);
-      if (webhook.protocol !== "https:" || !["hooks.slack.com", "hooks.slack-gov.com"].includes(webhook.hostname)) throw deliveryError("InvalidSlackConfiguration");
-      const text = team
-        ? `Teammate joined\n${invite.full_name} (${invite.email})\n${invite.company_name}\nTeam invitation: no credit granted.\nInvitation: ${invite.id}`
-        : `Invitation accepted\n${invite.full_name} (${invite.email})\n${invite.company_name}\nGBP ${(invite.amount_gbp_pence / 100).toFixed(2)} development credit granted for ${invite.validity_days} days.\nInvitation: ${invite.id}`;
+      if (webhook.protocol !== "https:" || !["hooks.slack.com", "hooks.slack-gov.com"].includes(webhook.hostname) ||
+          webhook.username || webhook.password || !webhook.pathname.startsWith("/services/")) throw deliveryError("InvalidSlackConfiguration");
+      const fields = [["Company", invite.company_name], ["Name", invite.full_name], ["Email", invite.email]];
+      if (!team) fields.push(["Development credit", new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(invite.amount_gbp_pence / 100)],
+        ["Validity", `${invite.validity_days} days`]);
+      fields.push(["Customer id", invite.organization_id], ["Invitation id", invite.id]);
+      const payload = slackNotification({ title: team ? "Teammate joined" : "Invitation accepted", fields,
+        notes: team ? ["Team invitation: no credit granted."] : ["Development credit granted after invitation acceptance."],
+        organizationId: invite.organization_id }, env);
       const response = await fetcher(webhook, { method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blocks: [{ type: "section", text: { type: "plain_text", text } }] }) });
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!response.ok || (await response.text()).trim() !== "ok") throw deliveryError("SlackDeliveryRejected");
       return "slack";
     }

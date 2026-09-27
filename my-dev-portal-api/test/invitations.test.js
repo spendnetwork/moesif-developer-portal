@@ -151,8 +151,8 @@ test("the Slack alert for a teammate says no credit was granted", async () => {
   const { results } = await runTeamJob({ id: "job", lease_id: "lease", kind: "accepted_slack", invitation: teamInvite }, {
     fetcher: async (_, options) => { body = JSON.parse(options.body); return { ok: true, text: async () => "ok" }; } });
   assert.equal(results[0].result, "sent");
-  const text = body.blocks[0].text.text;
-  assert.ok(text.startsWith("Teammate joined"));
+  assert.equal(body.blocks[0].text.text, "Teammate joined");
+  const text = JSON.stringify(body.blocks);
   assert.ok(text.includes("no credit granted"));
   assert.ok(!text.includes("NaN") && !text.includes("null"));
 });

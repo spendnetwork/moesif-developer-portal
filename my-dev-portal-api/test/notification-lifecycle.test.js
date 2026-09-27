@@ -6,6 +6,21 @@ const { createCustomerNotificationWorker, renderJob } = require("../services/cus
 const { renderEmail } = require("../services/notificationEmail");
 const { installNotificationRoutes } = require("../services/notificationRoutes");
 
+test("worker distinguishes missing routes and auth failures without leaking upstream details", async (t) => {
+  const logs = [];
+  t.mock.method(console, "warn", value => logs.push(JSON.parse(value)));
+  for (const [status, code] of [[404, "notification_api_route_missing"], [401, "notification_api_unauthorized"], [403, "notification_api_forbidden"], [503, "delivery_service_unavailable"]]) {
+    logs.length = 0;
+    const fail = async () => { throw Object.assign(new Error("private-token customer@example.com"), { status, code: "private_token", detail: "private upstream body" }); };
+    await createCustomerNotificationWorker({ service: { settings: () => ({}), scan: fail, claim: fail } }).tick();
+    assert.deepEqual(logs, [
+      { event: "notification_scan_delayed", phase: "scan", status, code },
+      { event: "customer_notification_worker_delayed", phase: "claim", status, code },
+    ]);
+    assert.doesNotMatch(JSON.stringify(logs), /private|customer@example/);
+  }
+});
+
 test("verified SendGrid reports forward only permitted fields; API outage is retriable", async () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const env = { SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY: publicKey.export({ format: "der", type: "spki" }).toString("base64") };

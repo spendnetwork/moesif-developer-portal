@@ -26,7 +26,9 @@ const templates = Object.fromEntries([
   ["payment_confirmed", require("../email-templates/payment-confirmed.json")],
   ["access_paused", require("../email-templates/access-paused.json")],
   ["access_restored", require("../email-templates/account-update.json")],
-  ...["development_granted", "credit_low", "credit_exhausted", "credit_expiring", "credit_expired",
+  ["credit_low", require("../email-templates/credit-utilisation.json")],
+  ["credit_exhausted", require("../email-templates/credit-utilisation.json")],
+  ...["development_granted", "credit_expiring", "credit_expired",
       "pricing_expiring", "pricing_expired", "payment_failed", "api_key_changed", "purchase_requested"]
     .map(kind => [kind, require("../email-templates/account-update.json")]),
 ].map(([kind, template]) => [kind, {
