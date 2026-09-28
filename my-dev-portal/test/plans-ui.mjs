@@ -57,7 +57,7 @@ try {
     assert.equal(await page.getByRole("link", { name: "Request an invoice instead" }).count(), 2);
     await page.evaluate(() => document.fonts.ready);
     assert.deepEqual(await page.locator(".plan-option h2").allTextContents(), ["Basic", "Growth", "Enterprise"]);
-    assert.equal(await page.getByRole("heading", { name: "Testing the API?" }).count(), 1);
+    assert.equal(await page.getByRole("heading", { name: "Testing the API?" }).count(), 0);
     assert.equal(await page.getByText("Highlight differences", { exact: true }).count(), 0);
     const boxes = await page.locator(".plan-option").evaluateAll(els => els.map(el => el.getBoundingClientRect().toJSON()));
     if (width > 860) assert.equal(new Set(boxes.map(box => box.height)).size, 1);
@@ -82,7 +82,6 @@ try {
     const { page } = await pageFor(390, tier);
     await page.goto(base + "/plans?fixture=wallet-" + tier);
     await page.getByText("Current pricing", { exact: true }).waitFor();
-    assert.equal(await page.locator(".development-banner").count(), 0);
     if (tier === "enterprise") {
       assert.equal(await page.getByRole("button", { name: "Available after Enterprise ends" }).isDisabled(), true);
       await page.goto(base + "/credit?package=growth");

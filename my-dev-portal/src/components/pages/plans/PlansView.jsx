@@ -20,7 +20,6 @@ export default function PlansView() {
   const { idToken } = useAuthCombined();
   const { data: context, error } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
   const current = context?.current_plan_key;
-  const showDevelopment = (!idToken || Boolean(context)) && !context?.has_activated_paid_plan;
   return <PageLayout><main className="plans-page">
     <header className="plans-page__heading"><div><h1>Open Opportunities API plans</h1>
       <p>Prepaid credit, with 12 months of lower rates on Growth and Enterprise. No overages.</p></div></header>
@@ -45,9 +44,5 @@ export default function PlansView() {
       })}
     </div>
     <p style={{ color: "#526862", lineHeight: 1.6, marginTop: 24 }}>Growth and Enterprise can be paid by card or invoice. Credit-only top-ups use card below £5,000 and invoice from £5,000. Credit and pricing activate only after payment clears.</p>
-    {showDevelopment && <section className="development-banner" aria-labelledby="development-access-heading">
-      <div><p className="development-banner__label">Development access</p><h2 id="development-access-heading">Testing the API?</h2><p>Speak to our team about development credits. Separate expiry, metered at Basic rates.</p></div>
-      <a className="plan-choice-button" href="mailto:welcome@openopps.com?subject=API%20development%20credit">Request access</a>
-    </section>}
   </main></PageLayout>;
 }
