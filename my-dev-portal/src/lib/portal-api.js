@@ -3,8 +3,17 @@
 // inactive subscription (402), etc.
 
 import { notifySessionExpired } from "./session-expiry";
+import { pendingInvitation } from "./invitation-session";
 
 const BASE = import.meta.env.REACT_APP_DEV_PORTAL_API_SERVER;
+
+// Any authenticated request can be the one that first creates a new user's
+// account, so each carries a captured invitation. Otherwise whichever request
+// arrives first could register an invited teammate as an unrelated signup.
+export function invitationHeaders() {
+  const pending = pendingInvitation();
+  return pending ? { "X-Pending-Invitation": pending } : {};
+}
 
 async function parseBody(response) {
   if (response.status === 204) return null;
@@ -51,6 +60,7 @@ export async function authedFetcher([path, idToken]) {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
+      ...invitationHeaders(),
     },
   });
   const body = await parseBody(response);
@@ -73,6 +83,7 @@ export async function apiRequest(path, idToken, options = {}) {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
+      ...invitationHeaders(),
       ...options.headers,
     },
   });

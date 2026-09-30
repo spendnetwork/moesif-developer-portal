@@ -73,7 +73,7 @@ function Auth0Settings(props) {
         <div style={styles.eyebrow}>Account</div>
         <h1 style={styles.h1}>Settings</h1>
         <p style={styles.lead}>
-          Your profile and where to manage payment details.
+          Your profile, billing and team.
         </p>
 
         {isAuthenticated && user ? (
@@ -143,7 +143,11 @@ function Auth0Settings(props) {
               </button>
             </div>
 
-            <Team isOrgAdmin={Boolean(portalContext?.is_org_admin)} />
+            <Team
+              isOrgAdmin={Boolean(portalContext?.is_org_admin)}
+              currentUserId={portalContext?.user_id}
+              organisationName={portalContext?.organization_name || organisation}
+            />
           </>
         ) : (
           <NoticeBox
@@ -227,6 +231,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "space-between",
     gap: 24,
+    marginBottom: 16,
     boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
   },
   billingTitle: {

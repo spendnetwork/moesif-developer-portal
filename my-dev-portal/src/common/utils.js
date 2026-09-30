@@ -1,4 +1,5 @@
 import isNil from "lodash/isNil";
+import { invitationHeaders } from "../lib/portal-api";
 
 export function formatPrice(priceInDecimal = 0, currency) {
   if (isNil(priceInDecimal)) {
@@ -66,6 +67,7 @@ export async function moesifIdentifyUserFrontEndIfPossible(idToken, user) {
           method: "GET",
           headers: {
             Authorization: `Bearer ${idToken}`,
+            ...invitationHeaders(),
           },
         }
       );

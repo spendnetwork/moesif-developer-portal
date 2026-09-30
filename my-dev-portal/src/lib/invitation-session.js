@@ -5,6 +5,14 @@ export function skipInvitationAnalytics(event) {
     return /\/(?:invitations|invitation-notifications|notifications)(?:\/|$)/.test(path);
   } catch { return true; }
 }
+// Moesif records request headers; an invitation token is a bearer secret.
+export function maskInvitationHeader(event) {
+  const headers = event?.request?.headers;
+  if (headers && typeof headers === "object") {
+    for (const name of Object.keys(headers)) if (name.toLowerCase() === "x-pending-invitation") delete headers[name];
+  }
+  return event;
+}
 export function captureInvitation() {
   if (window.location.pathname !== "/signup") return;
   const value = new URLSearchParams(window.location.hash.slice(1)).get("invitation");
