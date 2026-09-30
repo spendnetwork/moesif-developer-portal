@@ -1,0 +1,265 @@
+/* An invoice request awaiting our team (CreditPurchase). Same card surface as
+   the purchase form, with room for the details a pending payment needs. */
+
+.invoice-request {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 28px;
+  color: var(--heading-color);
+}
+
+.invoice-request__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.invoice-request__icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--warning-soft);
+  color: #8a6d1a;
+}
+
+.invoice-request--cancelled .invoice-request__icon {
+  background: var(--surface-muted);
+  color: var(--muted-text-color);
+}
+
+.invoice-request__title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.invoice-request h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 500;
+}
+
+.invoice-request__head p {
+  margin: 6px 0 0;
+  color: var(--muted-text-color);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.invoice-request__pill {
+  padding: 3px 10px;
+  border: 1px solid #efde96;
+  border-radius: var(--radius-pill);
+  background: var(--warning-soft);
+  color: #725300;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.invoice-request__details {
+  display: grid;
+  gap: 12px;
+  margin: 22px 0 0;
+  padding: 18px 0;
+  border-block: 1px solid var(--border-subtle);
+  font-size: 14px;
+}
+
+.invoice-request__details > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.invoice-request__details dt {
+  color: var(--muted-text-color);
+}
+
+.invoice-request__details dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.invoice-request__details dd small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-text-color);
+  font-size: 12.5px;
+}
+
+.invoice-request__amount {
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-request__reference {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted-text-color);
+}
+
+.invoice-request__steps {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--muted-text-color);
+}
+
+.invoice-request__steps li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.invoice-request__steps li span {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+/* The connecting line between step markers. */
+.invoice-request__steps li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 18px;
+  width: 2px;
+  height: 12px;
+  background: var(--border-subtle);
+}
+
+.invoice-request__steps li.is-done { color: var(--heading-color); }
+.invoice-request__steps li.is-done span { border-color: var(--accent); background: var(--accent); }
+.invoice-request__steps li.is-current { color: var(--heading-color); font-weight: 500; }
+.invoice-request__steps li.is-current span { border-color: #d9b64a; background: var(--warning-soft); }
+
+.invoice-request__note {
+  margin: 18px 0 0;
+  color: var(--muted-text-color);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.invoice-request__actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.invoice-request__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 10px 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
+}
+
+.invoice-request__button:hover,
+.invoice-request__button:focus-visible {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.invoice-request__button--outline {
+  background: var(--surface);
+  border-color: var(--border-subtle);
+  color: var(--heading-color);
+}
+
+.invoice-request__button--outline:hover,
+.invoice-request__button--outline:focus-visible {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Withdrawing is possible but deliberately quiet. */
+.invoice-request__footer {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  text-align: center;
+}
+
+.invoice-request__text-button {
+  border: 0;
+  background: none;
+  padding: 4px 6px;
+  color: var(--muted-text-color);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.invoice-request__text-button:hover,
+.invoice-request__text-button:focus-visible {
+  color: var(--heading-color);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.invoice-request__text-button--danger { color: var(--danger-ink); font-weight: 500; }
+.invoice-request__text-button--danger:hover,
+.invoice-request__text-button--danger:focus-visible { color: var(--danger-ink); }
+.invoice-request__text-button:disabled { opacity: 0.55; cursor: default; }
+
+.invoice-request__confirm p {
+  margin: 0 0 8px;
+  color: var(--heading-color);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.invoice-request__confirm > div {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+
+.invoice-request__error {
+  margin: 0 0 10px;
+  color: var(--danger-ink);
+  font-size: 13px;
+}
+
+.invoice-request :focus-visible {
+  outline: 3px solid #80a3bd;
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .invoice-request { padding: 22px 18px; }
+  .invoice-request__details > div { grid-template-columns: 1fr; gap: 2px; }
+  .invoice-request__details dd { text-align: left; }
+}

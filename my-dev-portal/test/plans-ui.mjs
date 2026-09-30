@@ -88,7 +88,10 @@ try {
       await page.getByRole("heading", { name: "Your Enterprise pricing is still active" }).waitFor();
       assert.equal(await page.getByRole("button", { name: "Request invoice" }).count(), 0);
     } else {
-      await page.getByRole("button", { name: "Buy credit", exact: true }).click();
+      // The active plan's button shows its status; its actions sit underneath.
+      assert.equal(await page.getByRole("status").filter({ hasText: "Current plan" }).count(), 1);
+      if (tier === "basic") await page.getByRole("link", { name: "Buy more credit", exact: true }).click();
+      else await page.getByRole("button", { name: "Buy credit", exact: true }).click();
       await page.getByRole("heading", { name: "Buy API credit" }).waitFor();
       assert.equal(await page.getByLabel("Credit amount (GBP)").inputValue(), "50");
     }

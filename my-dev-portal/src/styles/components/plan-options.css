@@ -177,3 +177,60 @@
 @media (prefers-reduced-motion: reduce) {
   .plans-page .plan-choice-button { transition: none; }
 }
+
+/* An invoice request awaiting our team, shown on the tier it was made for. */
+.plan-option__pending {
+  margin: -8px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid #efde96;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: #5c4500;
+}
+
+.plan-option__pending-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.plan-option__pending-title span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c79a14;
+}
+
+.plan-option .plan-option__pending p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b5410;
+}
+
+.plan-option a.plan-choice-button--link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+/* The active plan's button is a status, not an action. */
+.plan-option .plan-choice-button--current {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  cursor: default;
+}
+
+.plan-option__active {
+  display: block;
+  color: var(--muted-text-color);
+}
+
+.plan-option__active + a { margin-top: 2px; display: inline-block; }

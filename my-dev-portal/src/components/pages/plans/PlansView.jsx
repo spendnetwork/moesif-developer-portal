@@ -14,12 +14,25 @@ const TIERS = [
     note: "Includes 12 months of Enterprise pricing from cleared payment. Remaining credit returns to Basic pricing when the pricing period ends." },
 ];
 const LABELS = ["Records / docs", "API calls", "Aggregate calls", "Attachments"];
+const money = pence => new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 }).format(pence / 100);
+const longDate = value => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(value);
+const RENEWAL_WINDOW_MS = 30 * 86400000;
+const requestedOn = value => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(value));
 
 export default function PlansView() {
   const navigate = useNavigate();
   const { idToken } = useAuthCombined();
   const { data: context, error } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
   const current = context?.current_plan_key;
+  const { data: purchaseData } = useSWR(idToken ? ["/wallet/purchases", idToken] : null, authedFetcher);
+  // A paid package needs no payment options until it is close to ending.
+  const { data: usage } = useSWR(idToken ? ["/usage-summary", idToken] : null, authedFetcher);
+  const pricingEndsAt = usage?.pricingEndsAt ? new Date(usage.pricingEndsAt) : null;
+  const validEnd = pricingEndsAt && !Number.isNaN(pricingEndsAt.getTime());
+  const renewalOpen = validEnd && pricingEndsAt.getTime() - Date.now() <= RENEWAL_WINDOW_MS;
+  // An invoice request waiting for our team, per tier (Basic tops up with plain credit).
+  const pendingFor = key => purchaseData?.purchases?.find(item => item.payment_provider === "invoice" &&
+    item.status === "awaiting_payment" && item.purchase_kind === (key === "basic" ? "credit" : key));
   return <PageLayout><main className="plans-page">
     <header className="plans-page__heading"><div><h1>Open Opportunities API plans</h1>
       <p>Prepaid credit, with 12 months of lower rates on Growth and Enterprise. No overages.</p></div></header>
@@ -28,18 +41,36 @@ export default function PlansView() {
       {TIERS.map(tier => {
         const blocked = tier.key === "growth" && current === "enterprise";
         const packageTier = tier.key !== "basic";
+        const pending = pendingFor(tier.key);
+        const isCurrent = current === tier.key;
+        const requestPath = `/credit?package=${packageTier ? tier.key : "credit"}&payment=invoice`;
         return <section key={tier.key} className={`plan-option${current === tier.key ? " plan-option--current" : ""}`} aria-labelledby={`plan-${tier.key}`}>
           <div className="plan-option__heading"><h2 id={`plan-${tier.key}`}>{tier.name}</h2>
             {current === tier.key && <span className="plan-option__badge">Current pricing</span>}</div>
           <p className="plan-option__commitment">{tier.price}</p>
           <dl className="plan-option__rates" aria-label="Usage rates per unit">{LABELS.map((label, i) => <div key={label}><dt>{label}</dt><dd>{tier.rates[i]}</dd></div>)}</dl>
           <p className="plan-option__note">{blocked ? "Growth is available when your Enterprise pricing period ends. You can still add credit without changing your rates." : tier.note}</p>
+          {pending && <div className="plan-option__pending" role="status">
+            <div className="plan-option__pending-title"><span aria-hidden="true" />Invoice requested</div>
+            <p>{money(pending.amount_gbp_pence)} requested on {requestedOn(pending.created_at)}. Our team will confirm once your payment clears.</p>
+          </div>}
+          {pending ? <Link className="plan-choice-button plan-choice-button--link" to={requestPath}>View request</Link> :
+          isCurrent ? <div className="plan-choice-button plan-choice-button--selected plan-choice-button--current" role="status">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+            Current plan
+          </div> :
           <button className="plan-choice-button" disabled={blocked || Boolean(error) || Boolean(idToken && !context)}
             onClick={() => navigate(`/credit?package=${packageTier ? tier.key : "credit"}`)}>
             {blocked ? "Available after Enterprise ends" : packageTier ? `Pay ${tier.key === "growth" ? "£5,000" : "£12,000"} by card` : "Buy credit"}
-          </button>
-          <div className="plan-option__alternative">{packageTier && !blocked && !error && (!idToken || context) &&
-            <Link to={`/credit?package=${tier.key}&payment=invoice`}>Request an invoice instead</Link>}</div>
+          </button>}
+          <div className="plan-option__alternative">{!pending && !error && (!idToken || context) && (isCurrent
+            ? packageTier
+              ? renewalOpen
+                ? <><span className="plan-option__active">Ends on {longDate(pricingEndsAt)}</span>
+                    <Link to={`/credit?package=${tier.key}`}>Renew by card</Link><span aria-hidden="true"> · </span><Link to={requestPath}>Request an invoice</Link></>
+                : validEnd && <span className="plan-option__active">Active until {longDate(pricingEndsAt)}</span>
+              : <Link to="/credit?package=credit">Buy more credit</Link>
+            : packageTier && !blocked && <Link to={requestPath}>Request an invoice instead</Link>)}</div>
         </section>;
       })}
     </div>

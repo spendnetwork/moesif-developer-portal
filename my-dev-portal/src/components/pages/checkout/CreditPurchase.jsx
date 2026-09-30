@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import useSWR from "swr";
 import { PageLayout } from "../../page-layout";
 import PurchaseResult from "../../purchase-result";
+import InvoiceRequest from "../../invoice-request";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { apiRequest, authedFetcher } from "../../../lib/portal-api";
 import "../../../styles/components/credit-purchase.css";
@@ -25,6 +26,10 @@ export default function CreditPurchase() {
   const submitting = useRef(false);
   const { data: context, error: contextError } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
   const { data: paymentOptions, error: paymentOptionsError } = useSWR(idToken ? ["/wallet/payment-options", idToken] : null, authedFetcher);
+  // The server is the record of pending invoice requests, so they show in any tab or device.
+  const { data: purchaseData, mutate: mutatePurchases } = useSWR(idToken ? ["/wallet/purchases", idToken] : null, authedFetcher);
+  const pendingInvoice = purchaseData?.purchases?.find(item => item.payment_provider === "invoice" &&
+    item.status === "awaiting_payment" && item.purchase_kind === kind);
   const blocked = kind === "growth" && context?.current_plan_key === "enterprise";
   const method = kind === "credit" ? (Number(amount) >= 5000 ? "invoice" : "card") : paymentMethod;
   const invoice = method === "invoice";
@@ -92,6 +97,7 @@ export default function CreditPurchase() {
           !["paid", "awaiting_payment"].includes(response.status) ||
           (method === "card" && response.status !== "paid" && !response.checkoutUrl)) throw new Error("The checkout could not be confirmed. Retry this same purchase.");
       setResult(response);
+      void mutatePurchases();
       if (response.checkoutUrl) {
         const url = new URL(response.checkoutUrl);
         if (url.protocol !== "https:" || url.hostname !== "checkout.stripe.com") throw new Error("Checkout could not be verified.");
@@ -112,6 +118,15 @@ export default function CreditPurchase() {
     setError("");
     setAmount(String(selected.amount));
   }
+  const invoiceRequest = result?.payment_provider === "invoice" && ["awaiting_payment", "cancelled"].includes(result.status)
+    ? result : pendingInvoice;
+  function invoiceChanged(updated) {
+    sessionStorage.removeItem(storageKey);
+    setLocked(false);
+    setResult(updated);
+    void mutatePurchases(data => data && { ...data, purchases: data.purchases.map(item =>
+      item.request_id === updated.request_id ? updated : item) });
+  }
   const quickAmounts = [50, 100, 250, 500];
   return <PageLayout><main className="credit-purchase">
     <div className="credit-purchase__container">
@@ -127,6 +142,7 @@ export default function CreditPurchase() {
             <Link to="/credit" className="credit-purchase__button credit-purchase__button--secondary">Buy credit</Link>
           </section>
         </div> :
+        invoiceRequest ? <InvoiceRequest purchase={invoiceRequest} idToken={idToken} onChange={invoiceChanged} onStartOver={startOver} /> :
         result && !result.checkoutUrl ? <PurchaseResult
           status={result.status === "paid" ? "success" : "pending"}
           title={result.status === "paid" ? "Credit added" : "Invoice requested"}
