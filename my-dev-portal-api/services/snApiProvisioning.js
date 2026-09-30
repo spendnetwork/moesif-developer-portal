@@ -302,6 +302,13 @@ function suspendSnApiOrganizationMember(userId) {
   return snApiKeyRequest(`/api/v3/developer-portal/organization-members/${userId}/suspend`, { method: "POST" });
 }
 
+// Self-service: sn-api checks the caller is an admin of the member's organisation.
+function removeSnApiOrganizationMember(authUser, userId) {
+  return snApiKeyRequest(`/api/v3/developer-portal/organization-members/${userId}/remove`, {
+    method: "POST", body: { auth0_user_id: authUser.sub },
+  });
+}
+
 function getSnApiUsageSummary(authUser) {
   return snApiKeyRequest(
     `/api/v3/developer-portal/usage-summary?auth0_user_id=${encodeURIComponent(authUser.sub)}`
@@ -518,6 +525,7 @@ module.exports = {
   createWalletPurchase: body => snApiKeyRequest("/api/v3/developer-portal/wallet/purchases", { method: "POST", body, timeoutMs: 10000 }),
   confirmWalletPayment: (id, body) => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases/${encodeURIComponent(id)}/confirm`, { method: "POST", body }),
   listWalletPurchases: user => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases?auth0_user_id=${encodeURIComponent(user.sub)}`),
+  cancelWalletPurchase: (user, id) => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases/${encodeURIComponent(id)}/cancel`, { method: "POST", body: { auth0_user_id: user.sub } }),
   getWalletPurchase: (user, id) => snApiKeyRequest(`/api/v3/developer-portal/wallet/purchases/${encodeURIComponent(id)}?auth0_user_id=${encodeURIComponent(user.sub)}`),
   provisionSnApiCustomer,
   provisionSnApiPrepaidCustomer,
@@ -539,6 +547,7 @@ module.exports = {
   revokeSnApiOrganizationKey,
   listSnApiOrganizationMembers,
   suspendSnApiOrganizationMember,
+  removeSnApiOrganizationMember,
   createSnApiPlanChange,
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,

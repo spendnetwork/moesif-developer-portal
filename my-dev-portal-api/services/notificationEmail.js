@@ -29,7 +29,7 @@ const templates = Object.fromEntries([
   ["credit_low", require("../email-templates/credit-utilisation.json")],
   ["credit_exhausted", require("../email-templates/credit-utilisation.json")],
   ...["development_granted", "credit_expiring", "credit_expired",
-      "pricing_expiring", "pricing_expired", "payment_failed", "api_key_changed", "purchase_requested"]
+      "pricing_expiring", "pricing_expired", "payment_failed", "api_key_changed", "purchase_requested", "purchase_cancelled"]
     .map(kind => [kind, require("../email-templates/account-update.json")]),
 ].map(([kind, template]) => [kind, {
   subject: Handlebars.compile(template.subject, { strict: true, noEscape: true }),

@@ -92,6 +92,12 @@ function createInvitations({ request, env = process.env }) {
         token_hash: hash(rawToken), requested_by: body.requestedBy,
       } });
     },
+    revokeTeamInvitation(user, id, requestId) {
+      if (!UUID.test(id) || !UUID.test(String(requestId || ""))) fail("invalid_invitation_id");
+      return request(`${PREFIX}/team-invitations/${id}/revoke`, { method: "POST", body: {
+        request_id: requestId, auth0_user_id: user.sub,
+      } });
+    },
     listTeamMembers(organizationId, offset = 0) {
       const value = Number(offset);
       if (!Number.isSafeInteger(value) || value < 0) fail("invalid_invitation_page");
@@ -176,6 +182,8 @@ function installInvitationRoutes(app, { service, auth, portalAuth, jsonParser, s
     requestId: req.body.requestId, email: req.body.email, fullName: req.body.fullName,
     internalNote: req.body.internalNote, auth0UserId: req.user.sub,
   })));
+  app.post("/team-invitations/:id/revoke", auth, jsonParser, handle(req => service.revokeTeamInvitation(
+    req.user, String(req.params.id).toLowerCase(), String(req.body?.requestId || "").toLowerCase())));
 
   // portalAuth (not just auth) so req.portalContext.organization_id is
   // resolved -- never trust a client-supplied organization_id here.

@@ -31,6 +31,8 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
       // generic "we could not confirm this purchase" fallback below.
       purchase_not_found: "This purchase could not be found. Refresh and try again.",
       purchase_not_payable: "This purchase has already been confirmed or is no longer awaiting payment. Refresh to see its current status.",
+      purchase_not_cancellable: "This invoice has already been paid, so the request can no longer be cancelled. Contact our team if you need help.",
+      organization_admin_required: "Only your organisation's admin can manage purchases.",
       payment_amount_mismatch: "The confirmed amount no longer matches this purchase. Refresh and try again.",
       stripe_customer_conflict: "This payment is linked to a different Stripe customer. Contact our team before retrying.",
       payment_already_recorded: "This payment reference has already been recorded against another purchase. Check the invoice reference.",
@@ -54,6 +56,14 @@ function installWalletRoutes(app, { auth, jsonParser, serviceTokenMatches, deps,
       const result = await createPurchase(req.user, req.body, deps);
       invalidate(req.user.sub);
       res.status(200).json(result);
+    } catch (error) { respondError(res, error); }
+  });
+  // Customers withdraw their own unpaid invoice request; sn-api tells the team.
+  app.post("/wallet/purchases/:id/cancel", auth, async (req, res) => {
+    try {
+      const result = await deps.cancelWalletPurchase(req.user, requestIdentity(req.params.id));
+      invalidate(req.user.sub);
+      res.json(result);
     } catch (error) { respondError(res, error); }
   });
   app.get("/wallet/purchases", auth, async (req, res) => {

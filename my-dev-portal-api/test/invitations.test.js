@@ -156,3 +156,15 @@ test("the Slack alert for a teammate says no credit was granted", async () => {
   assert.ok(text.includes("no credit granted"));
   assert.ok(!text.includes("NaN") && !text.includes("null"));
 });
+
+test("an admin's cancel request carries their own identity and rejects malformed ids", async () => {
+  const calls = [];
+  const service = createInvitations({ env, request: async (...args) => { calls.push(args); return { status: "revoked" }; } });
+  const id = crypto.randomUUID(), requestId = crypto.randomUUID();
+  assert.deepEqual(await service.revokeTeamInvitation(user, id, requestId), { status: "revoked" });
+  assert.deepEqual(calls[0], [`/api/v3/developer-portal/team-invitations/${id}/revoke`,
+    { method: "POST", body: { request_id: requestId, auth0_user_id: user.sub } }]);
+  assert.throws(() => service.revokeTeamInvitation(user, "../admin", requestId), { code: "invalid_invitation_id" });
+  assert.throws(() => service.revokeTeamInvitation(user, id, "not-a-uuid"), { code: "invalid_invitation_id" });
+  assert.equal(calls.length, 1);
+});

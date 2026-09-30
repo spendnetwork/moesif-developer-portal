@@ -95,6 +95,9 @@ function renderJob(job, origin) {
     case "purchase_requested":
       return { heading: "Invoice purchase recorded", portalUrl,
         message: `An invoice purchase of ${money(payload.amount_gbp_pence)} has been recorded for ${company}. Credit and any pricing change activate only after payment is confirmed as cleared.` };
+    case "purchase_cancelled":
+      return { heading: "Invoice request cancelled", portalUrl: `${origin}/plans`,
+        message: `The invoice request of ${money(payload.amount_gbp_pence)} for ${company} has been cancelled, so no invoice will be issued for it. Your credit and pricing are unchanged. You can make a new request from Plans at any time.` };
     default:
       throw deliveryError("UnknownNotificationKind", true);
   }
@@ -107,10 +110,12 @@ function accountSlack(job, origin, env) {
     ? { heading: "Customer notification delivery failed", message: "Check notification health and provider configuration." }
     : renderJob(job, origin);
   const titles = { welcome: "Customer signed up", access_paused: "Customer API access paused",
-    access_restored: "Customer API access restored", development_granted: "Development credit granted" };
+    access_restored: "Customer API access restored", development_granted: "Development credit granted",
+    purchase_requested: "Invoice requested", purchase_cancelled: "Invoice request cancelled by customer" };
   const fields = [["Company", job.company], ["Plan", PLAN_NAMES[p.plan_key || job.plan_key] || "Not available"]];
   if (job.kind === "payment_confirmed") fields.push(["Payment", summary.amount], ["Available credit", summary.available], ["Credit expires", summary.creditExpiresAt]);
-  if (["development_granted", "purchase_requested"].includes(job.kind)) fields.push(["Credit amount", money(p.amount_gbp_pence)]);
+  if (["development_granted", "purchase_requested", "purchase_cancelled"].includes(job.kind)) fields.push(["Credit amount", money(p.amount_gbp_pence)]);
+  if (job.kind === "purchase_cancelled") fields.push(["Package", PLAN_NAMES[p.purchase_kind] || "Credit top-up"], ["Cancelled by", p.cancelled_by || "Not available"]);
   if (["credit_expiring", "credit_expired"].includes(job.kind)) fields.push(["Credit type", p.funding === "development" ? "Development" : "Purchased"], ["Remaining", money(p.remaining_gbp_pence)]);
   if (p.expires_at) fields.push(["Expiry", displayDate(p.expires_at)]);
   if (job.kind === "delivery_failed") fields.push(["Failed notification", p.notification_kind]);

@@ -63,6 +63,7 @@ const {
   revokeSnApiOrganizationKey,
   listSnApiOrganizationMembers,
   suspendSnApiOrganizationMember,
+  removeSnApiOrganizationMember,
   createSnApiPlanChange,
   getSnApiCurrentPlanChange,
   getSnApiPlanChangeByCustomer,
@@ -1932,6 +1933,18 @@ app.delete("/organization-api-keys/:api_key_id", portalAuthMiddleware, async fun
 app.get("/team-members", portalAuthMiddleware, async function (req, res) {
   try {
     res.status(200).json(await listSnApiOrganizationMembers(req.portalContext.organization_id));
+  } catch (error) {
+    sendKeyManagementError(res, error);
+  }
+});
+
+// Org admins remove a teammate; sn-api enforces who may remove whom.
+app.post("/team-members/:user_id/remove", portalAuthMiddleware, async function (req, res) {
+  if (!/^\d{1,18}$/.test(req.params.user_id)) {
+    return res.status(404).json({ code: "organization_member_not_found", message: "Team member not found." });
+  }
+  try {
+    res.status(200).json(await removeSnApiOrganizationMember(req.user, req.params.user_id));
   } catch (error) {
     sendKeyManagementError(res, error);
   }
