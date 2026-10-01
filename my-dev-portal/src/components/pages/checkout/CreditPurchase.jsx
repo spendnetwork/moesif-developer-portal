@@ -131,7 +131,7 @@ export default function CreditPurchase() {
   return <PageLayout><main className="credit-purchase">
     <div className="credit-purchase__container">
       <Link to="/plans" className="credit-purchase__back">← Back to pricing</Link>
-      <header><h1>{selected.title}</h1><p>{recurring ? "Annual subscription with prepaid credit. No usage overages." : "Prepaid credit. No automatic top-ups or usage overages."}</p></header>
+      <header><h1>{selected.title}</h1><p>{recurring ? "Annual subscription with prepaid credit. Usage stops when your credit runs out." : "Prepaid credit. No automatic top-ups; usage stops when your credit runs out."}</p></header>
       {error && <div role="alert" className="credit-purchase__error">{error}</div>}
       {contextError && <div role="alert" className="credit-purchase__error">We could not verify your account. Please refresh before purchasing.</div>}
       {paymentOptionsError && <div role="alert" className="credit-purchase__error">We could not verify the payment terms. Please refresh before purchasing.</div>}

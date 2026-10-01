@@ -6,17 +6,17 @@ const PLAN_DETAILS = {
   basic: {
     label: "Basic",
     commitment: "Flexible prepaid credit",
-    note: "Choose any top-up amount. Usage stops at zero credit, with no overage bill.",
+    note: "Choose any top-up amount. Usage stops when your credit runs out.",
   },
   growth: {
     label: "Growth",
     commitment: "\u00a35,000 prepaid commitment",
-    note: "Usage draws down your commitment; overage is billed in arrears.",
+    note: "Usage draws down your prepaid commitment and stops when it runs out.",
   },
   enterprise: {
     label: "Enterprise",
     commitment: "\u00a312,000 prepaid commitment",
-    note: "Usage draws down your commitment; overage is billed in arrears.",
+    note: "Usage draws down your prepaid commitment and stops when it runs out.",
   },
 };
 

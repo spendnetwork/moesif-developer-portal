@@ -64,7 +64,7 @@ function SubDisplay({ sub, plans, onManage }) {
   const period = isDevelopment
     ? "Credit to build and test your integration, at Basic rates. No payment required."
     : isPurePrepaid
-    ? "Prepaid credit. £50 minimum per top-up; no usage overage."
+    ? "Prepaid credit. £50 minimum per top-up; usage stops when your credit runs out."
     : `Billing period ${formatIsoTimestamp(
         sub.current_period_start
       )} – ${formatIsoTimestamp(sub.current_period_end)}`;

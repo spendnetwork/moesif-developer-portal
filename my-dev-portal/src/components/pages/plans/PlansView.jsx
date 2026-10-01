@@ -35,7 +35,7 @@ export default function PlansView() {
     item.status === "awaiting_payment" && item.purchase_kind === (key === "basic" ? "credit" : key));
   return <PageLayout><main className="plans-page">
     <header className="plans-page__heading"><div><h1>Open Opportunities API plans</h1>
-      <p>Prepaid credit, with 12 months of lower rates on Growth and Enterprise. No overages.</p></div></header>
+      <p>Prepaid credit, with 12 months of lower rates on Growth and Enterprise. Usage stops when your credit runs out.</p></div></header>
     {error && <p role="alert">Your current pricing could not be verified. Refresh before choosing a package.</p>}
     <div id="plan-options" className="plan-options">
       {TIERS.map(tier => {

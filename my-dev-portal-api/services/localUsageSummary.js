@@ -82,7 +82,6 @@ function localUsageSummary(snapshot) {
     currency: "GBP",
     period: { start: periodStart, end: periodEnd },
     accrued,
-    overage: nonnegative(snapshot.usage?.overage_gbp_pence ?? 0),
     lines,
     credit: { granted, used: Math.max(0, granted - totalRemaining), remaining, spendable, expired },
     balances: snapshot.balances,
