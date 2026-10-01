@@ -65,10 +65,12 @@ function createInvitations({ request, env = process.env }) {
         requested_by: body.requestedBy, token_hash: hash(rawToken),
       } });
     },
-    list(offset = 0) {
+    list(offset = 0, search = "") {
       const value = Number(offset);
       if (!Number.isSafeInteger(value) || value < 0) fail("invalid_invitation_page");
-      return request(`${PREFIX}/invitations?offset=${value}&limit=50`);
+      const term = typeof search === "string" ? search.trim() : "";
+      if (term.length > 200) fail("invalid_invitation_search");
+      return request(`${PREFIX}/invitations?offset=${value}&limit=50${term ? `&search=${encodeURIComponent(term)}` : ""}`);
     },
     // Self-service: organization_id and admin authorization are resolved
     // server-side from auth0UserId -- never client-supplied.
@@ -157,7 +159,7 @@ function installInvitationRoutes(app, { service, auth, portalAuth, jsonParser, s
       res.status(status).json({ code, message: messages[code] || (status === 422 ? "Check the invitation details and try again." : "The invitation could not be confirmed. Retry this request; your details have been retained.") });
     }
   };
-  app.get("/admin/invitations", admin, handle(req => service.list(req.query.offset)));
+  app.get("/admin/invitations", admin, handle(req => service.list(req.query.offset, req.query.search)));
   app.post("/admin/invitations", admin, jsonParser, handle(req => service.create(req.body)));
   for (const action of ["resend", "revoke", "retry-notifications"]) app.post(`/admin/invitations/:id/${action}`, admin, jsonParser, handle(req => service.change(req.params.id, action, req.body)));
   for (const action of ["preview", "accept"]) app.post(`/invitations/${action}`, auth, jsonParser, handle(async req => {

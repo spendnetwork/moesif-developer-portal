@@ -168,3 +168,13 @@ test("an admin's cancel request carries their own identity and rejects malformed
   assert.throws(() => service.revokeTeamInvitation(user, id, "not-a-uuid"), { code: "invalid_invitation_id" });
   assert.equal(calls.length, 1);
 });
+
+test("the staff invitation list forwards a trimmed search and rejects oversized ones", async () => {
+  const calls = [];
+  const service = createInvitations({ env, request: async (...args) => { calls.push(args); return { items: [], total: 0 }; } });
+  await service.list(0, "  Harbour & Co ");
+  await service.list(50);
+  assert.equal(calls[0][0], "/api/v3/developer-portal/invitations?offset=0&limit=50&search=Harbour%20%26%20Co");
+  assert.equal(calls[1][0], "/api/v3/developer-portal/invitations?offset=50&limit=50");
+  assert.throws(() => service.list(0, "x".repeat(201)), { code: "invalid_invitation_search" });
+});
