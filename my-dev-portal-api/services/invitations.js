@@ -126,6 +126,7 @@ function createInvitations({ request, env = process.env }) {
 const messages = {
   invitations_not_configured: "Invitations are not configured yet. Contact your platform administrator.",
   invitation_already_pending: "An invitation is already pending for this email. Open Invitations to resend or revoke it.",
+  customer_already_invited: "This person has already accepted an invitation. To give them more credit, open their customer page and grant development credit.",
   invitation_request_conflict: "This request was already saved with different details. Check Invitations before sending another.",
   invitation_delivery_pending: "The invitation is queued or was sent recently. Wait a minute before resending.",
   invitation_not_pending: "This invitation can no longer be resent or revoked. Refresh its status.",
