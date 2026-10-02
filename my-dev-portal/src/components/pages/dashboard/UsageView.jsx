@@ -1,6 +1,7 @@
 import React from "react";
 
 import useUsageSummary from "../../../hooks/useUsageSummary";
+import { PageHeader } from "../../page-header";
 
 const C = {
   green: "#034737",
@@ -131,13 +132,8 @@ export default function UsageView({
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-      <div style={{ marginBottom: 28 }}>
-        <div style={styles.eyebrow}>Usage</div>
-        <h1 style={styles.h1}>API activity</h1>
-        <p style={styles.lead}>
-          Settled API usage and available credit across your organisation.
-        </p>
-      </div>
+      <PageHeader eyebrow="Usage" title="API activity"
+        description="Settled API usage and available credit across your organisation." />
 
       {analyticsWarning && (
         <div role="status" style={styles.warning}>
@@ -370,8 +366,8 @@ const styles = {
   metricValue: {
     fontSize: 34,
     lineHeight: 1,
-    fontWeight: 500,
-    letterSpacing: 0,
+    fontWeight: 700,
+    letterSpacing: "-0.01em",
     color: C.head,
     fontVariantNumeric: "tabular-nums",
   },

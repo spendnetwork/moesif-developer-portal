@@ -7,6 +7,7 @@ import InvoiceRequest from "../../invoice-request";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { apiRequest, authedFetcher } from "../../../lib/portal-api";
 import "../../../styles/components/credit-purchase.css";
+import { PageHeader } from "../../page-header";
 
 const PACKAGES = { credit: { title: "Buy API credit", amount: 50 }, growth: { title: "Buy Growth", amount: 5000 }, enterprise: { title: "Buy Enterprise", amount: 12000 } };
 
@@ -131,7 +132,7 @@ export default function CreditPurchase() {
   return <PageLayout><main className="credit-purchase">
     <div className="credit-purchase__container">
       <Link to="/plans" className="credit-purchase__back">← Back to pricing</Link>
-      <header><h1>{selected.title}</h1><p>{recurring ? "Annual subscription with prepaid credit. Usage stops when your credit runs out." : "Prepaid credit. No automatic top-ups; usage stops when your credit runs out."}</p></header>
+      <PageHeader eyebrow="Billing" title={selected.title} description={recurring ? "Annual subscription with prepaid credit. Requests stop when your available credit cannot cover them." : "Prepaid credit. No automatic top-ups; requests stop when your available credit cannot cover them."} />
       {error && <div role="alert" className="credit-purchase__error">{error}</div>}
       {contextError && <div role="alert" className="credit-purchase__error">We could not verify your account. Please refresh before purchasing.</div>}
       {paymentOptionsError && <div role="alert" className="credit-purchase__error">We could not verify the payment terms. Please refresh before purchasing.</div>}

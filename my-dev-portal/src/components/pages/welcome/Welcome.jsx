@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { PageLayout } from "../../page-layout";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { welcomeStorageKey } from "../../../common/constants";
+import { PageHeader } from "../../page-header";
 
 const API_DOCS_URL =
   "https://docs.openopps.com/s/1e0ae5a0-98cd-4814-9a10-08fef3ce3c4b/doc/api-v30-documentation-v2-summary-records-P5dS1Xsr1g";
@@ -57,12 +58,8 @@ function Welcome() {
   return (
     <PageLayout>
       <div style={{ maxWidth: 760, paddingTop: 8 }}>
-        <div style={styles.eyebrow}>Welcome</div>
-        <h1 style={styles.h1}>Welcome to the Open Opportunities API</h1>
-        <p style={styles.lead}>
-          Procurement data from 900+ sources across 180+ countries, delivered as
-          clean JSON.
-        </p>
+        <PageHeader eyebrow="Welcome" title="Welcome to the Open Opportunities API"
+          description="Procurement data from 1050+ sources across 180+ countries, delivered as clean JSON." />
 
         <div style={styles.grid}>
           {STEPS.map((step) => (

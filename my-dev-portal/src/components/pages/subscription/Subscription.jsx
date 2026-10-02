@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import usePlans from "../../../hooks/usePlans";
 import SubDisplay from "./SubDisplay";
 import { isSessionExpiredError } from "../../../lib/session-expiry";
+import { PageHeader } from "../../page-header";
 
 const C = {
   head: "#23383A",
@@ -66,15 +67,8 @@ function Subscription() {
 
   return (
     <PageLayout>
-      <div style={styles.header}>
-        <div>
-          <div style={styles.eyebrow}>Billing</div>
-          <h1 style={styles.h1}>Plan and credit</h1>
-          <p style={{ margin: 0, fontSize: 15, color: C.muted }}>
-            Your access, current rates and payment options.
-          </p>
-        </div>
-      </div>
+      <PageHeader eyebrow="Billing" title="Plan and credit"
+        description="Your access, current rates and payment options." />
 
       {subscriptionsError && (
         <div style={styles.errorCard} role="alert">

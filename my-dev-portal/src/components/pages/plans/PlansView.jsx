@@ -4,6 +4,7 @@ import { PageLayout } from "../../page-layout";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { authedFetcher } from "../../../lib/portal-api";
 import "../../../styles/components/plan-options.css";
+import { PageHeader } from "../../page-header";
 
 const TIERS = [
   { key: "basic", name: "Basic", price: "Credit from £50", rates: ["£0.13", "£0.26", "Not included", "£0.65"],
@@ -34,8 +35,8 @@ export default function PlansView() {
   const pendingFor = key => purchaseData?.purchases?.find(item => item.payment_provider === "invoice" &&
     item.status === "awaiting_payment" && item.purchase_kind === (key === "basic" ? "credit" : key));
   return <PageLayout><main className="plans-page">
-    <header className="plans-page__heading"><div><h1>Open Opportunities API plans</h1>
-      <p>Prepaid credit, with 12 months of lower rates on Growth and Enterprise. Usage stops when your credit runs out.</p></div></header>
+    <PageHeader eyebrow="Pricing" title="Open Opportunities API plans"
+      description="Prepaid credit, with 12 months of lower rates on Growth and Enterprise. Requests stop when your available credit cannot cover them." />
     {error && <p role="alert">Your current pricing could not be verified. Refresh before choosing a package.</p>}
     <div id="plan-options" className="plan-options">
       {TIERS.map(tier => {

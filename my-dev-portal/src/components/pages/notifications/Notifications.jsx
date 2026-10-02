@@ -5,6 +5,7 @@ import { PageLayout } from "../../page-layout";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { apiRequest, authedFetcher } from "../../../lib/portal-api";
 import "../../../styles/components/notifications.css";
+import { PageHeader } from "../../page-header";
 
 export default function Notifications() {
   const { idToken } = useAuthCombined();
@@ -23,11 +24,10 @@ export default function Notifications() {
   }
   return <PageLayout>
     <section className="notifications-page" aria-labelledby="notifications-title">
-      <header className="notifications-heading">
-        <div><p className="notifications-eyebrow">Account</p><h1 id="notifications-title">Notifications</h1></div>
-        <button className="notifications-icon" type="button" onClick={() => mutate()} disabled={!idToken || isValidating}
-          aria-label="Refresh notifications" title="Refresh notifications"><RefreshCw size={19} aria-hidden="true" /></button>
-      </header>
+      <PageHeader eyebrow="Account" title="Notifications" titleId="notifications-title"
+        description="Credit, payment and account updates for your company."
+        actions={<button className="notifications-icon" type="button" onClick={() => mutate()} disabled={!idToken || isValidating}
+          aria-label="Refresh notifications" title="Refresh notifications"><RefreshCw size={19} aria-hidden="true" /></button>} />
       {(error || actionError) && <p role="alert" className="notifications-error">{actionError || (error.status === 403
         ? "Account notifications are available to company administrators."
         : "Notifications are temporarily unavailable. Please try again.")}</p>}

@@ -1,7 +1,7 @@
 import React from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
-export const SignupButton = ({ isLink, isPriceAction }) => {
+export const SignupButton = ({ isLink, isPriceAction, className: override }) => {
   const { loginWithRedirect } = useAuth0();
 
   const handleSignUp = async () => {
@@ -26,7 +26,7 @@ export const SignupButton = ({ isLink, isPriceAction }) => {
     : ` button__${isPriceAction ? "price-action" : "sign-up"}`;
 
   return (
-    <button className={className} onClick={handleSignUp}>
+    <button className={override || className} onClick={handleSignUp}>
       Create account
     </button>
   );

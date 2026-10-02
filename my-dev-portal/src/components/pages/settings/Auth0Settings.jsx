@@ -9,6 +9,7 @@ import Team from "./Team";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { authedFetcher } from "../../../lib/portal-api";
 import profileIcon from "../../../images/icons/user.svg";
+import { PageHeader } from "../../page-header";
 
 const C = {
   green: "#034737",
@@ -69,12 +70,9 @@ function Auth0Settings(props) {
 
   return (
     <PageLayout>
+      <div>
       <div style={{ maxWidth: 680 }}>
-        <div style={styles.eyebrow}>Account</div>
-        <h1 style={styles.h1}>Settings</h1>
-        <p style={styles.lead}>
-          Your profile, billing and team.
-        </p>
+        <PageHeader eyebrow="Account" title="Settings" description="Your profile, billing and team." />
 
         {isAuthenticated && user ? (
           <>
@@ -156,6 +154,7 @@ function Auth0Settings(props) {
             description="We could not load your profile. Please refresh the page or sign in again."
           />
         )}
+      </div>
       </div>
     </PageLayout>
   );

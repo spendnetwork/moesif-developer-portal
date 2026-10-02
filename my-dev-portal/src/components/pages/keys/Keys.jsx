@@ -9,6 +9,7 @@ import { PageLoader } from "../../page-loader";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import { apiRequest, authedFetcher } from "../../../lib/portal-api";
 import "../../../styles/components/api-keys.css";
+import { PageHeader } from "../../page-header";
 
 const C = {
   green: "#034737",
@@ -343,17 +344,9 @@ function Keys() {
 
   return (
     <PageLayout>
-      <div style={styles.header}>
-        <div>
-          <div style={styles.eyebrow}>Access</div>
-          <h1 style={styles.h1}>
-            API keys{!hardError ? ` (${keys.length})` : ""}
-          </h1>
-          <p style={{ margin: 0, fontSize: 15, color: C.muted }}>
-            Maximum {maxKeys} keys, active or paused.
-          </p>
-        </div>
-        {!locked && !hardError && (
+      <PageHeader eyebrow="Access" title={`API keys${!hardError ? ` (${keys.length})` : ""}`}
+        description={`Maximum ${maxKeys} keys, active or paused.`}
+        actions={!locked && !hardError && (
           <button
             type="button"
             onClick={openCreateModal}
@@ -367,8 +360,7 @@ function Keys() {
           >
             Create API key
           </button>
-        )}
-      </div>
+        )} />
 
       {hardError && (
         <div style={styles.errorCard} role="alert">

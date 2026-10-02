@@ -1,7 +1,7 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import React from "react";
 
-export const LoginButton = ({ isLink }) => {
+export const LoginButton = ({ isLink, className: override }) => {
   const { loginWithRedirect } = useAuth0();
 
   const handleLogin = async () => {
@@ -22,7 +22,7 @@ export const LoginButton = ({ isLink }) => {
   const className = isLink ? " button__link" : "button__login";
 
   return (
-    <button className={className} onClick={handleLogin}>
+    <button className={override || className} onClick={handleLogin}>
       Log in
     </button>
   );

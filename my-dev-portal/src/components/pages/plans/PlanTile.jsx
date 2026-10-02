@@ -6,17 +6,17 @@ const PLAN_DETAILS = {
   basic: {
     label: "Basic",
     commitment: "Flexible prepaid credit",
-    note: "Choose any top-up amount. Usage stops when your credit runs out.",
+    note: "Choose any top-up amount. Requests stop when your available credit cannot cover them.",
   },
   growth: {
     label: "Growth",
     commitment: "\u00a35,000 prepaid commitment",
-    note: "Usage draws down your prepaid commitment and stops when it runs out.",
+    note: "Usage draws down your prepaid commitment. Requests stop when your available credit cannot cover them.",
   },
   enterprise: {
     label: "Enterprise",
     commitment: "\u00a312,000 prepaid commitment",
-    note: "Usage draws down your prepaid commitment and stops when it runs out.",
+    note: "Usage draws down your prepaid commitment. Requests stop when your available credit cannot cover them.",
   },
 };
 
