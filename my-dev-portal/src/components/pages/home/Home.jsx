@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { Check, FileText, Plug, Tags } from "lucide-react";
 
 import { PageLayout } from "../../page-layout";
@@ -96,6 +96,11 @@ function UseCases() {
 
 function Home() {
   const { isAuthenticated, isLoading } = useAuthCombined();
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== "#faq" || isLoading) return;
+    document.getElementById("faq")?.scrollIntoView({ block: "start" });
+  }, [hash, isLoading]);
 
   if (isLoading) return <PageLoader />;
   if (isAuthenticated) return <Navigate replace to="/dashboard" />;
@@ -166,7 +171,7 @@ function Home() {
           </ol>
         </section>
 
-        <section className="home-section home-faq" aria-labelledby="home-faq">
+        <section id="faq" className="home-section home-faq" aria-labelledby="home-faq">
           <div>
             <p className="home-eyebrow">Questions</p>
             <h2 id="home-faq">Frequently asked</h2>

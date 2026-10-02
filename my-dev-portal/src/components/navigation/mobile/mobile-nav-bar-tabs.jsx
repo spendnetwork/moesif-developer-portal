@@ -1,12 +1,16 @@
 import React from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { MobileNavBarTab } from "./mobile-nav-bar-tab";
+import { PublicLinks } from "../public-links";
 
 export const MobileNavBarTabs = ({ handleClick }) => {
   const { isAuthenticated } = useAuth0();
 
   return (
     <div className="mobile-nav-bar__tabs">
+      {!isAuthenticated && (
+        <PublicLinks linkClass="mobile-nav-bar__tab" activeClass="mobile-nav-bar__tab--active" onNavigate={handleClick} />
+      )}
       {isAuthenticated && (
         <>
           <MobileNavBarTab path="/notifications" label="Notifications" handleClick={handleClick} />

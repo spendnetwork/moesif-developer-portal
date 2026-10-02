@@ -395,6 +395,8 @@
 
 /* --- FAQ --------------------------------------------------------------- */
 .home-faq {
+  /* Clears the fixed phone bar when jumped to from the FAQs link. */
+  scroll-margin-top: 88px;
   display: grid;
   grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
   gap: 40px;
