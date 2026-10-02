@@ -8,10 +8,8 @@ export const NavBar = ({ hideNavTabs }) => {
     <div className="nav-bar__container">
       <nav className="nav-bar">
         <NavBarBrand />
-        <div className="nav-bar__actions">
-          <NavBarTabs />
-          <NavBarButtons />
-        </div>
+        <NavBarTabs />
+        <NavBarButtons />
       </nav>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import React from "react";
 
-export const LogoutButton = () => {
+export const LogoutButton = ({ className = "button__logout", children, ...props }) => {
   const { logout } = useAuth0();
 
   const handleLogout = async () => {
@@ -17,8 +17,8 @@ export const LogoutButton = () => {
   };
 
   return (
-    <button className="button__logout" onClick={handleLogout}>
-      Log out
+    <button type="button" {...props} className={className} onClick={handleLogout}>
+      {children || "Log out"}
     </button>
   );
 };
