@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    {%- auth0:head -%}
+    <style>
+      :root {
+        --oo-green: #034737;
+        --oo-green-ink: #ffffff;
+      }
+      html, body { margin: 0; padding: 0; height: 100%; }
+      *, *::before, *::after { box-sizing: border-box; }
+
+      .oo-split {
+        display: flex;
+        min-height: 100vh;
+        width: 100%;
+      }
+
+      /* Left: Auth0 widget lives here. White, centered. */
+      .oo-left {
+        flex: 1 1 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #ffffff;
+        padding: 40px 24px;
+      }
+      /* Constrain the injected widget to a sensible column width. */
+      .oo-left .oo-widget { width: 100%; max-width: 400px; }
+
+      /* Right: branded marketing panel. */
+      .oo-right {
+        flex: 1 1 50%;
+        background: var(--oo-green);
+        color: var(--oo-green-ink);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 64px 72px;
+      }
+      .oo-right h1 {
+        font-size: 2.4rem;
+        line-height: 1.15;
+        margin: 0 0 28px;
+        font-weight: 700;
+      }
+      .oo-right p {
+        font-size: 1.1rem;
+        line-height: 1.55;
+        margin: 0 0 22px;
+        max-width: 48ch;
+      }
+      .oo-right a { color: var(--oo-green-ink); text-decoration: underline; }
+
+      /* Collapse to a single column (widget only) on narrow screens. */
+      @media (max-width: 900px) {
+        .oo-right { display: none; }
+        .oo-left { flex-basis: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="oo-split">
+      <div class="oo-left">
+        <div class="oo-widget">
+          {%- auth0:widget -%}
+        </div>
+      </div>
+
+      <!--
+        The marketing panel shows on all Universal Login screens by default.
+        To show it only on login/signup (and keep password-reset / MFA / error
+        pages clean), wrap the block below in:
+          {% if prompt.name == "login" or prompt.name == "signup" or prompt.name == "login-id" or prompt.name == "login-password" %} ... {% endif %}
+      -->
+      <aside class="oo-right">
+        <h1>Want our data in your systems?</h1>
+        <p>Every tender you see on Open Opportunities is also available through our API.</p>
+        <p>Bring it into the tools your team already works in &mdash; your CRM, your AI assistant, a Teams or Slack channel.</p>
+        <p>Bid teams are using it to shortlist opportunities, brief leadership, and stay ahead of the buyers that matter to them.</p>
+        <p>We&rsquo;d love to hear what you&rsquo;d build. Get in touch at <a href="mailto:welcome@openopps.com">welcome@openopps.com</a>.</p>
+      </aside>
+    </div>
+  </body>
+</html>
