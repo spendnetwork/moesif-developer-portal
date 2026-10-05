@@ -87,9 +87,9 @@
   --emerald: #1bc99f;
   --moesif-black: #17221f;
 
-  --overall-bg: #f5f7f4;
-  /* Matches the admin console's top bar exactly, so both internal tools
-     read as one product family. */
+  /* One white background across the portal, like the admin console. */
+  --overall-bg: #ffffff;
+  /* Dark green top bar, shared with the admin console. */
   --nav-bg: #23383a;
   --nav-border: #3a5052;
   --nav-muted: #8fa5a0;

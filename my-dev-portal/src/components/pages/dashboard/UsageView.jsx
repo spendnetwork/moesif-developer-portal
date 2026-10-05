@@ -358,7 +358,7 @@ const styles = {
   metricCard: {
     background: "#FFFFFF",
     border: `1px solid ${C.line}`,
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 20,
     boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
   },
@@ -416,7 +416,7 @@ const styles = {
   chartCard: {
     background: "#FFFFFF",
     border: `1px solid ${C.line}`,
-    borderRadius: 8,
+    borderRadius: 12,
     overflow: "hidden",
     boxShadow: "0 1px 2px rgba(35,56,58,0.04)",
   },
