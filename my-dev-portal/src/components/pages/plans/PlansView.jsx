@@ -23,6 +23,7 @@ const requestedOn = value => new Intl.DateTimeFormat("en-GB", { day: "numeric", 
 export default function PlansView() {
   const navigate = useNavigate();
   const { idToken } = useAuthCombined();
+  const loggedOut = !idToken;
   const { data: context, error } = useSWR(idToken ? ["/portal-context", idToken] : null, authedFetcher);
   const current = context?.current_plan_key;
   const { data: purchaseData } = useSWR(idToken ? ["/wallet/purchases", idToken] : null, authedFetcher);
@@ -55,7 +56,8 @@ export default function PlansView() {
             <div className="plan-option__pending-title"><span aria-hidden="true" />Invoice requested</div>
             <p>{money(pending.amount_gbp_pence)} requested on {requestedOn(pending.created_at)}. Our team will confirm once your payment clears.</p>
           </div>}
-          {pending ? <Link className="plan-choice-button plan-choice-button--link" to={requestPath}>View request</Link> :
+          {loggedOut ? <Link className="plan-choice-button" to="/signup">Try now</Link> :
+          pending ? <Link className="plan-choice-button plan-choice-button--link" to={requestPath}>View request</Link> :
           isCurrent ? <div className="plan-choice-button plan-choice-button--selected plan-choice-button--current" role="status">
             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
             Current plan
@@ -64,7 +66,7 @@ export default function PlansView() {
             onClick={() => navigate(`/credit?package=${packageTier ? tier.key : "credit"}`)}>
             {blocked ? "Available after Enterprise ends" : packageTier ? `Pay ${tier.key === "growth" ? "£5,000" : "£12,000"} by card` : "Buy credit"}
           </button>}
-          <div className="plan-option__alternative">{!pending && !error && (!idToken || context) && (isCurrent
+          <div className="plan-option__alternative">{!pending && !error && context && (isCurrent
             ? packageTier
               ? renewalOpen
                 ? <><span className="plan-option__active">Ends on {longDate(pricingEndsAt)}</span>
