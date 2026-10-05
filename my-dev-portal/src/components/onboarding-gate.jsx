@@ -31,6 +31,13 @@ function TermsForm({ data, token, refresh, refreshToken, signInAgain }) {
   // unverified email. It unlocks the recovery actions below rather than leaving
   // the user staring at a dead-end message after they verified out-of-band.
   const [needsVerify, setNeedsVerify] = useState(false);
+  // Resend state: escalating cooldown (seconds) mirrors bid-bench-next so a
+  // user can't hammer Auth0's verification-email job.
+  const RESEND_STEPS = [30, 60, 120, 300];
+  const [resendCount, setResendCount] = useState(0);
+  const [cooldown, setCooldown] = useState(0);
+  const [resendBusy, setResendBusy] = useState(false);
+  const [resendNote, setResendNote] = useState("");
   const panel = useRef(null);
   const submitting = useRef(false);
   const navigate = useNavigate();
@@ -44,6 +51,25 @@ function TermsForm({ data, token, refresh, refreshToken, signInAgain }) {
     if (panel.current) observer.observe(panel.current);
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+  async function resendVerification() {
+    if (resendBusy || cooldown > 0) return;
+    setResendBusy(true); setResendNote("");
+    try {
+      await apiRequest("/onboarding/resend-verification", token, { method: "POST", signal: AbortSignal.timeout(15000) });
+      setResendNote("Verification email sent. Check your inbox, then use the button below.");
+      setCooldown(RESEND_STEPS[Math.min(resendCount, RESEND_STEPS.length - 1)]);
+      setResendCount(resendCount + 1);
+    } catch (failure) {
+      setResendNote(failure.code === "verification_resend_unconfigured"
+        ? "Resending isn't available right now. Contact welcome@openopps.com."
+        : "We couldn't resend the email. Wait a moment and try again.");
+    } finally { setResendBusy(false); }
+  }
   // Core acceptance, usable with either the current token or a freshly
   // refreshed one (after the user confirms they've verified their email).
   async function submitAccept(activeToken) {
@@ -113,10 +139,16 @@ function TermsForm({ data, token, refresh, refreshToken, signInAgain }) {
       {!atEnd && <p className="onboarding-hint">Read to the end to accept the terms.</p>}
       {error && <p className="onboarding-error" role="alert">{error}</p>}
       <button className="onboarding-continue" type="submit" disabled={!atEnd || !agreed || busy}>{busy ? "Confirming acceptance..." : "Accept and continue"}</button>
-      {needsVerify && <div className="onboarding-recovery__actions">
-        <button className="onboarding-continue" type="button" disabled={busy} onClick={() => void verifiedAndRetry()}>{busy ? "Checking..." : "I've verified my email"}</button>
-        {signInAgain && <button className="onboarding-recovery__secondary" type="button" disabled={busy} onClick={signInAgain}>Sign in again</button>}
-      </div>}
+      {needsVerify && <>
+        {resendNote && <p className="onboarding-hint" role="status">{resendNote}</p>}
+        <div className="onboarding-recovery__actions">
+          <button className="onboarding-continue" type="button" disabled={busy} onClick={() => void verifiedAndRetry()}>{busy ? "Checking..." : "I've verified my email"}</button>
+          <button className="onboarding-recovery__secondary" type="button" disabled={resendBusy || cooldown > 0} onClick={() => void resendVerification()}>
+            {resendBusy ? "Sending..." : cooldown > 0 ? `Resend email (${cooldown}s)` : "Resend verification email"}
+          </button>
+          {signInAgain && <button className="onboarding-recovery__secondary" type="button" disabled={busy} onClick={signInAgain}>Sign in again</button>}
+        </div>
+      </>}
     </form>
   </>;
 }

@@ -1,9 +1,13 @@
+const { resendVerificationEmail } = require("./auth0Management");
+
 const PREFIX = "/api/v3/developer-portal/onboarding";
 const messages = {
   terms_acceptance_required: "Read and accept the Terms of API Access before continuing.",
   terms_version_changed: "The terms have changed. Review the latest version before accepting.",
   terms_email_unverified: "Verify your email, then sign in again to accept the terms.",
   terms_identity_mismatch: "Sign in with the email address associated with your account.",
+  verification_resend_unconfigured: "Resending verification emails is not available right now. Contact support.",
+  verification_resend_failed: "We could not resend the verification email. Wait a moment and try again.",
 };
 
 function createOnboarding(deps, invitations) {
@@ -51,6 +55,24 @@ function createOnboarding(deps, invitations) {
       app.get("/onboarding", auth, async (req, res) => {
         try { res.json(await get(req.user, true, req.headers["x-pending-invitation"])); }
         catch (error) { errorResponse(res, error); }
+      });
+      // Auth-only (never terms-gated): an unverified user must be able to ask
+      // for another verification email precisely because they can't pass the
+      // terms gate yet. The frontend owns the resend cooldown; the server just
+      // forwards to Auth0.
+      app.post("/onboarding/resend-verification", auth, async (req, res) => {
+        if (req.user?.email_verified === true) {
+          return res.status(409).json({ code: "already_verified", message: "Your email is already verified." });
+        }
+        try {
+          await resendVerificationEmail(req.user?.sub);
+          res.json({ sent: true });
+        } catch (error) {
+          const code = error.code === "verification_resend_unconfigured" ? error.code : "verification_resend_failed";
+          const status = error.status === 503 ? 503 : 502;
+          console.warn(JSON.stringify({ event: "verification_resend_failed", code, status }));
+          res.status(status).json({ code, message: messages[code] });
+        }
       });
       app.post("/onboarding/accept", auth, jsonParser, async (req, res) => {
         try {
