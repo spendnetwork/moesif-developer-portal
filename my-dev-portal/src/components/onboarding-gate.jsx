@@ -5,6 +5,7 @@ import useAuthCombined from "../hooks/useAuthCombined";
 import { apiRequest } from "../lib/portal-api";
 import { pendingInvitation } from "../lib/invitation-session";
 import logo from "../images/assets/open-opportunities-logo.png";
+import { SessionLoader } from "./session-loader";
 import "../styles/components/onboarding.css";
 
 const request = async (token, options) => {
@@ -86,27 +87,46 @@ function TermsForm({ data, token, refresh }) {
 }
 
 export default function OnboardingGate({ children }) {
-  const { isAuthenticated, isLoading, idToken, logout, loginWithRedirect } = useAuthCombined();
-  const { data, error, mutate, isValidating } = useSWR(isAuthenticated && idToken ? ["/onboarding", idToken] : null,
-    ([, token]) => request(token), { shouldRetryOnError: false, revalidateOnFocus: true, revalidateOnReconnect: true });
+  const { isAuthenticated, isLoading, idToken, logout, loginWithRedirect, error: authError } = useAuthCombined();
+  const waitingForSession = isLoading || (isAuthenticated && !idToken);
+  const { data, error, mutate, isValidating } = useSWR(!waitingForSession && isAuthenticated && idToken ? ["/onboarding", idToken] : null,
+    ([, token]) => request(token), { keepPreviousData: false, shouldRetryOnError: false, revalidateOnFocus: true, revalidateOnReconnect: true });
   const [forced, setForced] = useState(false);
+  const [sessionTimedOut, setSessionTimedOut] = useState(false);
+  useEffect(() => {
+    setSessionTimedOut(false);
+    if (!waitingForSession) return;
+    const timer = setTimeout(() => setSessionTimedOut(true), 15000);
+    return () => clearTimeout(timer);
+  }, [waitingForSession]);
   useEffect(() => {
     const recheck = () => { setForced(true); void mutate().catch(() => {}).finally(() => setForced(false)); };
     window.addEventListener("openopps:terms-required", recheck);
     return () => window.removeEventListener("openopps:terms-required", recheck);
   }, [mutate]);
-  if (!isLoading && !isAuthenticated) return children;
-  if (data && typeof data.required === "boolean" && !data.required && !error && !forced) return children;
-  const documentReady = data?.required && data.document?.text && !error && !forced;
+  const signInAgain = () => loginWithRedirect({ appState: { returnTo: window.location.pathname + window.location.search }, authorizationParams: { prompt: "login" } });
+  const sessionFailed = authError || (waitingForSession && sessionTimedOut);
+  if (!sessionFailed && !isLoading && !isAuthenticated) return children;
+  if (!sessionFailed && waitingForSession) return <SessionLoader />;
+  if (!sessionFailed && data?.required === false && !error && !forced) return children;
+  const documentReady = !sessionFailed && data?.required && data.document?.text && !error && !forced;
+  // Never mount protected routes while the initial check or an explicit recheck is pending.
+  if (!sessionFailed && (forced || isValidating || !error) && !documentReady) return <SessionLoader />;
   return <main className="onboarding-page">
+    <div className="onboarding-card">
     <div className="onboarding-brand"><img src={logo} alt="Open Opportunities" /><span>Developer Portal</span></div>
-    {documentReady ? <TermsForm key={data.document.sha256} data={data} token={idToken} refresh={mutate} /> : <section className="onboarding-loading" aria-live="polite">
-      <h1>{error ? "We could not confirm your account setup" : "Preparing your account"}</h1>
-      <p>{error ? "Your account is saved. Check your connection and try again." : "Checking your account and terms acceptance."}</p>
-      <button type="button" disabled={isValidating || !idToken} onClick={() => void mutate()}>Try again</button>
-      <button type="button" onClick={() => loginWithRedirect({ appState: { returnTo: window.location.pathname + window.location.search }, authorizationParams: { prompt: "login" } })}>Sign in again</button>
+    {documentReady ? <TermsForm key={data.document.sha256} data={data} token={idToken} refresh={mutate} /> : <section className="onboarding-recovery" aria-labelledby="onboarding-recovery-title">
+      <div role="alert">
+        <h1 id="onboarding-recovery-title">{sessionFailed ? "We could not complete sign-in" : "We could not open your account"}</h1>
+        <p>{sessionFailed ? "Your session could not be confirmed. Sign in again to continue." : "Your account is still saved. Check your connection and try again."}</p>
+      </div>
+      <div className="onboarding-recovery__actions">
+        {!sessionFailed && <button className="onboarding-continue" type="button" disabled={isValidating || !idToken} onClick={() => void mutate().catch(() => {})}>Try again</button>}
+        <button className={sessionFailed ? "onboarding-continue" : "onboarding-recovery__secondary"} type="button" onClick={signInAgain}>Sign in again</button>
+      </div>
     </section>}
     <footer className="onboarding-footer"><a href="mailto:welcome@openopps.com">Contact support</a>
       <button type="button" onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}>Sign out</button></footer>
+    </div>
   </main>;
 }
