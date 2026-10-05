@@ -154,10 +154,16 @@ function TermsForm({ data, token, refresh, refreshToken, signInAgain }) {
 }
 
 export default function OnboardingGate({ children }) {
-  const { isAuthenticated, isLoading, idToken, logout, loginWithRedirect, refreshIdToken, error: authError } = useAuthCombined();
+  const { isAuthenticated, isLoading, idToken, user, logout, loginWithRedirect, refreshIdToken, error: authError } = useAuthCombined();
   const waitingForSession = isLoading || (isAuthenticated && !idToken);
-  const { data, error, mutate, isValidating } = useSWR(!waitingForSession && isAuthenticated && idToken ? ["/onboarding", idToken] : null,
-    ([, token]) => request(token), { keepPreviousData: false, shouldRetryOnError: false, revalidateOnFocus: true, revalidateOnReconnect: true });
+  // Key on the stable user identity, NOT the raw token: refreshIdToken() (used
+  // by the "I've verified my email" recovery) swaps the token in place, and
+  // keying on the token would rekey SWR mid-accept -- unmounting the form and
+  // orphaning the bound mutate just as acceptance succeeds. The fetcher reads
+  // the current idToken via closure, so a refreshed token is still used.
+  const onboardingKey = !waitingForSession && isAuthenticated && idToken ? ["/onboarding", user?.sub || "me"] : null;
+  const { data, error, mutate, isValidating } = useSWR(onboardingKey,
+    () => request(idToken), { keepPreviousData: false, shouldRetryOnError: false, revalidateOnFocus: true, revalidateOnReconnect: true });
   const [forced, setForced] = useState(false);
   const [sessionTimedOut, setSessionTimedOut] = useState(false);
   useEffect(() => {
