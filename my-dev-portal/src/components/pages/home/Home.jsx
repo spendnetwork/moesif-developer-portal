@@ -69,7 +69,7 @@ function UseCases() {
   const current = USE_CASES.find((item) => item.key === active);
   return (
     <section className="home-section" aria-labelledby="home-uses">
-      <p className="home-eyebrow">Who it's for</p>
+      <p className="home-eyebrow">Who it&apos;s for</p>
       <h2 id="home-uses">Built for teams that work with tenders</h2>
       <div className="home-uses">
         <div className="home-uses__tabs" role="tablist" aria-label="Use cases">
