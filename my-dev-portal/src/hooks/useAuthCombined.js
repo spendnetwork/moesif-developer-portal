@@ -100,6 +100,26 @@ export default function useAuthCombined() {
     }
   }, [isAuthenticated, getAccessTokenSilently, getIdTokenClaims]);
 
+  // Force a brand-new ID token from the refresh-token grant, bypassing the
+  // cached copy. Used after the user verifies their email out-of-band: the
+  // cached token still carries email_verified:false, which blocks the terms
+  // gate; a forced refresh re-mints the token with the now-verified claim.
+  // Returns the fresh raw ID token (or null if the session can't be refreshed).
+  const refreshIdToken = async () => {
+    try {
+      await getAccessTokenSilently({ cacheMode: "off" });
+      const claims = await getIdTokenClaims();
+      const raw = claims?.__raw;
+      if (!raw) return null;
+      setIdToken(raw);
+      return raw;
+    } catch (err) {
+      console.error("failed to refresh id token", err);
+      if (isSessionDeadError(err)) notifySessionExpired();
+      return null;
+    }
+  };
+
   return {
     isAuthenticated,
     user,
@@ -107,6 +127,10 @@ export default function useAuthCombined() {
     handleSignUp,
     idToken,
     accessToken,
+    refreshIdToken,
+    loginWithRedirect,
+    getAccessTokenSilently,
+    getIdTokenClaims,
     userEmail: auth0User?.email,
     ...rest,
   };

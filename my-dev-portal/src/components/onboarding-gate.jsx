@@ -22,11 +22,15 @@ const request = async (token, options) => {
   return data;
 };
 
-function TermsForm({ data, token, refresh }) {
+function TermsForm({ data, token, refresh, refreshToken, signInAgain }) {
   const [atEnd, setAtEnd] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Set when acceptance is blocked only because the ID token still carries an
+  // unverified email. It unlocks the recovery actions below rather than leaving
+  // the user staring at a dead-end message after they verified out-of-band.
+  const [needsVerify, setNeedsVerify] = useState(false);
   const panel = useRef(null);
   const submitting = useRef(false);
   const navigate = useNavigate();
@@ -40,30 +44,57 @@ function TermsForm({ data, token, refresh }) {
     if (panel.current) observer.observe(panel.current);
     return () => observer.disconnect();
   }, []);
-  async function accept(event) {
-    event.preventDefault();
-    if (!atEnd || !agreed || submitting.current) return;
-    submitting.current = true; setBusy(true); setError("");
+  // Core acceptance, usable with either the current token or a freshly
+  // refreshed one (after the user confirms they've verified their email).
+  async function submitAccept(activeToken) {
+    setError(""); setNeedsVerify(false);
     try {
-      await apiRequest("/onboarding/accept", token, {
+      await apiRequest("/onboarding/accept", activeToken, {
         method: "POST", signal: AbortSignal.timeout(15000),
         body: JSON.stringify({ version: data.document.version, sha256: data.document.sha256, agreed: true }),
       });
       if (pendingInvitation()) navigate("/invitation", { replace: true });
       await refresh();
+      return true;
     } catch (failure) {
       // The POST may have committed even if its response was lost.
       try {
-        const confirmed = await request(token);
+        const confirmed = await request(activeToken);
         if (!confirmed.required) {
           if (pendingInvitation()) navigate("/invitation", { replace: true });
           await refresh(confirmed, { revalidate: false });
-          return;
+          return true;
         }
         if (confirmed.version !== data.version) await refresh(confirmed, { revalidate: false });
       } catch { /* Stay gated until the server confirms acceptance. */ }
-      setError(failure.code === "terms_email_unverified" ? failure.message :
-        "We could not confirm acceptance. Your account is saved. Check your connection and retry; you will not need another account.");
+      if (failure.code === "terms_email_unverified") {
+        setNeedsVerify(true);
+        setError("Your email isn't verified yet. Open the link in the verification email, then use the button below.");
+      } else {
+        setError("We could not confirm acceptance. Your account is saved. Check your connection and retry; you will not need another account.");
+      }
+      return false;
+    }
+  }
+  async function accept(event) {
+    event.preventDefault();
+    if (!atEnd || !agreed || submitting.current) return;
+    submitting.current = true; setBusy(true);
+    try { await submitAccept(token); }
+    finally { submitting.current = false; setBusy(false); }
+  }
+  // After the user tells us they've verified, force a fresh ID token (so the
+  // email_verified claim updates) and retry acceptance in one step.
+  async function verifiedAndRetry() {
+    if (submitting.current) return;
+    submitting.current = true; setBusy(true); setError("");
+    try {
+      const fresh = refreshToken ? await refreshToken() : null;
+      if (!fresh) {
+        setError("We couldn't refresh your session. Use “Sign in again” below to continue.");
+        return;
+      }
+      await submitAccept(fresh);
     } finally { submitting.current = false; setBusy(false); }
   }
   return <>
@@ -82,12 +113,16 @@ function TermsForm({ data, token, refresh }) {
       {!atEnd && <p className="onboarding-hint">Read to the end to accept the terms.</p>}
       {error && <p className="onboarding-error" role="alert">{error}</p>}
       <button className="onboarding-continue" type="submit" disabled={!atEnd || !agreed || busy}>{busy ? "Confirming acceptance..." : "Accept and continue"}</button>
+      {needsVerify && <div className="onboarding-recovery__actions">
+        <button className="onboarding-continue" type="button" disabled={busy} onClick={() => void verifiedAndRetry()}>{busy ? "Checking..." : "I've verified my email"}</button>
+        {signInAgain && <button className="onboarding-recovery__secondary" type="button" disabled={busy} onClick={signInAgain}>Sign in again</button>}
+      </div>}
     </form>
   </>;
 }
 
 export default function OnboardingGate({ children }) {
-  const { isAuthenticated, isLoading, idToken, logout, loginWithRedirect, error: authError } = useAuthCombined();
+  const { isAuthenticated, isLoading, idToken, logout, loginWithRedirect, refreshIdToken, error: authError } = useAuthCombined();
   const waitingForSession = isLoading || (isAuthenticated && !idToken);
   const { data, error, mutate, isValidating } = useSWR(!waitingForSession && isAuthenticated && idToken ? ["/onboarding", idToken] : null,
     ([, token]) => request(token), { keepPreviousData: false, shouldRetryOnError: false, revalidateOnFocus: true, revalidateOnReconnect: true });
@@ -115,7 +150,7 @@ export default function OnboardingGate({ children }) {
   return <main className="onboarding-page">
     <div className="onboarding-card">
     <div className="onboarding-brand"><img src={logo} alt="Open Opportunities" /><span>Developer Portal</span></div>
-    {documentReady ? <TermsForm key={data.document.sha256} data={data} token={idToken} refresh={mutate} /> : <section className="onboarding-recovery" aria-labelledby="onboarding-recovery-title">
+    {documentReady ? <TermsForm key={data.document.sha256} data={data} token={idToken} refresh={mutate} refreshToken={refreshIdToken} signInAgain={signInAgain} /> : <section className="onboarding-recovery" aria-labelledby="onboarding-recovery-title">
       <div role="alert">
         <h1 id="onboarding-recovery-title">{sessionFailed ? "We could not complete sign-in" : "We could not open your account"}</h1>
         <p>{sessionFailed ? "Your session could not be confirmed. Sign in again to continue." : "Your account is still saved. Check your connection and try again."}</p>
