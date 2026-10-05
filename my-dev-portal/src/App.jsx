@@ -69,11 +69,11 @@ function App() {
                 element={<AuthenticationGuard component={Subscription} />}
               />
             </Routes>
+            <PageFooter />
             </OnboardingGate>
           </Auth0ProviderWithNavigate>
         </BrowserRouter>
       </div>
-      <PageFooter />
     </div>
   );
 }
