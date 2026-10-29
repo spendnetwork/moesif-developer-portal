@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 // This is set up as a hook so that
 // in case other pages need subscription info
 // it can also be reused.
-export default function useSubscriptions({ user, idToken, accessToken }) {
+export default function useSubscriptions({ user, idToken }) {
   const [subscriptions, setSubscriptions] = useState(null);
   const [finishedLoading, setFinishedLoading] = useState(false);
   const [subscriptionsError, setSubscriptionsError] = useState(null);

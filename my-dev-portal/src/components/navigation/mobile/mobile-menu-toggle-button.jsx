@@ -1,5 +1,5 @@
-import React from "react";
 
+import PropTypes from "prop-types";
 export const MobileMenuToggleButton = ({ icon, handleClick }) => {
   return (
     <span
@@ -10,4 +10,9 @@ export const MobileMenuToggleButton = ({ icon, handleClick }) => {
       {icon}
     </span>
   );
+};
+
+MobileMenuToggleButton.propTypes = {
+  icon: PropTypes.node,
+  handleClick: PropTypes.func,
 };

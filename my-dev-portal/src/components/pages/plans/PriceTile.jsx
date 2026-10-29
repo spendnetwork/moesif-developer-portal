@@ -1,5 +1,5 @@
-import React from "react";
 
+import PropTypes from "prop-types";
 import CommonTable from "../../common-table";
 import { formatPrice, formatPeriod } from "../../../common/utils";
 
@@ -56,7 +56,7 @@ function TierTable(props) {
     {
       header: "Units",
       accessor: "up_to",
-      cell: ({ index, value, row }) => {
+      cell: ({ index, value }) => {
         return (
           <span>
             {data[index - 1]?.up_to
@@ -72,7 +72,7 @@ function TierTable(props) {
     {
       header: "",
       accessor: "id",
-      cell: ({ index }) => <span className="price-operator">⟶</span>,
+      cell: () => <span className="price-operator">⟶</span>,
       width: "15px",
       justifyContent: "center",
     },
@@ -84,7 +84,7 @@ function TierTable(props) {
       {
         header: "/Unit",
         accessor: "unit_price_in_decimal",
-        cell: ({ index, value, row }) => {
+        cell: ({ value }) => {
           return formatPrice(value);
         },
         justifyContent: "flex-end",
@@ -108,7 +108,7 @@ function TierTable(props) {
       {
         header: <span>Flat Fee</span>,
         accessor: "flat_price_in_decimal",
-        cell: ({ index, value, row }) => {
+        cell: ({ value }) => {
           return formatPrice(value);
         },
         justifyContent: "flex-end",
@@ -121,7 +121,7 @@ function TierTable(props) {
       {
         header: <span>Flat Fee</span>,
         accessor: "flat_price_in_decimal",
-        cell: ({ index, value, row }) => {
+        cell: ({ value }) => {
           return formatPrice(value);
         },
         justifyContent: "flex-end",
@@ -133,7 +133,7 @@ function TierTable(props) {
       {
         header: "/Unit",
         accessor: "unit_price_in_decimal",
-        cell: ({ index, value, row }) => {
+        cell: ({ value }) => {
           return formatPrice(value);
         },
         justifyContent: "flex-end",
@@ -185,3 +185,18 @@ function PriceTile(props) {
 }
 
 export default PriceTile;
+
+TierTable.propTypes = { tiers: PropTypes.arrayOf(PropTypes.object) };
+PriceTile.propTypes = {
+  price: PropTypes.shape({
+    name: PropTypes.string,
+    tiers: PropTypes.arrayOf(PropTypes.object),
+    price_in_decimal: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    pricing_model: PropTypes.string,
+    period_units: PropTypes.string,
+    period: PropTypes.number,
+  }),
+  plan: PropTypes.shape({ name: PropTypes.string, unit: PropTypes.string }),
+  actionButton: PropTypes.node,
+  subscriptionPeriod: PropTypes.string,
+};

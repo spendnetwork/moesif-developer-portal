@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 import { formatIsoTimestamp } from "../../../common/utils";
 import PriceTile from "../plans/PriceTile";
 
@@ -132,8 +132,8 @@ function SubDisplay({ sub, plans }) {
 
         if (!foundPlan || !foundPrice) {
           return (
-            <div className="price--tile">
-              <div plan--content>
+            <div key={item.subscription_item_id || `${planId}-${priceId}`} className="price--tile">
+              <div className="plan--content">
                 <div className="price-name">Plan and Price not found</div>
                 <div
                   className="single-price--unit"
@@ -172,3 +172,12 @@ function SubDisplay({ sub, plans }) {
 }
 
 export default SubDisplay;
+
+SubDisplay.propTypes = {
+  sub: PropTypes.shape({
+    items: PropTypes.arrayOf(PropTypes.object),
+    current_period_start: PropTypes.string,
+    current_period_end: PropTypes.string,
+  }),
+  plans: PropTypes.arrayOf(PropTypes.object),
+};

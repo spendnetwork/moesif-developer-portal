@@ -1,3 +1,4 @@
+import PropTypes from "prop-types";
 import React from "react";
 import SecureRoute from "./okta/SecureRoute";
 import { PageLoader } from "./page-loader";
@@ -22,4 +23,10 @@ export const AuthenticationGuard = ({ children, component, options={} }) => {
 
     return <Component />;
   }
+};
+
+AuthenticationGuard.propTypes = {
+  children: PropTypes.node,
+  component: PropTypes.elementType,
+  options: PropTypes.object,
 };

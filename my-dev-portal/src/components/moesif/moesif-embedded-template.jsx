@@ -1,3 +1,4 @@
+import PropTypes from "prop-types";
 export default function MoesifEmbeddedTemplate(props) {
   const { embedTemplateUrls } = props;
 
@@ -11,10 +12,13 @@ export default function MoesifEmbeddedTemplate(props) {
             id={url}
             src={url}
             name="preview-frame"
-            noresize="noresize"
           />
         ))}
       </div>
     </div>
   );
 }
+
+MoesifEmbeddedTemplate.propTypes = {
+  embedTemplateUrls: PropTypes.arrayOf(PropTypes.string),
+};

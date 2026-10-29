@@ -1,4 +1,3 @@
-import React from "react";
 import { useOktaAuth } from "@okta/okta-react";
 import { useNavigate } from "react-router-dom";
 

@@ -1,4 +1,3 @@
-import React from "react";
 import Auth0Settings from "./Auth0Settings";
 import OktaSettings from "./OktaSettings";
 

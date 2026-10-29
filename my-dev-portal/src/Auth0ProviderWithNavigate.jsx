@@ -1,5 +1,5 @@
+import PropTypes from "prop-types";
 import { Auth0Provider } from "@auth0/auth0-react";
-import React from "react";
 import { useNavigate } from "react-router-dom";
 
 export const Auth0ProviderWithNavigate = ({ children }) => {
@@ -28,3 +28,5 @@ export const Auth0ProviderWithNavigate = ({ children }) => {
     </Auth0Provider>
   );
 };
+
+Auth0ProviderWithNavigate.propTypes = { children: PropTypes.node };

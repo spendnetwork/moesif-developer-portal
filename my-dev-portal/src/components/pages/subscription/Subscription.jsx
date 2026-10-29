@@ -1,4 +1,3 @@
-import React from "react";
 
 import { PageLayout } from "../../page-layout";
 import useSubscriptions from "../../../hooks/useSubscriptions";
@@ -10,7 +9,7 @@ import NoticeBox from "../../notice-box";
 import noPriceIcon from "../../../images/icons/empty-state-price.svg";
 import SubDisplay from "./SubDisplay";
 
-function Subscription(props) {
+function Subscription() {
   const { isAuthenticated, isLoading, user, idToken, accessToken } =
     useAuthCombined();
   const { subscriptions, finishedLoading, subscriptionsError } =

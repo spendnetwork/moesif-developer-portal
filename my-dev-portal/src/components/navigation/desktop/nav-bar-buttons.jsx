@@ -1,4 +1,3 @@
-import React from "react";
 import Auth0NavBarButtons from "./auth0-nav-bar-buttons";
 import OktaNavBarButtons from "./okta-nav-bar-buttons";
 

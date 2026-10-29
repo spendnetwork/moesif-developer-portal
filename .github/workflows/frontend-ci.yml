@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     name: Build frontend
-    runs-on: ubuntu-latest
+    runs-on: codebuild-moesif-developer-portal-github-checks-${{ github.run_id }}-${{ github.run_attempt }}
     defaults:
       run:
         working-directory: my-dev-portal

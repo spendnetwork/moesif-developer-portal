@@ -1,4 +1,3 @@
-import React from "react";
 import { useOktaAuth } from "@okta/okta-react";
 import { NavBarTab } from "./nav-bar-tab";
 import preLoginMenu from "./pre-login-menu.json";

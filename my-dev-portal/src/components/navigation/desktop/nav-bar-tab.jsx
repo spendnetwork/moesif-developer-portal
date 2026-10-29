@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 import { NavLink } from "react-router-dom";
 
 export const NavBarTab = ({ path, label }) => {
@@ -13,4 +13,9 @@ export const NavBarTab = ({ path, label }) => {
       {label}
     </NavLink>
   );
+};
+
+NavBarTab.propTypes = {
+  path: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
+  label: PropTypes.node,
 };

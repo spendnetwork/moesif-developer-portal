@@ -1,3 +1,4 @@
+import PropTypes from "prop-types";
 import { useOktaAuth } from "@okta/okta-react";
 import { PageLayout } from "../../page-layout";
 import { useEffect, useState } from "react";
@@ -91,3 +92,5 @@ const OktaDashboard = (props) => {
 };
 
 export default OktaDashboard;
+
+OktaDashboard.propTypes = { fetchEmbedInfo: PropTypes.func };

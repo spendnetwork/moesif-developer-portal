@@ -1,4 +1,3 @@
-import React from "react";
 import { useOktaAuth } from "@okta/okta-react";
 import { LoginButton } from "../../buttons/login-button";
 import { LogoutButton } from "../../buttons/logout-button";

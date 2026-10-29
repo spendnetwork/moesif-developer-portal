@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 import { useNavigate } from "react-router-dom";
 import { Security } from "@okta/okta-react";
 import { OktaAuth } from "@okta/okta-auth-js";
@@ -25,3 +25,5 @@ export const OktaProviderWithNavigate = ({ children }) => {
     </Security>
   );
 };
+
+OktaProviderWithNavigate.propTypes = { children: PropTypes.node };

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import Modal from "react-modal";
 import SVG from "react-inlinesvg";
 import copy from "copy-to-clipboard";
@@ -88,7 +88,7 @@ const Keys = () => {
         <h1>My API Keys</h1>
         <p className="description">
           On this page, you can generate an API key to access{"\n"}the APIs
-          you're subscribed to.
+          you&apos;re subscribed to.
         </p>
         <div>
           <p>

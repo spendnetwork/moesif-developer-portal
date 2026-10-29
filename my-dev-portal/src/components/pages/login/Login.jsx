@@ -1,4 +1,3 @@
-import React from "react";
 import OktaLogin from "./OktaLogin";
 import Auth0Login from "./Auth0Login";
 

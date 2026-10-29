@@ -1,5 +1,5 @@
-import React from "react";
 
+import PropTypes from "prop-types";
 import { useAuth0 } from "@auth0/auth0-react";
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
@@ -82,3 +82,5 @@ function Auth0Settings(props) {
 }
 
 export default Auth0Settings;
+
+Auth0Settings.propTypes = { openStripeManagement: PropTypes.func };

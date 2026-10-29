@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { LineLoader } from "../../line-loader";
 import NoPriceFound from "./NoPriceFound";
@@ -8,7 +8,7 @@ import { SignupButton } from "../../buttons/signup-button";
 import { examplePlansFromStripe } from "./examplePlansFromStripe";
 import usePlans from "../../../hooks/usePlans";
 
-function MoesifPlans(props) {
+function MoesifPlans() {
   const { isAuthenticated } = useAuth0();
 
   const [showExample, setShowExample] = useState();
