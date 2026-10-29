@@ -26,7 +26,7 @@ concurrency:
 jobs:
   test:
     name: API tests
-    runs-on: ubuntu-latest
+    runs-on: codebuild-moesif-developer-portal-github-checks-${{ github.run_id }}-${{ github.run_attempt }}
     defaults:
       run:
         working-directory: my-dev-portal-api
@@ -42,7 +42,7 @@ jobs:
 
   container:
     name: API container packaging
-    runs-on: ubuntu-latest
+    runs-on: codebuild-moesif-developer-portal-github-checks-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v5
       - run: docker build --file distribution/docker/Dockerfile-dev-portal-api --tag moesif-developer-portal-api:ci .
