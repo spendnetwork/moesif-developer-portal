@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { PageLayout } from "../../page-layout";
 import { Link } from "react-router-dom";
@@ -15,8 +15,6 @@ import { PageLoader } from "../../page-loader";
 // - receive the returned sessionId from Stripe and call backend API to provision services.
 
 function registerPurchaseStripe({
-  planId,
-  priceId,
   sessionId,
   idToken,
   setCustomerEmail,
@@ -66,7 +64,6 @@ function registerPurchaseStripe({
 function registerPurchaseCustom({
   planId,
   priceId,
-  sessionId,
   idToken,
   user,
   setCustomerEmail,
@@ -99,7 +96,7 @@ function registerPurchaseCustom({
       }
       return res.json();
     })
-    .then((data) => {
+    .then(() => {
       setStatus("complete");
       setCustomerEmail(user?.email);
     })
@@ -112,7 +109,7 @@ function registerPurchaseCustom({
     });
 }
 
-function Return(props) {
+function Return() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [customerEmail, setCustomerEmail] = useState("");

@@ -7,7 +7,7 @@ import dashIcon from "../../../images/icons/bar-chart.svg";
 import useAuthCombined from "../../../hooks/useAuthCombined";
 import fetchEmbedChartUrls from "./fetchEmbedChartUrls";
 
-const Dashboard = (props) => {
+const Dashboard = () => {
   const { user, isLoading, idToken, userEmail } = useAuthCombined();
 
   const [error, setError] = useState();

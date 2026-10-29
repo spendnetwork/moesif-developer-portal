@@ -1,5 +1,5 @@
-import React from "react";
 
+import PropTypes from "prop-types";
 const OktaError = ({ error }) => (
   <div>
     <h1>Error</h1>
@@ -8,3 +8,7 @@ const OktaError = ({ error }) => (
 );
 
 export default OktaError;
+
+OktaError.propTypes = {
+  error: PropTypes.shape({ message: PropTypes.string }),
+};

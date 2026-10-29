@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 import { useOktaAuth } from "@okta/okta-react";
 import { PageLayout } from "../../page-layout";
 import { PageLoader } from "../../page-loader";
@@ -46,3 +46,5 @@ function OktaSettings(props) {
 }
 
 export default OktaSettings;
+
+OktaSettings.propTypes = { openStripeManagement: PropTypes.func };

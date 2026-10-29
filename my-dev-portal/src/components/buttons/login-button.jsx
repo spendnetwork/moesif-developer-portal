@@ -1,6 +1,6 @@
+import PropTypes from "prop-types";
 import { useOktaAuth } from "@okta/okta-react";
 import { useAuth0 } from "@auth0/auth0-react";
-import React from "react";
 
 const LoginButtonWithOkta = ({ isLink }) => {
   const { oktaAuth } = useOktaAuth();
@@ -56,3 +56,7 @@ export const LoginButton = ({ isLink }) => {
     return null; // or some error message
   }
 };
+
+LoginButtonWithOkta.propTypes = { isLink: PropTypes.bool };
+LoginButtonWithAuth0.propTypes = { isLink: PropTypes.bool };
+LoginButton.propTypes = { isLink: PropTypes.bool };

@@ -1,8 +1,9 @@
+import PropTypes from "prop-types";
 import { useOktaAuth } from "@okta/okta-react";
 import { useLocation } from "react-router-dom";
 import { toRelativeUrl } from "@okta/okta-auth-js";
 import OktaError from "./OktaError";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const SecureRoute = ({ children, onAuthRequired, errorComponent }) => {
   const { oktaAuth, authState, _onAuthRequired } = useOktaAuth();
@@ -64,3 +65,9 @@ const SecureRoute = ({ children, onAuthRequired, errorComponent }) => {
 };
 
 export default SecureRoute;
+
+SecureRoute.propTypes = {
+  children: PropTypes.node,
+  onAuthRequired: PropTypes.func,
+  errorComponent: PropTypes.elementType,
+};

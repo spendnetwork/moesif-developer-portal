@@ -15,10 +15,8 @@ function customizeUrlDisplayOptions(embedInfo) {
 }
 
 export default async function fetchEmbedChartUrls({
-  stripCustomerId,
   authUserId,
   idToken,
-  setError,
   email,
 }) {
   const response = await fetch(

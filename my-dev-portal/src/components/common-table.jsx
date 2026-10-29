@@ -1,4 +1,3 @@
-import React from "react";
 import PropTypes from "prop-types";
 import safeGet from "lodash/get";
 
@@ -228,4 +227,15 @@ CommonTable.propTypes = {
   style: PropTypes.object,
   className: PropTypes.string,
   withBorder: PropTypes.bool,
+  tableRef: PropTypes.oneOfType([PropTypes.func, PropTypes.object]),
+  rowRef: PropTypes.oneOfType([PropTypes.func, PropTypes.object]),
+};
+
+TableHeader.propTypes = {
+  columnField: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.func]),
+  header: PropTypes.oneOfType([PropTypes.node, PropTypes.func]),
+  data: PropTypes.array,
+  alignRight: PropTypes.bool,
+  contentType: PropTypes.string,
+  justify: PropTypes.string,
 };

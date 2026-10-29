@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 import { NavLink } from "react-router-dom";
 import yourLogo from '../../../images/icons/your-logo.svg';
 
@@ -16,3 +16,5 @@ export const MobileNavBarBrand = ({ handleClick }) => {
     </div>
   );
 };
+
+MobileNavBarBrand.propTypes = { handleClick: PropTypes.func };

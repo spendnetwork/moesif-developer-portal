@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useOktaAuth } from "@okta/okta-react";
 import { PageLayout } from "../../page-layout";
 import Modal from "react-modal";

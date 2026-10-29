@@ -16,7 +16,7 @@ export function formatPrice(priceInDecimal = 0) {
   }).format(priceInDollars);
 }
 
-export function formatPeriod(periodUnits, period) {
+export function formatPeriod(periodUnits) {
   switch (periodUnits) {
     case "y":
       return "yearly";
@@ -43,7 +43,7 @@ export function formatIsoTimestamp(isoString) {
       second: "2-digit",
       hour12: true, // Use 12-hour format
     });
-  } catch (err) {
+  } catch {
     return "";
   }
 }

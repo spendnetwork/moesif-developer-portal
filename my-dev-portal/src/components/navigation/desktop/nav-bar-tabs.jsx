@@ -1,4 +1,3 @@
-import React from "react";
 import Auth0NavBarTabs from "./auth0-nav-bar-tabs";
 import OktaNavBarTabs from "./okta-nav-bar-tabs";
 

@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useNavigate } from "react-router-dom";
 
@@ -62,4 +62,14 @@ export const SignupButton = ({ isLink, isPriceAction }) => {
       <SignupButtonWithAuth0 isLink={isLink} isPriceAction={isPriceAction} />
     );
   }
+};
+
+SignupButtonWithOkta.propTypes = { isLink: PropTypes.bool };
+SignupButtonWithAuth0.propTypes = {
+  isLink: PropTypes.bool,
+  isPriceAction: PropTypes.bool,
+};
+SignupButton.propTypes = {
+  isLink: PropTypes.bool,
+  isPriceAction: PropTypes.bool,
 };

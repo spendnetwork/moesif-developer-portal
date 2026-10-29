@@ -1,4 +1,3 @@
-import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import moesifBrowser from "moesif-browser-js";
 import './main.css'

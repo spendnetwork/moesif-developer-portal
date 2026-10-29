@@ -1,4 +1,4 @@
-import React from "react";
+import PropTypes from "prop-types";
 import SVG from "react-inlinesvg";
 
 import { iconFillColor } from "../common/constants";
@@ -22,3 +22,10 @@ function NoticeBox({ iconSrc, title, description, actions}) {
 }
 
 export default NoticeBox;
+
+NoticeBox.propTypes = {
+  iconSrc: PropTypes.string,
+  title: PropTypes.node,
+  description: PropTypes.node,
+  actions: PropTypes.node,
+};
